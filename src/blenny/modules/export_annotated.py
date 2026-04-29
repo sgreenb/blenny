@@ -13,7 +13,7 @@ from typing import Any
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
-from skimage import segmentation, util
+from skimage import morphology, segmentation, util
 
 from blenny.pipeline import BlennyParams, Exporter, ImageData, register
 
@@ -31,6 +31,21 @@ class AnnotatedImageExporter(Exporter):
         visible for audit purposes.
         """
         text_color: tuple[int, int, int] = (255, 255, 0)
+        draw_plate_boundary: bool = True
+        """If True, draw the effective plate-area boundary (after rim margin
+        exclusion) as a blue ring. Useful for diagnosing plate detection and
+        seeing exactly which colonies fall inside the analysis region.
+        """
+        plate_boundary_color: tuple[int, int, int] = (30, 144, 255)
+        """Color of the plate boundary ring (default: dodger blue)."""
+        plate_mask_key: str = "plate"
+        """Key in ``data.masks`` for the plate interior mask used to draw
+        the boundary ring."""
+        plate_boundary_thickness: int = 3
+        """Half-thickness of the boundary ring in pixels (the ring is drawn
+        by dilating the mask boundary by a disk of this radius).
+        Default 3 = ~7 px wide, visible at any working resolution.
+        """
 
     def export(self, data: ImageData) -> None:
         if self.params.mask_key not in data.masks:  # type: ignore[attr-defined]
@@ -71,6 +86,11 @@ class AnnotatedImageExporter(Exporter):
             boundaries = segmentation.find_boundaries(labels, mode="outer")
             rgb[boundaries] = np.array(self.params.outline_color, dtype=np.uint8)  # type: ignore[attr-defined]
 
+        # Draw the plate boundary ring over the colony outlines so it's
+        # always visible regardless of what's beneath it.
+        if self.params.draw_plate_boundary:  # type: ignore[attr-defined]
+            self._draw_plate_boundary(rgb, data, labels.shape)
+
         im = Image.fromarray(rgb)
         # Only draw numbers for non-artifact detections.
         countable = [r for r in data.measurements if not r.get("is_artifact")]
@@ -105,6 +125,25 @@ class AnnotatedImageExporter(Exporter):
         if image.dtype.kind == "f":
             return util.img_as_ubyte(np.clip(image, 0, 1))
         return image.astype(np.uint8, copy=True)
+
+    def _draw_plate_boundary(
+        self, rgb: np.ndarray, data: Any, target_shape: tuple[int, int]
+    ) -> None:
+        """Draw a thick ring at the inner edge of the plate mask."""
+        key: str = self.params.plate_mask_key  # type: ignore[attr-defined]
+        plate_mask = data.masks.get(key)
+        if plate_mask is None:
+            return
+        arr = np.asarray(plate_mask, dtype=bool)
+        if arr.shape[:2] != target_shape:
+            return
+        # Inner boundary: pixels inside the mask that touch the background.
+        boundary = segmentation.find_boundaries(arr, mode="inner")
+        t: int = self.params.plate_boundary_thickness  # type: ignore[attr-defined]
+        if t > 0:
+            boundary = morphology.dilation(boundary, morphology.disk(t))
+        color = np.array(self.params.plate_boundary_color, dtype=np.uint8)  # type: ignore[attr-defined]
+        rgb[boundary] = color
 
     def _draw_numbers(self, im: Image.Image, measurements: list[dict[str, Any]]) -> None:
         draw = ImageDraw.Draw(im)
