@@ -1,13 +1,42 @@
-"""Core pipeline abstractions.
+"""Core pipeline abstractions for Blenny.
 
-This module is intentionally minimal in Step 0; the real interfaces
-(Loader, Preprocessor, Segmenter, FeatureExtractor, Classifier, Exporter)
-will be designed in Step 1.
-
-The shapes here exist only so the package is importable, has something
-to test, and gives downstream code a stable import path.
+Public API:
+    - :class:`ImageData`, :class:`QualityFlag`, :class:`ProvenanceRecord`
+    - :class:`Module` and the six semantic subclasses (Loader, Preprocessor,
+      Segmenter, FeatureExtractor, Classifier, Exporter)
+    - :class:`BlennyParams` for declaring module parameter schemas
+    - :data:`MODULES` (the global registry) and :func:`register`
+    - :class:`Pipeline` (the runner)
 """
 
-from blenny.pipeline.core import Pipeline, PipelineStep
+from blenny.pipeline.base import (
+    BlennyParams,
+    Classifier,
+    Exporter,
+    FeatureExtractor,
+    Loader,
+    Module,
+    Preprocessor,
+    Segmenter,
+)
+from blenny.pipeline.context import ImageData, ProvenanceRecord, QualityFlag
+from blenny.pipeline.registry import MODULES, ModuleRegistry, register
+from blenny.pipeline.runner import Pipeline
 
-__all__ = ["Pipeline", "PipelineStep"]
+__all__ = [
+    "MODULES",
+    "BlennyParams",
+    "Classifier",
+    "Exporter",
+    "FeatureExtractor",
+    "ImageData",
+    "Loader",
+    "Module",
+    "ModuleRegistry",
+    "Pipeline",
+    "Preprocessor",
+    "ProvenanceRecord",
+    "QualityFlag",
+    "Segmenter",
+    "register",
+]

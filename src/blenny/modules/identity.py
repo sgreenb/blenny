@@ -1,14 +1,21 @@
-"""A no-op pipeline step. Useful as a template and for tests."""
+"""A no-op preprocessor — the 'hello world' of pipeline steps.
+
+Useful as:
+  - a template for new module authors,
+  - a placeholder in tests and example pipelines,
+  - a minimal demonstration of the registry + Params pattern.
+"""
 
 from __future__ import annotations
 
-from blenny.pipeline.core import Context, PipelineStep
+from typing import Any
+
+from blenny.pipeline import ImageData, Preprocessor, register
 
 
-class IdentityPreprocessor(PipelineStep):
-    """Returns the context unchanged. The 'hello world' of pipeline steps."""
+@register("identity")
+class IdentityPreprocessor(Preprocessor):
+    """Returns the image unchanged."""
 
-    name = "IdentityPreprocessor"
-
-    def run(self, context: Context) -> Context:
-        return context
+    def process(self, image: Any, data: ImageData) -> Any:
+        return image
