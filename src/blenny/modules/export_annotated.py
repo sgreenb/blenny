@@ -41,10 +41,12 @@ class AnnotatedImageExporter(Exporter):
         plate_mask_key: str = "plate"
         """Key in ``data.masks`` for the plate interior mask used to draw
         the boundary ring."""
-        plate_boundary_thickness: int = 3
+        plate_boundary_thickness: int = 0
         """Half-thickness of the boundary ring in pixels (the ring is drawn
         by dilating the mask boundary by a disk of this radius).
-        Default 3 = ~7 px wide, visible at any working resolution.
+        Default 0 = 1 px wide, matching the colony outline thickness.
+        Increase to 1 (3 px) or 2 (5 px) if you need a more visible ring
+        at lower display resolutions.
         """
 
     def export(self, data: ImageData) -> None:
