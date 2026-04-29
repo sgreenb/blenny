@@ -22,6 +22,9 @@ pip install -e ".[dev]"
 pytest
 ```
 
+**New here?** Read the **[Quickstart](docs/quickstart.md)** — it walks you
+from install to a counted plate in under 15 minutes.
+
 ## Quick taste
 
 ### From the command line
