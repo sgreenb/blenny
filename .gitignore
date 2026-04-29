@@ -40,3 +40,7 @@ coverage.xml
 debug_output/
 results/
 examples/output/
+
+# Local example plate images and per-image evaluation results.
+# Treated as scratch / private test data; not redistributed in the repo.
+example_plates/
