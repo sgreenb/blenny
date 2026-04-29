@@ -8,6 +8,7 @@ Touching colonies are split via distance-transform watershed when
 
 from __future__ import annotations
 
+import math
 from typing import Any, Literal
 
 import numpy as np
@@ -35,6 +36,23 @@ class ThresholdSegmenter(Segmenter):
 
         max_area_frac: float = 0.25
         """Drop regions covering more than this fraction of the ROI (likely artefacts)."""
+
+        min_circularity: float = 0.7
+        """Drop regions whose 4π·area / perimeter² falls below this.
+
+        A perfect disk has circularity 1.0. The plate-rim arcs and pen scribbles
+        that plague real plate photos are long-and-thin and score well below 0.5.
+        Set to ``0`` to disable the filter (e.g. when measuring elongated yeast
+        cells or filaments).
+        """
+
+        min_solidity: float = 0.85
+        """Drop regions whose area / convex-hull-area falls below this.
+
+        Compact, round colonies have solidity near 1.0. Irregular pen marks,
+        scratches, and merged colony chains have lower solidity. Set to ``0``
+        to disable.
+        """
 
         split_touching: bool = True
         """Apply distance-transform watershed to split touching objects."""
@@ -84,12 +102,31 @@ class ThresholdSegmenter(Segmenter):
         else:
             labels = measure.label(binary)
 
-        # Drop oversized blobs (likely the plate edge or a smudge).
+        # Drop oversized / non-circular / irregular blobs (rim arcs, smudges,
+        # pen marks). Each filter is independently disable-able by setting its
+        # threshold to 0.
         if labels.max() > 0:
-            roi_area = float(binary.sum()) if binary.any() else float(binary.size)
+            # "max_area_frac" is a fraction of the available analysis area, not
+            # of the foreground pixels (a single big region would otherwise
+            # always exceed the threshold against itself).
+            if roi_key and roi_key in data.masks:
+                roi_area = float(data.masks[roi_key].astype(bool).sum())
+            else:
+                roi_area = float(binary.size)
             max_area = self.params.max_area_frac * roi_area  # type: ignore[attr-defined]
+            min_circ: float = self.params.min_circularity  # type: ignore[attr-defined]
+            min_sol: float = self.params.min_solidity  # type: ignore[attr-defined]
             for prop in measure.regionprops(labels):
+                drop = False
                 if prop.area > max_area:
+                    drop = True
+                elif min_circ > 0 and prop.perimeter > 0:
+                    circ = 4.0 * math.pi * prop.area / (prop.perimeter * prop.perimeter)
+                    if circ < min_circ:
+                        drop = True
+                if not drop and min_sol > 0 and prop.solidity < min_sol:
+                    drop = True
+                if drop:
                     labels[labels == prop.label] = 0
             # Re-pack labels so they're contiguous 1..N.
             labels = measure.label(labels > 0)

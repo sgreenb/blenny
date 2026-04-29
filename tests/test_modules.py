@@ -52,6 +52,31 @@ def test_image_file_loader_missing_file_raises(tmp_path: Path) -> None:
         ImageFileLoader().run(ImageData(source=str(tmp_path / "nope.png")))
 
 
+def test_image_file_loader_downscales_large_images_by_default(tmp_path: Path) -> None:
+    _, p = _save_synthetic(tmp_path, n_colonies=5, image_size=(3000, 2000), seed=0)
+    data = ImageFileLoader().run(ImageData(source=str(p)))
+    # Default max_dimension=2000 means longest side becomes 2000.
+    assert max(data.image.shape[:2]) == 2000
+    assert data.metadata["resized"] is True
+    assert data.metadata["original_size_wh"] == (2000, 3000)  # PIL is (W, H)
+    assert any(f.code == "image_resized" and f.severity == "info" for f in data.quality_flags)
+
+
+def test_image_file_loader_max_dimension_none_keeps_native_resolution(tmp_path: Path) -> None:
+    _, p = _save_synthetic(tmp_path, n_colonies=5, image_size=(3000, 2000), seed=0)
+    data = ImageFileLoader(max_dimension=None).run(ImageData(source=str(p)))
+    assert data.image.shape[:2] == (3000, 2000)
+    assert "resized" not in data.metadata
+    assert all(f.code != "image_resized" for f in data.quality_flags)
+
+
+def test_image_file_loader_does_not_upscale_small_images(tmp_path: Path) -> None:
+    _, p = _save_synthetic(tmp_path, n_colonies=3, image_size=(256, 256), seed=0)
+    data = ImageFileLoader().run(ImageData(source=str(p)))  # default max_dim=2000
+    assert data.image.shape[:2] == (256, 256)
+    assert "resized" not in data.metadata
+
+
 # --- PlateDetector ------------------------------------------------------------
 
 
@@ -108,6 +133,41 @@ def test_threshold_segmenter_labels_objects() -> None:
     n_found = int(labels.max())
     # Should find roughly the right count on a clean synthetic plate.
     assert 8 <= n_found <= 16
+
+
+def test_circularity_filter_drops_elongated_shapes() -> None:
+    """A long thick rectangle (low circularity) should be filtered out."""
+    img = np.zeros((200, 200), dtype=np.float32)
+    # 8 px thick x 120 px long strip survives opening but has low circularity (~0.18).
+    img[80:88, 30:150] = 1.0
+    # 14x14 square; circularity ~0.85 -> passes 0.7 threshold.
+    img[20:34, 20:34] = 1.0
+    data = ImageData(source="x", image=img)
+    out = ThresholdSegmenter(roi_mask_key=None, split_touching=False).run(data)
+    labels = out.masks["objects"]
+    # Strip should be dropped, square should remain.
+    assert int(labels.max()) == 1
+    # And disabling the filter brings the strip back.
+    data2 = ImageData(source="x", image=img)
+    out2 = ThresholdSegmenter(
+        roi_mask_key=None, split_touching=False, min_circularity=0.0, min_solidity=0.0
+    ).run(data2)
+    assert int(out2.masks["objects"].max()) == 2
+
+
+def test_solidity_filter_drops_irregular_shapes() -> None:
+    """A C-shape (low solidity) should be filtered out at default threshold."""
+    img = np.zeros((100, 100), dtype=np.float32)
+    # Solid disk-ish square
+    img[10:25, 10:25] = 1.0
+    # C-shape: a square with a big bite taken out of it (low solidity)
+    img[40:80, 40:80] = 1.0
+    img[45:75, 45:75] = 0.0
+    img[55:65, 60:80] = 1.0  # connect to the right side via a thin bridge
+    data = ImageData(source="x", image=img)
+    out = ThresholdSegmenter(roi_mask_key=None, split_touching=False, min_circularity=0.0).run(data)
+    # Square remains; C-shape dropped.
+    assert int(out.masks["objects"].max()) == 1
 
 
 # --- ColonyMeasurer -----------------------------------------------------------

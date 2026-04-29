@@ -1,0 +1,14 @@
+image:        CFU.jpg
+input shape:  (367, 371, 3)
+colony count: 54
+total time:   1840 ms
+
+step timings:
+  load_image                 19 ms  shape=(367, 371, 3)
+  detect_plate              566 ms  center=(185, 184) radius=183 cropped_shape=(365, 367, 3)
+  correct_illumination     1018 ms
+  threshold_segment         123 ms  n_labels=54
+  measure_colonies           30 ms  rows=54
+
+quality flags:
+  (none)

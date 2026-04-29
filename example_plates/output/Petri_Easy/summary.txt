@@ -1,0 +1,14 @@
+image:        Petri_Easy.jpg
+input shape:  (601, 609, 3)
+colony count: 217
+total time:   4542 ms
+
+step timings:
+  load_image                 16 ms  shape=(601, 609, 3)
+  detect_plate             1842 ms  center=(301, 301) radius=276 cropped_shape=(553, 553, 3)
+  correct_illumination     2203 ms
+  threshold_segment         252 ms  n_labels=217
+  measure_colonies          108 ms  rows=217
+
+quality flags:
+  (none)

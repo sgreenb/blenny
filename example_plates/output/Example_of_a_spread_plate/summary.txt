@@ -1,0 +1,14 @@
+image:        Example of a spread plate.jpg
+input shape:  (378, 385, 3)
+colony count: 93
+total time:   1901 ms
+
+step timings:
+  load_image                  7 ms  shape=(378, 385, 3)
+  detect_plate              663 ms  center=(197, 188) radius=181 cropped_shape=(362, 363, 3)
+  correct_illumination     1008 ms
+  threshold_segment         102 ms  n_labels=93
+  measure_colonies           58 ms  rows=93
+
+quality flags:
+  (none)

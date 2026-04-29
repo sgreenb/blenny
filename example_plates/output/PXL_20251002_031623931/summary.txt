@@ -1,0 +1,14 @@
+image:        PXL_20251002_031623931.jpg
+input shape:  (1506, 2000, 3)
+colony count: 81
+total time:   17877 ms
+
+step timings:
+  load_image                365 ms  shape=(1506, 2000, 3)
+  detect_plate             9268 ms  center=(956, 1103) radius=511 cropped_shape=(1023, 1023, 3)
+  correct_illumination     7282 ms
+  threshold_segment         396 ms  n_labels=81
+  measure_colonies           48 ms  rows=81
+
+quality flags:
+  [info] image_resized (in ): Image downscaled from 4080x3072 to 2000x1506 (scale=0.49). Pass max_dimension=None to load at native resolution.

@@ -43,8 +43,14 @@ class PlateDetector(Preprocessor):
         mask_key: str = "plate"
         """Key under which the plate mask is stored in ``data.masks``."""
 
-        margin: int = 4
-        """Pixels to shrink the plate mask by, to avoid edge artefacts."""
+        margin_frac: float = 0.05
+        """Shrink the plate mask by this fraction of the detected radius.
+
+        Real plate photos almost always include a bright reflective rim that
+        otherwise gets segmented as a chain of small false-positive arcs. 5%
+        of the radius is a generous-but-safe default; reduce to ``0.02`` for
+        very clean scans, or raise to ``0.10`` if rim contamination persists.
+        """
 
     def process(self, image: Any, data: ImageData) -> Any:
         gray = color.rgb2gray(image) if image.ndim == 3 else image.astype(float) / 255.0
@@ -71,7 +77,7 @@ class PlateDetector(Preprocessor):
             return image
 
         cy, cx, r = int(cys[0]), int(cxs[0]), int(rs[0])
-        r_eff = max(1, r - self.params.margin)  # type: ignore[attr-defined]
+        r_eff = max(1, r - round(r * self.params.margin_frac))  # type: ignore[attr-defined]
 
         # Build mask in the original frame.
         mask = np.zeros((h, w), dtype=bool)

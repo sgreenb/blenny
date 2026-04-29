@@ -1,0 +1,14 @@
+image:        gm091.jpg
+input shape:  (700, 700, 3)
+colony count: 95
+total time:   3601 ms
+
+step timings:
+  load_image                 21 ms  shape=(700, 700, 3)
+  detect_plate             1123 ms  center=(342, 358) radius=266 cropped_shape=(533, 533, 3)
+  correct_illumination     2172 ms
+  threshold_segment         141 ms  n_labels=95
+  measure_colonies           47 ms  rows=95
+
+quality flags:
+  (none)
