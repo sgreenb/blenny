@@ -1,0 +1,70 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "blenny"
+version = "0.0.1"
+description = "A free, open-source toolkit for analyzing plates and microscopy images."
+readme = "README.md"
+license = { text = "GPL-3.0-or-later" }
+requires-python = ">=3.11"
+authors = [{ name = "The Blenny contributors" }]
+keywords = ["microscopy", "image-analysis", "colony-counting", "bioimage", "plates"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = [
+    "numpy>=1.24",
+    "pydantic>=2.5",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7",
+    "pytest-cov>=4",
+    "ruff>=0.5",
+    "mypy>=1.8",
+    "pre-commit>=3.6",
+]
+
+[project.scripts]
+blenny = "blenny.cli.main:app"
+
+[project.urls]
+Homepage = "https://github.com/your-org/blenny"
+Issues = "https://github.com/your-org/blenny/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/blenny"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+ignore = ["E501"]  # line length handled by formatter
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src/blenny"]
