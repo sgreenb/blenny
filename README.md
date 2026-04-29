@@ -25,22 +25,34 @@ pytest
 ## Quick taste
 
 ```python
-from blenny.pipeline import Pipeline
-from blenny.modules.identity import IdentityPreprocessor
+from blenny import Pipeline
 
-pipe = Pipeline([IdentityPreprocessor()])
-result = pipe.run({"image": ...})
+pipe = Pipeline.from_config([
+    {"name": "load_image"},
+    {"name": "detect_plate"},
+    {"name": "correct_illumination", "params": {"radius": 20}},
+    {"name": "threshold_segment", "params": {"roi_mask_key": "plate"}},
+    {"name": "measure_colonies"},
+    {"name": "export_csv", "params": {"output_path": "colonies.csv"}},
+    {"name": "export_annotated", "params": {"output_path": "annotated.png"}},
+])
+result = pipe.run("plate.jpg")
+print(f"Found {result.metadata['colony_count']} colonies")
 ```
 
-A real colony-counting pipeline is the next milestone — see the roadmap below.
+For a runnable end-to-end demo on a synthetic plate (no input image required):
+
+```bash
+python examples/01_count_colonies.py
+```
 
 ## Roadmap
 
-- [x] Step 0 — Project bootstrap (this commit)
-- [ ] Step 1 — Core pipeline abstractions (Loader/Preprocessor/Segmenter/...)
-- [ ] Step 2 — Vertical slice: classical-CV colony counting on plate photos
+- [x] Step 0 — Project bootstrap
+- [x] Step 1 — Core pipeline abstractions (Loader/Preprocessor/Segmenter/...)
+- [x] Step 2 — Vertical slice: classical-CV colony counting on plate photos
 - [ ] Step 3 — YAML pipeline configs + CLI (`blenny run pipeline.yaml`)
-- [ ] Step 4 — Transparency: per-step debug output, quality flags
+- [ ] Step 4 — Transparency: per-step debug output, quality flags surfacing
 - [ ] Step 5 — Documentation and examples
 
 ## License

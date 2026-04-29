@@ -27,6 +27,8 @@ dependencies = [
     "numpy>=1.24",
     "pydantic>=2.5",
     "pyyaml>=6.0",
+    "pillow>=10",
+    "scikit-image>=0.22",
 ]
 
 [project.optional-dependencies]
@@ -63,6 +65,11 @@ quote-style = "double"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
+filterwarnings = [
+    # skimage 0.26 deprecated `min_size` in favor of `max_size` with flipped
+    # semantics, slated for 2.0. Revisit once 2.0 lands.
+    "ignore:Parameter `min_size` is deprecated:FutureWarning",
+]
 
 [tool.mypy]
 python_version = "3.11"

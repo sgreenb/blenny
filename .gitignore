@@ -39,3 +39,4 @@ coverage.xml
 # Blenny outputs
 debug_output/
 results/
+examples/output/
