@@ -14,8 +14,26 @@ from blenny.pipeline import BlennyParams, FeatureExtractor, ImageData, register
 class ColonyMeasurer(FeatureExtractor):
     class Params(BlennyParams):
         mask_key: str = "objects"
+
         edge_touch_flag_threshold: float = 0.10
         """Raise an ImageData-level flag if more than this fraction of objects touch the image edge."""
+
+        max_plausible_count: int = 600
+        """Raise ``suspect_high_count`` if the detected colony count exceeds this.
+
+        600 is a practical upper bound for manually-countable plates; above
+        this the plate would typically be reported as TNTC (too numerous to
+        count). Set to ``0`` to disable.
+        """
+
+        max_coverage_frac: float = 0.50
+        """Raise ``suspect_high_count`` if detected colonies cover more than this
+        fraction of the plate (or image) area.
+
+        A normally-countable plate rarely exceeds 30% coverage; values above
+        50% almost always indicate large numbers of false positives. Set to
+        ``0`` to disable.
+        """
 
     def extract(self, image: Any, mask: Any, data: ImageData) -> list[dict[str, Any]]:
         labels = mask
@@ -75,4 +93,47 @@ class ColonyMeasurer(FeatureExtractor):
         else:
             data.metadata["colony_count"] = 0
 
+        self._check_plausibility(rows, data)
         return rows
+
+    def _check_plausibility(self, rows: list[dict], data: ImageData) -> None:
+        """Raise ``suspect_high_count`` if either plausibility threshold is exceeded."""
+        n = len(rows)
+        max_count: int = self.params.max_plausible_count  # type: ignore[attr-defined]
+        max_cov: float = self.params.max_coverage_frac  # type: ignore[attr-defined]
+
+        # Absolute count threshold.
+        if max_count > 0 and n > max_count:
+            data.add_flag(
+                "suspect_high_count",
+                f"Detected {n} colonies, which exceeds max_plausible_count={max_count}. "
+                "Results may contain many false positives (rim artifacts, noise). "
+                "Check the annotated image and consider increasing margin_frac "
+                "or the circularity/solidity filters.",
+                severity="warning",
+            )
+            return  # one flag is enough; skip coverage check
+
+        # Coverage fraction threshold.
+        if max_cov > 0 and n > 0:
+            total_colony_area = sum(r["area_px"] for r in rows)
+            # Use the plate mask area if available, otherwise the image area.
+            plate_mask = data.masks.get("plate")
+            if plate_mask is not None:
+                ref_area = float(np.asarray(plate_mask, dtype=bool).sum())
+            elif data.image is not None:
+                ref_area = float(np.asarray(data.image).shape[0] * np.asarray(data.image).shape[1])
+            else:
+                ref_area = 0.0
+            if ref_area > 0:
+                coverage = total_colony_area / ref_area
+                data.metadata["colony_coverage_frac"] = round(coverage, 4)
+                if coverage > max_cov:
+                    data.add_flag(
+                        "suspect_high_count",
+                        f"Detected colonies cover {coverage:.0%} of the plate area, "
+                        f"which exceeds max_coverage_frac={max_cov:.0%}. "
+                        "Results may contain large numbers of false positives. "
+                        "Check the annotated image.",
+                        severity="warning",
+                    )

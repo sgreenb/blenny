@@ -18,9 +18,10 @@ steps:
 
   - name: detect_plate
     params:
-      # Shrink the plate mask by 5% of the detected radius to exclude the
-      # bright reflective rim. Increase if rim arcs leak through.
-      margin_frac: 0.05
+      # Shrink the plate mask by 8% of the detected radius to exclude the
+      # bright reflective rim common in phone photos. Reduce to 0.03-0.05
+      # for flatbed scans or if colonies grow close to the rim.
+      margin_frac: 0.08
       crop: true
 
   - name: correct_illumination

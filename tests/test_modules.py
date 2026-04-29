@@ -202,6 +202,38 @@ def test_colony_measurer_handles_empty_mask() -> None:
     assert any(f.code == "no_objects" for f in out.quality_flags)
 
 
+def test_colony_measurer_flags_suspect_high_count_absolute() -> None:
+    """More detections than max_plausible_count should raise suspect_high_count."""
+    plate = make_synthetic_plate(n_colonies=10, image_size=(256, 256), seed=0)
+    data = ImageData(source="x", image=plate.image)
+    IlluminationCorrection(radius=20).run(data)
+    ThresholdSegmenter(roi_mask_key=None).run(data)
+    # Set the threshold below the actual count to force a flag.
+    out = ColonyMeasurer(max_plausible_count=2).run(data)
+    assert any(f.code == "suspect_high_count" for f in out.quality_flags)
+
+
+def test_colony_measurer_no_flag_when_count_is_normal() -> None:
+    """A reasonable count should produce no suspect_high_count flag."""
+    plate = make_synthetic_plate(n_colonies=10, image_size=(256, 256), seed=0)
+    data = ImageData(source="x", image=plate.image)
+    IlluminationCorrection(radius=20).run(data)
+    ThresholdSegmenter(roi_mask_key=None).run(data)
+    out = ColonyMeasurer(max_plausible_count=600).run(data)
+    assert not any(f.code == "suspect_high_count" for f in out.quality_flags)
+
+
+def test_colony_measurer_flags_suspect_high_coverage() -> None:
+    """Colonies covering >max_coverage_frac of the image should be flagged."""
+    plate = make_synthetic_plate(n_colonies=10, image_size=(256, 256), seed=0)
+    data = ImageData(source="x", image=plate.image)
+    IlluminationCorrection(radius=20).run(data)
+    ThresholdSegmenter(roi_mask_key=None).run(data)
+    # Set an absurdly low threshold so any coverage triggers it.
+    out = ColonyMeasurer(max_plausible_count=0, max_coverage_frac=0.0001).run(data)
+    assert any(f.code == "suspect_high_count" for f in out.quality_flags)
+
+
 # --- CSVExporter --------------------------------------------------------------
 
 

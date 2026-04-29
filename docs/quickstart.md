@@ -219,7 +219,7 @@ exclusion margin:
 ```yaml
 - name: detect_plate
   params:
-    margin_frac: 0.07     # default 0.05; try 0.07–0.10 for wide reflective rims
+    margin_frac: 0.12     # default 0.08; try 0.10–0.15 for wide reflective rims
 ```
 
 **Lots of false detections from pen marks or scratches.** The shape

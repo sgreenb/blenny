@@ -43,13 +43,15 @@ class PlateDetector(Preprocessor):
         mask_key: str = "plate"
         """Key under which the plate mask is stored in ``data.masks``."""
 
-        margin_frac: float = 0.05
+        margin_frac: float = 0.08
         """Shrink the plate mask by this fraction of the detected radius.
 
         Real plate photos almost always include a bright reflective rim that
-        otherwise gets segmented as a chain of small false-positive arcs. 5%
-        of the radius is a generous-but-safe default; reduce to ``0.02`` for
-        very clean scans, or raise to ``0.10`` if rim contamination persists.
+        otherwise gets segmented as a chain of small false-positive arcs.
+        8% is calibrated for the wide translucent plastic rims common in
+        phone photos; reduce to ``0.03``-``0.05`` for flatbed scans or
+        photos where colonies grow close to the rim, raise to ``0.12`` if
+        rim contamination persists.
         """
 
     def process(self, image: Any, data: ImageData) -> Any:
