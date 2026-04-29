@@ -6,6 +6,7 @@ configs can refer to them by their short registry names
 (``"load_image"``, ``"detect_plate"``, ...).
 """
 
+from blenny.modules.classify_interior import InteriorColonyClassifier
 from blenny.modules.correct_illumination import IlluminationCorrection
 from blenny.modules.detect_plate import PlateDetector
 from blenny.modules.export_annotated import AnnotatedImageExporter
@@ -22,6 +23,7 @@ __all__ = [
     "IdentityPreprocessor",
     "IlluminationCorrection",
     "ImageFileLoader",
+    "InteriorColonyClassifier",
     "PlateDetector",
     "ThresholdSegmenter",
 ]

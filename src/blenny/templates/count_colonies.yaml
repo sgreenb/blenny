@@ -43,6 +43,13 @@ steps:
 
   - name: measure_colonies
 
+  - name: classify_by_interior
+    # Validates edge-zone detections against the interior colony profile.
+    # Detections that don't match interior size/intensity/eccentricity are
+    # marked is_artifact=True and excluded from the count. They remain in
+    # the CSV for inspection. Tune interior_radius_frac and iqr_multiplier
+    # if too many real edge colonies are being rejected.
+
   - name: export_csv
     params:
       output_path: "{output_dir}/{stem}/colonies.csv"

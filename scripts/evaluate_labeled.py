@@ -43,6 +43,7 @@ PIPELINE_STEPS = [
     {"name": "correct_illumination", "params": {"radius": 25}},
     {"name": "threshold_segment", "params": {"roi_mask_key": "plate", "split_touching": True}},
     {"name": "measure_colonies"},
+    {"name": "classify_by_interior"},
     {"name": "export_annotated", "params": {"output_path": ""}},  # filled per-image
 ]
 
@@ -126,22 +127,25 @@ def run_image(img_path: Path, out_subdir: Path) -> dict:
     data = pipe.run(img_path)
 
     count = data.metadata.get("colony_count", 0)
+    artifact_count = data.metadata.get("artifact_count", 0)
     flags = [f.code for f in data.quality_flags]
     plate_found = "plate_not_found" not in flags
     coverage = data.metadata.get("colony_coverage_frac")
 
     # Write a summary so the cache-check works
     summary = (
-        f"image:        {img_path.name}\n"
-        f"colony count: {count}\n"
-        f"plate_found:  {plate_found}\n"
-        f"coverage_frac: {coverage}\n"
-        f"quality_flags: {', '.join(flags) if flags else '(none)'}\n"
+        f"image:          {img_path.name}\n"
+        f"colony count:   {count}\n"
+        f"artifact count: {artifact_count}\n"
+        f"plate_found:    {plate_found}\n"
+        f"coverage_frac:  {coverage}\n"
+        f"quality_flags:  {', '.join(flags) if flags else '(none)'}\n"
     )
     (out_subdir / "summary.txt").write_text(summary)
 
     return {
         "detected": count,
+        "artifact_count": artifact_count,
         "plate_found": plate_found,
         "quality_flags": flags,
         "coverage_frac": coverage,
@@ -157,11 +161,18 @@ def load_cached(out_subdir: Path) -> dict | None:
     for line in p.read_text().splitlines():
         if line.startswith("colony count:"):
             info["detected"] = int(line.split(":", 1)[1].strip())
+        elif line.startswith("artifact count:"):
+            info["artifact_count"] = int(line.split(":", 1)[1].strip())
         elif line.startswith("plate_found:"):
             info["plate_found"] = line.split(":", 1)[1].strip() == "True"
+        elif line.startswith("coverage_frac:"):
+            raw = line.split(":", 1)[1].strip()
+            info["coverage_frac"] = float(raw) if raw != "None" else None
         elif line.startswith("quality_flags:"):
             raw = line.split(":", 1)[1].strip()
             info["quality_flags"] = [] if raw == "(none)" else raw.split(", ")
+    info.setdefault("artifact_count", 0)
+    info.setdefault("coverage_frac", None)
     return info if "detected" in info else None
 
 

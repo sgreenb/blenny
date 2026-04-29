@@ -25,6 +25,11 @@ class AnnotatedImageExporter(Exporter):
         mask_key: str = "objects"
         draw_numbers: bool = True
         outline_color: tuple[int, int, int] = (255, 64, 64)
+        artifact_outline_color: tuple[int, int, int] = (130, 130, 130)
+        """Outline color for detections marked ``is_artifact=True``.
+        Drawn without numbers so they're visually distinct but still
+        visible for audit purposes.
+        """
         text_color: tuple[int, int, int] = (255, 255, 0)
 
     def export(self, data: ImageData) -> None:
@@ -46,14 +51,31 @@ class AnnotatedImageExporter(Exporter):
             )
             return
 
+        # Split label IDs into normal vs. artifact for separate colouring.
+        artifact_ids = {
+            int(r["label"]) for r in data.measurements if r.get("is_artifact") and "label" in r
+        }
+
         # Convert to uint8 RGB for drawing.
         rgb = self._to_rgb_uint8(base)
-        boundaries = segmentation.find_boundaries(labels, mode="outer")
-        rgb[boundaries] = np.array(self.params.outline_color, dtype=np.uint8)  # type: ignore[attr-defined]
+
+        if artifact_ids:
+            artifact_mask = np.isin(labels, list(artifact_ids))
+            normal_labels = np.where(~artifact_mask, labels, 0)
+            artifact_labels_arr = np.where(artifact_mask, labels, 0)
+            normal_bounds = segmentation.find_boundaries(normal_labels, mode="outer")
+            artifact_bounds = segmentation.find_boundaries(artifact_labels_arr, mode="outer")
+            rgb[normal_bounds] = np.array(self.params.outline_color, dtype=np.uint8)  # type: ignore[attr-defined]
+            rgb[artifact_bounds] = np.array(self.params.artifact_outline_color, dtype=np.uint8)  # type: ignore[attr-defined]
+        else:
+            boundaries = segmentation.find_boundaries(labels, mode="outer")
+            rgb[boundaries] = np.array(self.params.outline_color, dtype=np.uint8)  # type: ignore[attr-defined]
 
         im = Image.fromarray(rgb)
+        # Only draw numbers for non-artifact detections.
+        countable = [r for r in data.measurements if not r.get("is_artifact")]
         if self.params.draw_numbers:  # type: ignore[attr-defined]
-            self._draw_numbers(im, data.measurements)
+            self._draw_numbers(im, countable)
 
         path = Path(self.params.output_path)  # type: ignore[attr-defined]
         path.parent.mkdir(parents=True, exist_ok=True)
