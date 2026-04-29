@@ -24,18 +24,31 @@ pytest
 
 ## Quick taste
 
+### From the command line
+
+```bash
+# Scaffold a starter pipeline YAML
+blenny init --out pipeline.yaml
+
+# Run on one image, or many (quote the glob!)
+blenny run pipeline.yaml --input plate.jpg          --output results/
+blenny run pipeline.yaml --input "plates/*.jpg"     --output results/
+
+# Inspect every registered module and its params
+blenny modules
+```
+
+Results land in `results/<image-stem>/colonies.csv` + `annotated.png`,
+plus a per-image `provenance.json` recording every step that ran. A
+`results/summary.csv` rolls up counts and timings across the batch, and
+`results/config.yaml` records the exact (resolved) pipeline used.
+
+### From Python
+
 ```python
 from blenny import Pipeline
 
-pipe = Pipeline.from_config([
-    {"name": "load_image"},
-    {"name": "detect_plate"},
-    {"name": "correct_illumination", "params": {"radius": 20}},
-    {"name": "threshold_segment", "params": {"roi_mask_key": "plate"}},
-    {"name": "measure_colonies"},
-    {"name": "export_csv", "params": {"output_path": "colonies.csv"}},
-    {"name": "export_annotated", "params": {"output_path": "annotated.png"}},
-])
+pipe = Pipeline.from_yaml("pipeline.yaml")
 result = pipe.run("plate.jpg")
 print(f"Found {result.metadata['colony_count']} colonies")
 ```
@@ -51,7 +64,7 @@ python examples/01_count_colonies.py
 - [x] Step 0 — Project bootstrap
 - [x] Step 1 — Core pipeline abstractions (Loader/Preprocessor/Segmenter/...)
 - [x] Step 2 — Vertical slice: classical-CV colony counting on plate photos
-- [ ] Step 3 — YAML pipeline configs + CLI (`blenny run pipeline.yaml`)
+- [x] Step 3 — YAML pipeline configs + CLI (`blenny run pipeline.yaml`)
 - [ ] Step 4 — Transparency: per-step debug output, quality flags surfacing
 - [ ] Step 5 — Documentation and examples
 

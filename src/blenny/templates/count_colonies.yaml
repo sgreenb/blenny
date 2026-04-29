@@ -1,0 +1,52 @@
+# Count colonies on a plate photo (classical CV pipeline).
+#
+# Run on a single image:
+#   blenny run pipeline.yaml --input plate.jpg --output results/
+#
+# Run on a batch (the {stem} placeholder gives each image its own subdir):
+#   blenny run pipeline.yaml --input "plates/*.jpg" --output results/
+#
+# Tweak any params below to suit your data. `blenny modules` lists every
+# parameter and its default for every registered module.
+
+steps:
+  - name: load_image
+    # Resize huge phone photos for tractable processing time. Set
+    # max_dimension: null to load at native resolution (slower but exact).
+    params:
+      max_dimension: 2000
+
+  - name: detect_plate
+    params:
+      # Shrink the plate mask by 5% of the detected radius to exclude the
+      # bright reflective rim. Increase if rim arcs leak through.
+      margin_frac: 0.05
+      crop: true
+
+  - name: correct_illumination
+    params:
+      # Structuring-element radius in pixels. Should be larger than the
+      # biggest colony but smaller than the lighting variation scale.
+      method: white_tophat
+      radius: 25
+
+  - name: threshold_segment
+    params:
+      method: otsu
+      roi_mask_key: plate
+      split_touching: true
+      # Shape filters drop rim arcs (low circularity) and pen scribbles
+      # (low solidity). Set either to 0 to disable.
+      min_circularity: 0.7
+      min_solidity: 0.85
+
+  - name: measure_colonies
+
+  - name: export_csv
+    params:
+      output_path: "{output_dir}/{stem}/colonies.csv"
+      include_provenance: true
+
+  - name: export_annotated
+    params:
+      output_path: "{output_dir}/{stem}/annotated.png"

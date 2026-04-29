@@ -33,9 +33,9 @@ class Pipeline:
     def from_config(cls, steps_config: list[dict[str, Any]]) -> Pipeline:
         """Build a pipeline from a list of ``{"name": ..., "params": {...}}`` dicts.
 
-        This is the in-memory shape that YAML/JSON configs deserialize to
-        in Step 3. Keeping it here lets us test the registry → pipeline
-        path now, before we add a YAML loader.
+        This is the in-memory shape that YAML/JSON configs deserialize to.
+        ``Pipeline.from_yaml`` is a thin wrapper that adds parsing + path
+        placeholder substitution.
         """
         steps: list[Module] = []
         for entry in steps_config:
@@ -46,6 +46,28 @@ class Pipeline:
                 params["name"] = entry["instance_name"]
             steps.append(MODULES.create(entry["name"], **params))
         return cls(steps)
+
+    @classmethod
+    def from_yaml(
+        cls,
+        path: str | Path,
+        *,
+        input_path: str | Path | None = None,
+        output_dir: str | Path | None = None,
+    ) -> Pipeline:
+        """Build a pipeline from a YAML file, with optional path placeholder
+        substitution (``{stem}``, ``{input}``, ``{output_dir}``, ``{name}``).
+
+        The placeholders are filled in inside ``params`` strings only; the
+        module ``name`` field is never rewritten.
+        """
+        # Local import to avoid a circular dependency at module load time.
+        from blenny.config import extract_steps, load_yaml, substitute_paths
+
+        config = load_yaml(path)
+        steps = extract_steps(config)
+        steps = substitute_paths(steps, input_path=input_path, output_dir=output_dir)
+        return cls.from_config(steps)
 
     # --- Execution -----------------------------------------------------------
 
