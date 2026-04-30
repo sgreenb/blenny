@@ -39,7 +39,7 @@ RESULTS = OUT_DIR / "results.csv"
 # When a default changes, re-running with --force reflects it here too.
 PIPELINE_STEPS = [
     {"name": "load_image", "params": {"max_dimension": 2000}},
-    {"name": "detect_plate", "params": {"crop": True}},
+    {"name": "detect_plate", "params": {"crop": True, "radius_expand_frac": 0.05}},
     {"name": "correct_illumination", "params": {"radius": 25}},
     {"name": "threshold_segment", "params": {"roi_mask_key": "plate", "split_touching": True}},
     {"name": "measure_colonies"},

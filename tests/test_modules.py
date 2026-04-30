@@ -95,6 +95,27 @@ def test_plate_detector_finds_plate_and_crops() -> None:
     assert abs(cx - true_cx) <= 8
 
 
+def test_plate_detector_radius_expand_frac_grows_mask() -> None:
+    """radius_expand_frac > 0 produces a strictly larger plate mask."""
+    plate = make_synthetic_plate(n_colonies=10, image_size=(256, 256), seed=0)
+
+    d_default = ImageData(source="x", image=plate.image, original_image=plate.image)
+    PlateDetector(crop=False).run(d_default)
+
+    d_expanded = ImageData(source="x", image=plate.image, original_image=plate.image)
+    PlateDetector(crop=False, radius_expand_frac=0.10).run(d_expanded)
+
+    n_default = int(d_default.masks["plate"].sum())
+    n_expanded = int(d_expanded.masks["plate"].sum())
+    assert n_expanded > n_default
+    # Detected centre should not move when only the radius is expanded.
+    assert d_default.metadata["plate_center"] == d_expanded.metadata["plate_center"]
+    # plate_radius_hough is recorded for provenance and must equal the
+    # radius found before expansion (so it matches the un-expanded run).
+    assert d_default.metadata["plate_radius_hough"] == d_expanded.metadata["plate_radius_hough"]
+    assert d_expanded.metadata["plate_radius"] > d_default.metadata["plate_radius"]
+
+
 def test_plate_detector_flags_when_no_plate() -> None:
     # A flat image with no edges → Hough finds nothing useful but still picks
     # a top peak. Use uniform noise to ensure no circular structure.

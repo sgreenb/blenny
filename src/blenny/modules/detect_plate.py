@@ -44,7 +44,7 @@ class PlateDetector(Preprocessor):
         """Key under which the plate mask is stored in ``data.masks``."""
 
         margin_frac: float = 0.08
-        """Shrink the plate mask by this fraction of the detected radius.
+        """Shrink the plate mask by this fraction of the (expanded) radius.
 
         Real plate photos almost always include a bright reflective rim that
         otherwise gets segmented as a chain of small false-positive arcs.
@@ -52,6 +52,22 @@ class PlateDetector(Preprocessor):
         phone photos; reduce to ``0.03``-``0.05`` for flatbed scans or
         photos where colonies grow close to the rim, raise to ``0.12`` if
         rim contamination persists.
+        """
+
+        radius_expand_frac: float = 0.0
+        """Expand the detected plate radius by this fraction before applying
+        ``margin_frac``.
+
+        Off-axis camera angles make the plate appear slightly elliptical, and
+        Hough circle detection then fits a circle smaller than the true plate.
+        Expanding the radius before margin trimming recovers colonies near the
+        far edge that would otherwise fall outside the analysis region. The
+        ``InteriorColonyClassifier`` (if present in the pipeline) cleans up
+        any extra rim artifacts that the expansion introduces.
+
+        Default ``0.0`` preserves backward compatibility. Set to ``0.05``
+        for typical hand-held phone photos; ``0.10`` for clearly off-axis
+        shots where the plate ellipse is visible.
         """
 
     def process(self, image: Any, data: ImageData) -> Any:
@@ -78,7 +94,14 @@ class PlateDetector(Preprocessor):
             data.masks[self.params.mask_key] = np.ones((h, w), dtype=bool)  # type: ignore[attr-defined]
             return image
 
-        cy, cx, r = int(cys[0]), int(cxs[0]), int(rs[0])
+        cy, cx, r_hough = int(cys[0]), int(cxs[0]), int(rs[0])
+
+        # Apply optional expansion *before* margin trimming. The bbox, mask,
+        # and stored ``plate_radius`` all use the expanded radius so downstream
+        # geometry (e.g. InteriorColonyClassifier) sees a single consistent
+        # "plate radius" derived from the user-tunable knobs.
+        expand: float = self.params.radius_expand_frac  # type: ignore[attr-defined]
+        r = r_hough + round(r_hough * expand)
         r_eff = max(1, r - round(r * self.params.margin_frac))  # type: ignore[attr-defined]
 
         # Build mask in the original frame.
@@ -95,9 +118,11 @@ class PlateDetector(Preprocessor):
             data.metadata["plate_bbox"] = (int(y0), int(x0), int(y1), int(x1))
             data.metadata["plate_center"] = (int(cy), int(cx))
             data.metadata["plate_radius"] = int(r)
+            data.metadata["plate_radius_hough"] = int(r_hough)
             return cropped
 
         data.masks[self.params.mask_key] = mask  # type: ignore[attr-defined]
         data.metadata["plate_center"] = (int(cy), int(cx))
         data.metadata["plate_radius"] = int(r)
+        data.metadata["plate_radius_hough"] = int(r_hough)
         return image

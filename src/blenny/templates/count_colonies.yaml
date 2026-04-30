@@ -18,7 +18,12 @@ steps:
 
   - name: detect_plate
     params:
-      # Shrink the plate mask by 8% of the detected radius to exclude the
+      # Expand the Hough-detected radius by 5% before margin trimming. Off-
+      # axis phone photos make the plate elliptical; Hough then fits a circle
+      # smaller than the true plate. Set to 0 for flatbed scans or perfectly
+      # top-down shots; raise to 0.10 for clearly tilted images.
+      radius_expand_frac: 0.05
+      # Shrink the plate mask by 8% of the (expanded) radius to exclude the
       # bright reflective rim common in phone photos. Reduce to 0.03-0.05
       # for flatbed scans or if colonies grow close to the rim.
       margin_frac: 0.08

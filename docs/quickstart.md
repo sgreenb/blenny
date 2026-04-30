@@ -222,6 +222,21 @@ exclusion margin:
     margin_frac: 0.12     # default 0.08; try 0.10–0.15 for wide reflective rims
 ```
 
+**Colonies near the edge of the plate are missed (blue ring sits inside
+the agar instead of on the rim).** This usually means the photo was
+taken at a slight angle, making the plate elliptical, and the circle
+fitter chose a circle smaller than the actual plate. Expand the
+detected radius:
+
+```yaml
+- name: detect_plate
+  params:
+    radius_expand_frac: 0.10   # default 0.05; raise to 0.10–0.15 for tilted shots
+```
+
+If you have access to flatbed scans or perfectly top-down photos, set
+`radius_expand_frac: 0.0` to disable expansion entirely.
+
 **Lots of false detections from pen marks or scratches.** The shape
 filters in the segmenter drop very-elongated and irregular blobs.
 Tighten them:
