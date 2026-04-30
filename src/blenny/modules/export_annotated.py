@@ -25,10 +25,12 @@ class AnnotatedImageExporter(Exporter):
         mask_key: str = "objects"
         draw_numbers: bool = True
         outline_color: tuple[int, int, int] = (255, 64, 64)
-        artifact_outline_color: tuple[int, int, int] = (130, 130, 130)
+        artifact_outline_color: tuple[int, int, int] = (255, 140, 0)
         """Outline color for detections marked ``is_artifact=True``.
-        Drawn without numbers so they're visually distinct but still
-        visible for audit purposes.
+        Drawn without numbers so they're visually distinct from counted
+        colonies but remain auditable. Default is orange so artifacts are
+        visible against any plate background; gray (130, 130, 130) is
+        a more subtle alternative if you find orange too distracting.
         """
         text_color: tuple[int, int, int] = (255, 255, 0)
         draw_plate_boundary: bool = True
