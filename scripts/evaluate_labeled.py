@@ -133,6 +133,7 @@ def run_image(img_path: Path, out_subdir: Path) -> dict:
     coverage = data.metadata.get("colony_coverage_frac")
 
     # Write a summary so the cache-check works
+    global_stats = data.metadata.get("detection_global_stats", {})
     summary = (
         f"image:          {img_path.name}\n"
         f"colony count:   {count}\n"
@@ -140,6 +141,7 @@ def run_image(img_path: Path, out_subdir: Path) -> dict:
         f"plate_found:    {plate_found}\n"
         f"coverage_frac:  {coverage}\n"
         f"quality_flags:  {', '.join(flags) if flags else '(none)'}\n"
+        f"global_stats:   {global_stats}\n"
     )
     (out_subdir / "summary.txt").write_text(summary)
 

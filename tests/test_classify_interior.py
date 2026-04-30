@@ -135,15 +135,51 @@ def test_no_flag_when_all_edge_rows_accepted() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_skips_classification_when_insufficient_interior_samples() -> None:
-    """Fewer interior samples than min_interior_samples → pass-through + info flag."""
+def test_falls_back_to_strict_filter_when_interior_too_small() -> None:
+    """Fewer interior samples than min_interior_samples → strict shape fallback.
+
+    Round detections survive; non-round ones are rejected. This replaces the
+    earlier pass-through behaviour, which let blank plates report dozens of
+    "colonies" coming from agar texture.
+    """
     data = _data_with_geometry()
-    sparse_interior = _INTERIOR[:3]  # only 3, default min is 5
-    rows = sparse_interior + _ARTIFACTS
+    sparse_interior = _INTERIOR[:3]  # only 3, default min is 5; ecc=0.15
+    elongated_edge = [_row(50, 100.0, 190.0, area=40.0, eccentricity=0.9)]
+    rows = sparse_interior + elongated_edge
     result = InteriorColonyClassifier().classify(rows, data)
-    assert all(not r["is_artifact"] for r in result)
+
+    # Round interior rows survive, elongated edge row is rejected.
+    assert all(not r["is_artifact"] for r in result[: len(sparse_interior)])
+    assert result[-1]["is_artifact"]
     codes = [f.code for f in data.quality_flags]
-    assert "interior_classifier_insufficient_samples" in codes
+    # Either flag is acceptable depending on whether the small sample also
+    # tripped the degeneracy heuristic; both lead to the same fallback path.
+    assert "interior_classifier_insufficient_samples" in codes or "plate_likely_empty" in codes
+
+
+def test_blank_plate_triggers_plate_likely_empty() -> None:
+    """A plate whose detections are mostly elongated noise should be flagged
+    as likely empty and have its noise rejected, not reported as colonies."""
+    data = _data_with_geometry()
+    # 30 detections, all elongated (eccentricity ~0.85), wildly variable area.
+    rng = np.random.default_rng(0)
+    rows = [
+        _row(
+            i + 1,
+            cy=100 + 60 * math.sin(i),
+            cx=100 + 60 * math.cos(i),
+            area=float(rng.integers(20, 800)),
+            eccentricity=0.85,
+        )
+        for i in range(30)
+    ]
+    InteriorColonyClassifier().classify(rows, data)
+    codes = [f.code for f in data.quality_flags]
+    assert "plate_likely_empty" in codes
+    # Almost everything should be marked as an artifact.
+    n_artifacts = sum(1 for r in rows if r["is_artifact"])
+    assert n_artifacts >= 0.9 * len(rows)
+    assert data.metadata["colony_count"] <= 0.1 * len(rows)
 
 
 def test_skips_classification_when_no_plate_geometry() -> None:

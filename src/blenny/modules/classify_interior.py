@@ -78,6 +78,34 @@ class InteriorColonyClassifier(Classifier):
         ``plate_center`` / ``plate_radius`` are absent from metadata.
         """
 
+        # ---- Blank-plate / noise-dominated guard ---------------------------
+        # When the IQR reference can't be trusted (too few interior samples,
+        # or the whole detection set looks like noise), we fall back to a
+        # purely-geometric strict filter rather than passing everything
+        # through. This is what keeps a blank negative control from being
+        # reported as 100+ "colonies".
+        degenerate_max_median_eccentricity: float = 0.55
+        """If the median eccentricity of *all* detections exceeds this, the
+        plate is treated as degenerate (likely empty / noise-dominated).
+        Real colonies are nearly round (typical median eccentricity 0.2-0.4);
+        agar texture and crack fragments are elongated.
+        """
+
+        degenerate_max_area_cv: float = 1.2
+        """If the coefficient of variation (std/mean) of detection areas
+        exceeds this, the plate is treated as degenerate. Real colonies
+        cluster tightly in size on a given plate (CV typically 0.3-0.7);
+        a CV above ~1 means the size distribution is dominated by
+        outliers / noise.
+        """
+
+        strict_fallback_max_eccentricity: float = 0.55
+        """In strict-fallback mode, every detection above this eccentricity
+        is marked as an artifact. Bilobed colonies typically have
+        eccentricity 0.6-0.85, so they are also rejected here — they will
+        be recovered later by the multiplicity estimator (TODO).
+        """
+
     # ------------------------------------------------------------------
     # Public interface
     # ------------------------------------------------------------------
@@ -121,16 +149,37 @@ class InteriorColonyClassifier(Classifier):
         interior = [r for r in rows if r["zone"] == "interior"]
         edge = [r for r in rows if r["zone"] == "edge"]
 
-        # --- 3. Check we have enough interior samples ---
+        # --- 3. Check whether we can trust an IQR reference at all ---
+        # If interior is too small OR the detection set as a whole looks
+        # noise-dominated (most blobs elongated, sizes wildly variable),
+        # using interior as a reference would just enshrine noise. Fall
+        # back to a strict purely-geometric filter instead.
         min_n: int = self.params.min_interior_samples  # type: ignore[attr-defined]
-        if len(interior) < min_n:
-            data.add_flag(
-                "interior_classifier_insufficient_samples",
-                f"Only {len(interior)} interior detection(s) found "
-                f"(need {min_n}); edge-zone classification skipped. "
-                "All detections are kept as-is.",
-                severity="info",
-            )
+        self._last_global_stats: dict[str, Any] = {}
+        is_degenerate, degen_reason = self._plate_looks_degenerate(rows)
+        if self._last_global_stats:
+            data.metadata["detection_global_stats"] = self._last_global_stats
+        insufficient = len(interior) < min_n
+
+        if insufficient or is_degenerate:
+            n_rejected = self._apply_strict_fallback(rows)
+            if is_degenerate:
+                data.add_flag(
+                    "plate_likely_empty",
+                    f"Plate appears empty or noise-dominated ({degen_reason}); "
+                    f"applied strict shape fallback (eccentricity \u2264 "
+                    f"{self.params.strict_fallback_max_eccentricity}). "  # type: ignore[attr-defined]
+                    f"{n_rejected} detection(s) marked as artifacts.",
+                    severity="warning",
+                )
+            else:  # insufficient interior, but plate doesn't look degenerate
+                data.add_flag(
+                    "interior_classifier_insufficient_samples",
+                    f"Only {len(interior)} interior detection(s) found "
+                    f"(need {min_n}); applied strict shape fallback. "
+                    f"{n_rejected} detection(s) marked as artifacts.",
+                    severity="info",
+                )
             self._update_count(rows, data)
             return rows
 
@@ -200,6 +249,57 @@ class InteriorColonyClassifier(Classifier):
                 return cy_f, cx_f, r_f
 
         return None, None, None
+
+    def _plate_looks_degenerate(self, rows: list[dict[str, Any]]) -> tuple[bool, str]:
+        """Detect plates where the entire detection set looks like noise.
+
+        Returns ``(is_degenerate, human_reason)``. The reason string is empty
+        when the plate looks fine.
+        """
+        eccs = [
+            float(r["eccentricity"])
+            for r in rows
+            if isinstance(r.get("eccentricity"), (int, float))
+        ]
+        areas = [float(r["area_px"]) for r in rows if isinstance(r.get("area_px"), (int, float))]
+        if len(eccs) < 3 or len(areas) < 3:
+            return True, f"only {len(eccs)} usable detection(s)"
+
+        median_ecc = float(np.median(eccs))
+        area_arr = np.array(areas, dtype=float)
+        mean_a = float(area_arr.mean())
+        area_cv = float(area_arr.std() / mean_a) if mean_a > 0 else float("inf")
+
+        max_ecc: float = self.params.degenerate_max_median_eccentricity  # type: ignore[attr-defined]
+        max_cv: float = self.params.degenerate_max_area_cv  # type: ignore[attr-defined]
+
+        # Stash global stats so users (and the eval report) can see why
+        # a plate was or wasn't flagged.
+        self._last_global_stats = {
+            "median_eccentricity": round(median_ecc, 4),
+            "area_cv": round(area_cv, 4),
+            "n_detections": len(eccs),
+        }
+
+        if median_ecc > max_ecc:
+            return True, f"median eccentricity {median_ecc:.2f} > {max_ecc}"
+        if area_cv > max_cv:
+            return True, f"area coefficient-of-variation {area_cv:.2f} > {max_cv}"
+        return False, ""
+
+    def _apply_strict_fallback(self, rows: list[dict[str, Any]]) -> int:
+        """Mark anything insufficiently round as an artifact. Returns count."""
+        max_ecc: float = self.params.strict_fallback_max_eccentricity  # type: ignore[attr-defined]
+        n = 0
+        for row in rows:
+            ecc = row.get("eccentricity")
+            if isinstance(ecc, (int, float)) and float(ecc) > max_ecc:
+                row["is_artifact"] = True
+                row["artifact_reason"] = (
+                    f"strict-fallback: eccentricity={float(ecc):.2f} > {max_ecc}"
+                )
+                n += 1
+        return n
 
     def _fit_reference(self, interior: list[dict[str, Any]]) -> dict[str, dict[str, float]]:
         """Build per-feature IQR-based bounds from interior detections."""
