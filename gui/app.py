@@ -213,24 +213,22 @@ with st.sidebar:
             st.session_state[f"slide_{key}"] = st.session_state[key]
 
         val = c1.number_input(
-            label, 
-            value=float(st.session_state[key]) if isinstance(step, float) else int(st.session_state[key]), 
-            min_value=float(min_val) if isinstance(step, float) else int(min_val), 
-            max_value=float(max_val) if isinstance(step, float) else int(max_val), 
-            step=step, 
-            key=f"num_{key}", 
+            label,
+            min_value=float(min_val) if isinstance(step, float) else int(min_val),
+            max_value=float(max_val) if isinstance(step, float) else int(max_val),
+            step=step,
+            key=f"num_{key}",
             label_visibility="collapsed",
             on_change=sync_num
         )
-        
+
         val = c2.slider(
-            label, 
-            min_value=float(min_val) if isinstance(step, float) else int(min_val), 
-            max_value=float(max_val) if isinstance(step, float) else int(max_val), 
-            value=float(st.session_state[key]) if isinstance(step, float) else int(st.session_state[key]), 
-            step=step, 
-            key=f"slide_{key}", 
-            label_visibility="collapsed", 
+            label,
+            min_value=float(min_val) if isinstance(step, float) else int(min_val),
+            max_value=float(max_val) if isinstance(step, float) else int(max_val),
+            step=step,
+            key=f"slide_{key}",
+            label_visibility="collapsed",
             help=help_text,
             on_change=sync_slide
         )
