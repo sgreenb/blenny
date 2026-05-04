@@ -41,12 +41,12 @@ class InteriorColonyClassifier(Classifier):
     """Validate edge-zone detections against interior colony characteristics."""
 
     class Params(BlennyParams):
-        interior_radius_frac: float = 0.75
+        interior_radius_frac: float = 0.85
         """Detections within this fraction of the plate radius from its centre
         are treated as interior (trusted reference). Those beyond it form the
         edge zone and are scored against the reference.
 
-        0.75 = inner 75% of the plate area. The outer 25% (radially) covers
+        0.85 = inner 85% of the plate area. The outer 15% (radially) covers
         the rim band without being so conservative that dense plates lose
         many real edge colonies.
         """
@@ -110,6 +110,53 @@ class InteriorColonyClassifier(Classifier):
     # Public interface
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def update_count(rows: list[dict[str, Any]], data: ImageData) -> None:
+        """Rewrite colony_count in metadata to exclude artifacts.
+
+        ``colony_count`` is the sum of ``colony_count_estimate`` across
+        non-artifact rows so that merged-colony detections (tagged by
+        ``estimate_multiplicity``) contribute their estimated multiplicity.
+        ``detection_count`` is the raw row count for cross-reference.
+        """
+        kept = [r for r in rows if not r.get("is_artifact", False)]
+        n_artifacts = sum(1 for r in rows if r.get("is_artifact", False))
+        n_colonies = sum(int(r.get("colony_count_estimate", 1)) for r in kept)
+        data.metadata["colony_count"] = n_colonies
+        data.metadata["detection_count"] = len(kept)
+        data.metadata["artifact_count"] = n_artifacts
+
+    @staticmethod
+    def reassign_ids(rows: list[dict[str, Any]], data: ImageData) -> list[dict[str, Any]]:
+        """Re-assign IDs: colonies first (1..N), then artifacts (N+1..M).
+
+        This ensures IDs in annotated images and tables match the count.
+        """
+        colonies = [r for r in rows if not r.get("is_artifact")]
+        artifacts = [r for r in rows if r.get("is_artifact")]
+
+        # Sort each group by their original label (or spatial position) to
+        # maintain consistency across runs.
+        def sort_key(row):
+            return (row.get("centroid_y", 0), row.get("centroid_x", 0))
+
+        colonies.sort(key=sort_key)
+        artifacts.sort(key=sort_key)
+
+        new_rows = []
+        for i, row in enumerate(colonies, 1):
+            row["label"] = i
+            new_rows.append(row)
+
+        n_colonies = len(colonies)
+        for i, row in enumerate(artifacts, 1):
+            row["label"] = n_colonies + i
+            new_rows.append(row)
+
+        # Replace data.measurements with the re-ordered and re-labeled list.
+        data.measurements[:] = new_rows
+        return data.measurements
+
     def classify(self, rows: list[dict[str, Any]], data: ImageData) -> list[dict[str, Any]]:
         if not rows:
             return rows
@@ -133,7 +180,7 @@ class InteriorColonyClassifier(Classifier):
                 severity="warning",
             )
             # Re-label anyway just in case measure_colonies left a mess
-            return self._reassign_ids(rows, data)
+            return self.reassign_ids(rows, data)
 
         # --- 2. Compute radial position for every detection ---
         for row in rows:
@@ -181,8 +228,8 @@ class InteriorColonyClassifier(Classifier):
                     f"{n_rejected} detection(s) marked as artifacts.",
                     severity="info",
                 )
-            self._update_count(rows, data)
-            return self._reassign_ids(rows, data)
+            self.update_count(rows, data)
+            return self.reassign_ids(rows, data)
 
         # --- 4. Fit reference distribution from interior colonies ---
         ref = self._fit_reference(interior)
@@ -208,7 +255,7 @@ class InteriorColonyClassifier(Classifier):
                 n_rejected += 1
 
         # --- 6. Update colony count and raise info flag ---
-        self._update_count(rows, data)
+        self.update_count(rows, data)
 
         if n_rejected:
             data.add_flag(
@@ -220,41 +267,7 @@ class InteriorColonyClassifier(Classifier):
                 severity="info",
             )
 
-        return self._reassign_ids(rows, data)
-
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
-
-    def _reassign_ids(self, rows: list[dict[str, Any]], data: ImageData) -> list[dict[str, Any]]:
-        """Re-assign IDs: colonies first (1..N), then artifacts (N+1..M).
-
-        This ensures IDs in annotated images and tables match the count.
-        """
-        colonies = [r for r in rows if not r.get("is_artifact")]
-        artifacts = [r for r in rows if r.get("is_artifact")]
-
-        # Sort each group by their original label (or spatial position) to
-        # maintain consistency across runs.
-        def sort_key(row):
-            return (row.get("centroid_y", 0), row.get("centroid_x", 0))
-
-        colonies.sort(key=sort_key)
-        artifacts.sort(key=sort_key)
-
-        new_rows = []
-        for i, row in enumerate(colonies, 1):
-            row["label"] = i
-            new_rows.append(row)
-
-        n_colonies = len(colonies)
-        for i, row in enumerate(artifacts, 1):
-            row["label"] = n_colonies + i
-            new_rows.append(row)
-
-        # Replace data.measurements with the re-ordered and re-labeled list.
-        data.measurements[:] = new_rows
-        return data.measurements
+        return self.reassign_ids(rows, data)
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -396,19 +409,3 @@ class InteriorColonyClassifier(Classifier):
             if v < bounds["lo"] or v > bounds["hi"]:
                 reasons.append(f"{feat}={v:.2f} outside [{bounds['lo']:.2f}, {bounds['hi']:.2f}]")
         return reasons
-
-    @staticmethod
-    def _update_count(rows: list[dict[str, Any]], data: ImageData) -> None:
-        """Rewrite colony_count in metadata to exclude artifacts.
-
-        ``colony_count`` is the sum of ``colony_count_estimate`` across
-        non-artifact rows so that merged-colony detections (tagged by
-        ``estimate_multiplicity``) contribute their estimated multiplicity.
-        ``detection_count`` is the raw row count for cross-reference.
-        """
-        kept = [r for r in rows if not r.get("is_artifact", False)]
-        n_artifacts = sum(1 for r in rows if r.get("is_artifact", False))
-        n_colonies = sum(int(r.get("colony_count_estimate", 1)) for r in kept)
-        data.metadata["colony_count"] = n_colonies
-        data.metadata["detection_count"] = len(kept)
-        data.metadata["artifact_count"] = n_artifacts

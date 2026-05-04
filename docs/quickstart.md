@@ -33,41 +33,7 @@ output for errors.
 
 ---
 
-## 2. Your first count (2 minutes, no input image needed)
-
-Blenny ships a synthetic plate generator so you can verify the pipeline
-runs before you supply your own data:
-
-```bash
-python examples/01_count_colonies.py
-```
-
-You should see something like:
-
-```
-Generated synthetic plate with 30 colonies → examples/output/synthetic_plate.png
-Pipeline([load_image, detect_plate, correct_illumination, threshold_segment, ...])
-
-Detected colonies: 30
-Ground-truth count: 30
-Mean area (px):     156.4
-
-No quality flags raised.
-
-Provenance:
-  load_image                 7.2 ms  {'as_gray': False, ...}
-  detect_plate             464.9 ms  {'crop': True, ...}
-  correct_illumination     947.7 ms  ...
-  ...
-```
-
-If the detected count matches the ground-truth count, your install is
-healthy. If not, something is wrong in your environment — open an issue
-with the printed error and your `pip list` output.
-
----
-
-## 3. Run on your own plate photo (3 minutes)
+## 2. Run on your own plate photo
 
 ### a. Scaffold a starter pipeline
 
@@ -99,71 +65,84 @@ Done: 1/1 succeeded in 12.4s
 
 ```
 results/
-├── config.yaml          ← the exact pipeline that ran (with all defaults filled in)
-├── summary.csv          ← one row per image: count, status, time
-└── plate/               ← per-image outputs, one folder per input
-    ├── annotated.png    ← original image with detected colonies outlined and numbered
-    ├── colonies.csv     ← one row per colony: area, centroid, intensity, ...
-    └── provenance.json  ← every pipeline step that ran, with timings and params
+├── reproducible_config.yaml   ← the exact pipeline that ran (all defaults filled in)
+└── plate/                     ← per-image outputs, one folder per input stem
+    ├── annotated.png          ← original image with detected colonies outlined and numbered
+    ├── colonies.csv           ← one row per colony: ID, coordinates, area, RGB/HSV
+    └── log.txt                ← human-readable report with counts, flags, and per-colony table
 ```
 
-**Open `results/plate/annotated.png` first.** The numbered red outlines
-should land on real colonies. If most of them are right, you're done.
-If most are wrong, the next section explains how to fix it.
+**Open `results/plate/annotated.png` first.** Red outlines are counted colonies.
+Magenta outlines are detections that were rejected as artifacts (rim fragments, etc.).
+Numbers match the IDs in `colonies.csv`.
+
+If most outlines land on real colonies, you're done. If most are wrong, the
+tuning section below explains how to fix it.
+
+### d. Optional outputs
+
+```bash
+# Save a full audit trail (params, timings, quality flags) per image
+blenny run pipeline.yaml -i plate.jpg -o results/ --provenance
+
+# Force batch summary files even for a single image
+blenny run pipeline.yaml -i plate.jpg -o results/ --summary
+
+# Save intermediate images from every pipeline step for debugging
+blenny run pipeline.yaml -i plate.jpg -o results/ --debug-dir debug/
+```
 
 ---
 
-## 4. Understanding the outputs
-
-### `summary.csv`
-
-A one-row-per-image roll-up of the batch. Useful for sanity checks across
-many plates at a glance:
-
-```csv
-input,stem,status,colony_count,n_quality_flags,duration_s
-plates/A.jpg,A,ok,147,0,12.4
-plates/B.jpg,B,ok,89,1,11.9
-plates/bad.jpg,bad,failed,,,0.3
-```
+## 3. Understanding the outputs
 
 ### `<image>/colonies.csv`
 
-One row per detected colony with measurements:
+One row per detected colony:
 
 | column | meaning |
 |---|---|
-| `label` | unique integer id, matches the number drawn on the annotated image |
+| `label` | unique integer ID, matches the number drawn on the annotated image |
+| `centroid_x`, `centroid_y` | pixel coordinates of the colony centre |
 | `area_px` | colony area in pixels |
-| `centroid_x`, `centroid_y` | pixel coordinates of the centroid |
-| `equivalent_diameter_px` | diameter of a circle with the same area |
-| `eccentricity` | 0 = perfect circle, → 1 = elongated |
-| `mean_intensity` | average pixel intensity inside the colony (0–1 float) |
-| `bbox_y0`, `bbox_x0`, `bbox_y1`, `bbox_x1` | bounding box |
-| `touches_edge` | true if the colony touches the image edge (likely partially clipped) |
-| `source` | the input file the row came from |
+| `mean_r`, `mean_g`, `mean_b` | mean RGB values (0–255) |
+| `mean_h`, `mean_s`, `mean_v` | mean HSV values (0–1 float) |
+| `is_artifact` | `True` if the colony was rejected as a rim/noise artifact |
 
-### `<image>/provenance.json`
+### `<image>/log.txt`
 
-The full audit trail for the run on this image:
+A human-readable report containing:
+- Count statistics (total colonies, artifacts found, size distribution)
+- Quality flags with their severity and explanations
+- A full per-colony table (ID, X, Y, Area, RGB, HSV, Type)
+- The pipeline provenance (which steps ran, in order)
 
-- every step's name, params, and timing
-- image metadata (dimensions, original size if it was resized, plate geometry)
-- every quality flag that was raised, with severity and the step that raised it
+### `summary.csv` (batch runs only)
 
-Useful for: filing a bug report, reproducing a result a year later, or
-explaining your methods in a paper.
+One row per image:
 
-### `config.yaml` (in the output directory root)
+```csv
+input,stem,status,colony_count,n_quality_flags,flag_codes,duration_s
+plates/A.jpg,A,ok,147,0,,12.4
+plates/B.jpg,B,ok,89,1,low_plate_confidence,11.9
+```
 
-A snapshot of the pipeline that ran, with every default filled in and
-placeholders resolved. **This is the resolved-for-the-first-image copy
-for transparency**; to re-run the same batch, use your original
-`pipeline.yaml`.
+### `reproducible_config.yaml`
+
+A snapshot of the pipeline that ran with every default filled in. Useful
+for sharing your exact analysis settings with a collaborator or reviewer.
+
+### `provenance.json` (opt-in, `--provenance`)
+
+The full audit trail for a single image:
+- every step's name, params, and wall-clock timing
+- image metadata (dimensions, plate geometry)
+- every quality flag that was raised, with the step that raised it
+- full per-colony measurements
 
 ---
 
-## 5. Batch mode (1 minute)
+## 4. Batch mode
 
 Quote the glob pattern so the shell doesn't expand it before Blenny sees it:
 
@@ -171,28 +150,18 @@ Quote the glob pattern so the shell doesn't expand it before Blenny sees it:
 blenny run pipeline.yaml --input "plates/*.jpg" --output results/
 ```
 
-Each input gets its own `results/<image-stem>/` directory. The
-`{stem}`, `{output_dir}`, `{input}`, and `{name}` placeholders inside
-`pipeline.yaml` are substituted per image:
-
-```yaml
-- name: export_csv
-  params:
-    output_path: "{output_dir}/{stem}/colonies.csv"
-```
+Each input gets its own `results/<stem>/` directory. A `summary.csv` and
+`batch_log.txt` are automatically written to the output root.
 
 If one image fails (corrupt file, weird format, etc.), the rest keep
-running — `summary.csv` records which ones succeeded and which failed,
-and the `blenny run` command exits with a nonzero status if there were
-any failures. Pass `--fail-fast` to stop on the first error instead.
+running. Pass `--fail-fast` to stop on the first error instead.
 
 ---
 
-## 6. Tuning the pipeline
+## 5. Tuning the pipeline
 
 Real lab images vary a lot, and the defaults are tuned for "reasonable
-phone photo of a plate" — they won't be perfect for everything. The
-`pipeline.yaml` file is yours to edit.
+phone photo of a plate." The `pipeline.yaml` file is yours to edit.
 
 ### See every parameter of every module
 
@@ -201,10 +170,9 @@ blenny modules
 ```
 
 This prints every registered module with a one-line description and the
-full list of parameters with their defaults. Use it as the canonical
-reference instead of memorizing.
+full list of parameters with their defaults.
 
-For machine consumption (e.g. building a config UI):
+For machine consumption:
 
 ```bash
 blenny modules --json
@@ -212,7 +180,7 @@ blenny modules --json
 
 ### Common adjustments
 
-**Annotated image shows a ring of false "colonies" along the plate rim.**
+**A ring of false "colonies" appears along the plate rim.**
 The plate's bright reflective rim is being detected. Increase the rim
 exclusion margin:
 
@@ -222,24 +190,28 @@ exclusion margin:
     margin_frac: 0.12     # default 0.08; try 0.10–0.15 for wide reflective rims
 ```
 
-**Colonies near the edge of the plate are missed (blue ring sits inside
-the agar instead of on the rim).** This usually means the photo was
-taken at a slight angle, making the plate elliptical, and the circle
-fitter chose a circle smaller than the actual plate. Expand the
-detected radius:
+**Colonies near the edge of the plate are missed.**
+The photo was taken at a slight angle so the plate looks elliptical, and
+the circle fitter chose a circle smaller than the actual plate:
 
 ```yaml
 - name: detect_plate
   params:
-    radius_expand_frac: 0.10   # default 0.05; raise to 0.10–0.15 for tilted shots
+    radius_expand_frac: 0.10   # default 0.05; raise for tilted shots
 ```
 
-If you have access to flatbed scans or perfectly top-down photos, set
-`radius_expand_frac: 0.0` to disable expansion entirely.
+**Real edge colonies are being wrongly rejected as artifacts.**
+The `classify_by_interior` module compares edge-zone detections against
+interior colonies. Widen the "safe" interior zone:
 
-**Lots of false detections from pen marks or scratches.** The shape
-filters in the segmenter drop very-elongated and irregular blobs.
-Tighten them:
+```yaml
+- name: classify_by_interior
+  params:
+    interior_radius_frac: 0.90   # default 0.85; higher = more permissive at edge
+    iqr_multiplier: 3.0          # default 2.0; higher = wider acceptable size range
+```
+
+**Lots of false detections from pen marks or scratches.**
 
 ```yaml
 - name: threshold_segment
@@ -248,31 +220,25 @@ Tighten them:
     min_solidity: 0.9      # default 0.85; closer to 1 demands more compact shapes
 ```
 
-If you instead have *real* elongated colonies (filaments, yeast tetrads,
-etc.) and want to keep them, set these to `0` to disable the filters.
-
-**Touching colonies are being merged into one.** The watershed step
-splits them, but its sensitivity depends on colony size. Try lowering
-`peak_min_distance`:
+**Touching colonies are merged into one.**
 
 ```yaml
 - name: threshold_segment
   params:
-    peak_min_distance: 3   # default 5; smaller = more aggressive splitting
+    peak_min_distance: 3   # default is scale-aware; smaller = more aggressive splitting
 ```
 
-**Phone photos are very slow.** By default, images larger than 2000 px
-on the long side are downscaled before analysis (a one-time `info`
-quality flag records this). To analyze at native resolution:
+**Phone photos are slow to process.**
+Images are loaded at native resolution by default. If speed is a concern,
+you can downscale large phone photos:
 
 ```yaml
 - name: load_image
   params:
-    max_dimension: null    # disable resize (slower, higher precision)
+    max_dimension: 2000    # downscale longest side to 2000 px (faster, less precise)
 ```
 
-**Many small false positives, especially in noisy backgrounds.** Raise
-the minimum colony area:
+**Many small false positives.**
 
 ```yaml
 - name: threshold_segment
@@ -280,42 +246,59 @@ the minimum colony area:
     min_area: 25           # default 10 pixels
 ```
 
-**Counts are way off and you want to see what each step is doing.**
-Open `results/<image>/provenance.json` — the `quality_flags` and
-per-step timings will usually point you at the culprit. If the plate
-detection step shows a `plate_radius` that doesn't match the real plate,
-plate detection is failing and downstream steps inherit the problem.
+### One-off overrides from the command line
+
+You can override any parameter without editing the YAML:
+
+```bash
+blenny run pipeline.yaml -i plate.jpg -o results/ \
+  -v detect_plate.margin_frac=0.12 \
+  -v classify_by_interior.interior_radius_frac=0.90
+```
 
 ---
 
-## 7. Quality flags: when to trust the count
+## 6. Quality flags
 
-Blenny raises *quality flags* on results that look unreliable. Always
-glance at them before quoting a number in a paper.
+Blenny raises quality flags on results that look unreliable. Always
+glance at them before quoting a count in a paper. They appear in
+`log.txt` and (as `flag_codes`) in `summary.csv`.
 
-Each flag has:
-- `code` — short machine-readable id (e.g. `low_contrast`, `many_edge_touches`)
-- `message` — human-readable explanation
-- `severity` — `info`, `warning`, or `error`
-- `step` — which pipeline step raised it
+| code | severity | meaning | what to do |
+|---|---|---|---|
+| `plate_not_found` | warning | Hough circles didn't find a plate | try clearer photos, or set `crop: false` |
+| `low_plate_confidence` | warning | Best circle fit scored below threshold | inspect `annotated.png`; may still be correct |
+| `many_low_circularity_rejected` | warning | Many non-circular objects removed | may indicate rim contamination or image noise |
+| `many_edge_touches` | warning | >10% of colonies touch the image edge | ensure the plate sits clearly inside the frame |
+| `no_objects` | warning | Segmenter found nothing | check illumination correction is producing visible signal |
+| `suspect_high_count` | warning | Count > 600 or coverage > 50% of plate | likely many false positives; tighten shape filters |
+| `plate_likely_empty` | warning | Detection set looks like noise | plate may be blank; strict shape filter was applied |
+| `multiplicity_estimated` | info | Some detections tagged as merged colonies | check `xN` labels on annotated image |
+| `artifacts_removed` | info | Edge detections rejected by interior classifier | inspect magenta outlines in `annotated.png` |
 
-Common flags from the built-in modules:
+---
 
-| code | meaning | what to do |
-|---|---|---|
-| `image_resized` (info) | the loader downscaled a large image | usually fine; disable with `max_dimension: null` if you need exact pixel scale |
-| `plate_not_found` (warning) | Hough circles didn't find a plate | try clearer/higher-contrast photos, or set `crop: false` and run on the whole frame |
-| `many_edge_touches` (warning) | >10% of detected colonies touch the image edge | crop the input image so the plate sits clearly inside the frame |
-| `no_objects` (warning) | the segmenter found nothing | usually a very dim or empty plate; check `correct_illumination` is producing visible signal |
+## 7. Interactive GUI
 
-The `summary.csv` includes a `n_quality_flags` column so you can spot
-suspicious rows quickly across a big batch.
+```bash
+blenny gui
+```
+
+The GUI provides point-and-click access to everything above. After a run:
+
+1. The **annotated image** appears immediately (red = colony, magenta = artifact).
+2. The **Interactive Review** table lets you check or uncheck "Artifact?" on any row.
+3. The image and colony count update **instantly** — no rerunning required.
+4. Click **"Save Reviewed Results"** to write the final `colonies.csv` and `log.txt`.
+
+Sidebar sliders correspond to the most commonly tuned parameters:
+**Plate Rim Margin**, **Min Colony Area**, **Min Circularity**, and
+**Interior Radius Frac**. Sliders respect values loaded from a
+`reproducible_config.yaml` so you can restore a previous run's settings.
 
 ---
 
 ## 8. Doing the same thing from Python
-
-If you want to drop into a notebook or a script:
 
 ```python
 from blenny import Pipeline
@@ -332,34 +315,33 @@ for row in result.measurements[:5]:
     print(row)
 ```
 
-Or build a pipeline directly without YAML:
+Or build a pipeline without YAML:
 
 ```python
 from blenny import Pipeline
 
 pipe = Pipeline.from_config([
     {"name": "load_image"},
-    {"name": "detect_plate", "params": {"margin_frac": 0.07}},
-    {"name": "correct_illumination", "params": {"radius": 25}},
+    {"name": "detect_plate", "params": {"margin_frac": 0.08}},
+    {"name": "correct_illumination"},
     {"name": "threshold_segment", "params": {"roi_mask_key": "plate"}},
     {"name": "measure_colonies"},
+    {"name": "classify_by_interior"},
 ])
 result = pipe.run("plate.jpg")
 ```
 
-The result is an `ImageData` object — see the [`pipeline/context.py`
-docstrings](../src/blenny/pipeline/context.py) for the full field list
-(`image`, `masks`, `measurements`, `metadata`, `provenance`, etc.).
+The result is an `ImageData` object — see
+[`pipeline/context.py`](../src/blenny/pipeline/context.py) for the full
+field list (`image`, `masks`, `measurements`, `metadata`, `provenance`, etc.).
 
 ---
 
 ## What to read next
 
-- **[`design.md`](../design.md)** — the project's vision, scope, and
-  guiding principles.
-- **[`README.md`](../README.md)** — install + project status at a glance.
-- **`blenny modules` output** — the canonical reference for what every
-  built-in module does and what its parameters mean.
+- **[`design.md`](../design.md)** — the project's vision, scope, and guiding principles.
+- **[`README.md`](../README.md)** — install and project status at a glance.
+- **`blenny modules`** — the canonical reference for every built-in module and its parameters.
 
-If you hit something that surprises you, please open an issue — the
-project is in pre-alpha and your feedback is the best signal we have.
+If you hit something that surprises you, please open an issue — the project is
+in pre-alpha and your feedback is the best signal we have.

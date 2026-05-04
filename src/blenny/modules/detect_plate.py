@@ -83,6 +83,13 @@ class PlateDetector(Preprocessor):
         force_mask_path: str | None = None
         """Path to a binary mask file to use as the plate ROI (bypasses detection)."""
 
+        min_confidence_score: float = 0.25
+        """Minimum Hough accumulator score to avoid a ``low_plate_confidence`` flag.
+
+        1.0 means every pixel on the circle circumference was an edge. Real
+        plates in variable lighting typically score 0.25-0.50.
+        """
+
     def process(self, image: Any, data: ImageData) -> Any:
         gray = color.rgb2gray(image) if image.ndim == 3 else image.astype(float) / 255.0
         h, w = gray.shape
@@ -145,7 +152,7 @@ class PlateDetector(Preprocessor):
             cy, cx, r_hough = int(cys[0]), int(cxs[0]), int(rs[0])
             score = float(accums[0])
 
-            if score < 0.35:
+            if score < self.params.min_confidence_score:
                 data.add_flag(
                     "low_plate_confidence",
                     f"Plate detection confidence is low (score={score:.2f}). "

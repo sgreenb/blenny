@@ -33,9 +33,8 @@ class CSVExporter(Exporter):
         # Define a nice column order for researchers. 
         # Any remaining columns found in the data will follow these.
         preferred_order = [
-            "label", "centroid_x", "centroid_y", "area_px", "eccentricity", 
-            "mean_r", "mean_g", "mean_b", "mean_h", "mean_s", "mean_v", 
-            "is_artifact", "artifact_reason", "source"
+            "label", "centroid_x", "centroid_y", "area_px", "mean_r", "mean_g", "mean_b",
+            "mean_h", "mean_s", "mean_v", "is_artifact", "source"
         ]
         
         fieldnames: list[str] = []
@@ -44,11 +43,8 @@ class CSVExporter(Exporter):
             if any(p in r for r in rows):
                 fieldnames.append(p)
         
-        # 2. Add any other columns found in the data
-        for row in rows:
-            for k in row:
-                if k not in fieldnames:
-                    fieldnames.append(k)
+        # 2. In default export, we only keep the minimal set requested by the user.
+        # We don't add "any other columns" here.
 
         with path.open("w", newline="", encoding="utf-8") as fh:
             if self.params.include_provenance:  # type: ignore[attr-defined]

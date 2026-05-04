@@ -11,10 +11,11 @@
 
 steps:
   - name: load_image
-    # Resize huge phone photos for tractable processing time. Set
-    # max_dimension: null to load at native resolution (slower but exact).
+    # Images are loaded at native resolution by default.
+    # Set max_dimension to an integer (e.g. 2000) to downscale large phone
+    # photos and speed up processing at the cost of some precision.
     params:
-      max_dimension: 2000
+      max_dimension: null
 
   - name: detect_plate
     params:
@@ -52,6 +53,13 @@ steps:
       min_circularity: 0.7
       min_solidity: 0.85
 
+  - name: add_manual_colonies
+    # Used for manual researcher-in-the-loop interventions in the GUI.
+    # Must run BEFORE measure_colonies so that manually added regions are
+    # included in the segmentation mask before measurements are taken.
+    params:
+      coordinates: []
+
   - name: measure_colonies
 
   - name: estimate_multiplicity
@@ -74,15 +82,9 @@ steps:
     params:
       exclude_ids: []
 
-  - name: add_manual_colonies
-    # Used for manual researcher-in-the-loop interventions in the GUI.
-    params:
-      coordinates: []
-
   - name: export_csv
     params:
       output_path: "{output_dir}/{stem}/colonies.csv"
-      include_provenance: true
 
   - name: export_summary
     params:

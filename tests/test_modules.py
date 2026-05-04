@@ -52,10 +52,19 @@ def test_image_file_loader_missing_file_raises(tmp_path: Path) -> None:
         ImageFileLoader().run(ImageData(source=str(tmp_path / "nope.png")))
 
 
-def test_image_file_loader_downscales_large_images_by_default(tmp_path: Path) -> None:
+def test_image_file_loader_loads_at_native_resolution_by_default(tmp_path: Path) -> None:
     _, p = _save_synthetic(tmp_path, n_colonies=5, image_size=(3000, 2000), seed=0)
     data = ImageFileLoader().run(ImageData(source=str(p)))
-    # Default max_dimension=2000 means longest side becomes 2000.
+    # Default max_dimension=None means native resolution is kept.
+    assert data.image.shape[:2] == (3000, 2000)
+    assert "resized" not in data.metadata
+    assert all(f.code != "image_resized" for f in data.quality_flags)
+
+
+def test_image_file_loader_downscales_when_max_dimension_set(tmp_path: Path) -> None:
+    _, p = _save_synthetic(tmp_path, n_colonies=5, image_size=(3000, 2000), seed=0)
+    data = ImageFileLoader(max_dimension=2000).run(ImageData(source=str(p)))
+    # max_dimension=2000 means longest side becomes 2000.
     assert max(data.image.shape[:2]) == 2000
     assert data.metadata["resized"] is True
     assert data.metadata["original_size_wh"] == (2000, 3000)  # PIL is (W, H)
@@ -268,7 +277,12 @@ def test_csv_exporter_writes_rows(tmp_path: Path) -> None:
     CSVExporter(output_path=str(out_path)).run(data)
     text = out_path.read_text()
     lines = text.strip().splitlines()
-    assert lines[0] == "label,area_px,source"
+    # is_artifact is injected by the exporter; source should be present too.
+    header_cols = lines[0].split(",")
+    assert "label" in header_cols
+    assert "area_px" in header_cols
+    assert "is_artifact" in header_cols
+    assert "source" in header_cols
     assert "50" in lines[1]
     assert "70" in lines[2]
 

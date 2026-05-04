@@ -37,14 +37,9 @@ class IDFilter(Classifier):
                 n_filtered += 1
 
         if n_filtered:
-            # Re-calculate metadata counts using the standard helper
-            # (assuming this is run before summary/annotated exporters)
             from blenny.modules.classify_interior import InteriorColonyClassifier
-            InteriorColonyClassifier._update_count(rows, data)
-            
-            # Re-assign IDs: colonies first (1..N), then artifacts (N+1..M)
-            # using the helper from InteriorColonyClassifier to maintain logic consistency.
-            InteriorColonyClassifier(min_interior_samples=0)._reassign_ids(rows, data)
+            InteriorColonyClassifier.update_count(rows, data)
+            InteriorColonyClassifier.reassign_ids(rows, data)
 
             data.add_flag(
                 "manual_exclusions",

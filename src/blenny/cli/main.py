@@ -34,8 +34,12 @@ app = typer.Typer(
     "Documentation: https://github.com/your-org/blenny\n\n"
     "CORE WORKFLOW:\n"
     "  1. Initialize a pipeline:  blenny init\n"
-    "  2. Run the analysis:       blenny run pipeline.yaml --input 'plates/*.jpg' --output results/\n"
-    "  3. Inspect modules:        blenny modules",
+    "  2. Run the analysis:       blenny run pipeline.yaml --input plate.jpg --output results/\n"
+    "  3. Inspect modules:        blenny modules\n"
+    "  4. Launch the GUI:         blenny gui\n\n"
+    "Single-image outputs: annotated.png, colonies.csv, log.txt\n"
+    "Batch outputs add:    summary.csv, batch_log.txt\n"
+    "Optional:             --provenance (provenance.json)  --debug-dir (step images)",
     no_args_is_help=True,
     add_completion=False,
     rich_markup_mode="rich",
@@ -67,7 +71,12 @@ def _root(
 # --- run ---------------------------------------------------------------------
 
 
-@app.command(help="Run a YAML pipeline on one image or a batch.")
+@app.command(
+    help="Run a YAML pipeline on one image or a batch.\n\n"
+    "Outputs per image: annotated.png, colonies.csv, log.txt\n"
+    "Batch outputs (auto or --summary): summary.csv, batch_log.txt\n"
+    "Optional: --provenance for provenance.json, --debug-dir for step images"
+)
 def run(
     pipeline_path: Annotated[
         Path,
@@ -99,6 +108,20 @@ def run(
         typer.Option(
             "--debug-dir",
             help="If set, write intermediate artifacts to per-image subdirs here.",
+        ),
+    ] = None,
+    write_provenance: Annotated[
+        bool,
+        typer.Option(
+            "--provenance/--no-provenance",
+            help="Save per-image provenance.json for reproducibility.",
+        ),
+    ] = False,
+    write_summary: Annotated[
+        bool | None,
+        typer.Option(
+            "--summary/--no-summary",
+            help="Save batch summary.csv and batch_log.txt. Defaults to True if multiple images are processed.",
         ),
     ] = None,
     fail_fast: Annotated[
@@ -210,7 +233,8 @@ def run(
             continue
 
         elapsed = time.perf_counter() - t0
-        _write_provenance(per_image_dir / "provenance.json", data, img)
+        if write_provenance:
+            _write_provenance(per_image_dir / "provenance.json", data, img)
         summary_rows.append(
             {
                 "input": str(img),
@@ -251,8 +275,12 @@ def run(
                 "_run_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
             },
         )
-    _write_summary_csv(output_dir / "summary.csv", summary_rows)
-    _write_batch_log_txt(output_dir / "batch_log.txt", summary_rows, time.perf_counter() - t_batch)
+
+    # Only write batch summary files if requested OR if there are multiple images
+    # and the user hasn't explicitly disabled them.
+    if write_summary is True or (write_summary is None and len(inputs) > 1):
+        _write_summary_csv(output_dir / "summary.csv", summary_rows)
+        _write_batch_log_txt(output_dir / "batch_log.txt", summary_rows, time.perf_counter() - t_batch)
 
     total = time.perf_counter() - t_batch
     succ = len(inputs) - failures
@@ -450,6 +478,7 @@ def _write_provenance(path: Path, data: Any, source: Path) -> None:
     payload = {
         "source": str(source),
         "metadata": _to_jsonable(dict(data.metadata)),
+        "measurements": _to_jsonable(data.measurements),
         "colony_count": data.metadata.get("colony_count"),
         "quality_flags": [dataclasses.asdict(f) for f in data.quality_flags],
         "provenance": [dataclasses.asdict(p) for p in data.provenance],

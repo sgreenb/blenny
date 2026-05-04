@@ -27,15 +27,14 @@ class ImageFileLoader(Loader):
         as_gray: bool = False
         """If True, convert to a single-channel grayscale image on load."""
 
-        max_dimension: int | None = 2000
+        max_dimension: int | None = None
         """If set, downscale so the longest side equals this many pixels (with
-        Lanczos antialiasing). Set to ``None`` to load at native resolution.
+        Lanczos antialiasing). ``None`` (the default) loads at native resolution.
 
-        Defaults to 2000 because morphological operations (e.g. the top-hat in
-        ``IlluminationCorrection``) scale roughly with image area, so a 12 MP
-        phone photo is ~6x slower than a 2 MP image with no real benefit for
-        colony-counting accuracy. Disable when you need precise pixel-level
-        measurements at native scale.
+        Set to a value such as 2000 to speed up processing of large phone photos.
+        Morphological operations scale roughly with image area, so a 12 MP phone
+        photo is ~6x slower than a 2 MP image. Only use this if processing time
+        is a concern and you don't need precise pixel-level measurements.
         """
 
     def load(self, source: str) -> Any:

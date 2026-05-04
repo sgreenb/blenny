@@ -2,9 +2,48 @@ import streamlit as st
 import subprocess
 import json
 import os
+import sys
+import time
 import numpy as np
 from pathlib import Path
 from PIL import Image, ImageOps
+
+from blenny.pipeline import Pipeline
+from blenny.modules.export_annotated import AnnotatedImageExporter
+from blenny.modules.export_summary import SummaryExporter
+from blenny.modules.classify_interior import InteriorColonyClassifier
+
+# --- Helpers ---
+
+def local_folder_picker(title="Select Folder"):
+    """
+    Open a native folder picker via a subprocess to avoid threading crashes.
+    Currently optimized for macOS.
+    """
+    if sys.platform == "darwin":
+        # macOS: Use AppleScript for a native, thread-safe picker
+        cmd = f'osascript -e \'POSIX path of (choose folder with prompt "{title}")\''
+        try:
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            if result.returncode == 0:
+                return result.stdout.strip()
+        except Exception:
+            pass
+    elif sys.platform == "win32":
+        # Windows: Use PowerShell for a native picker
+        cmd = (
+            'powershell -Command "Add-Type -AssemblyName System.Windows.Forms; '
+            '$f = New-Object System.Windows.Forms.FolderBrowserDialog; '
+            f'$f.Description = \\"{title}\\"; '
+            'if ($f.ShowDialog() -eq \\"OK\\") { $f.SelectedPath }"'
+        )
+        try:
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            if result.returncode == 0:
+                return result.stdout.strip()
+        except Exception:
+            pass
+    return None
 
 # Monkey-patch for streamlit-drawable-canvas compatibility with newer Streamlit versions
 import streamlit.elements.image as st_image
@@ -72,31 +111,38 @@ with st.sidebar:
     st.header("1. Data Input")
     input_files = st.file_uploader("Upload Plate Images", type=["jpg", "jpeg", "png", "tif"], accept_multiple_files=True)
     
-    # Folder picker with Browse button
+    # Input Folder Picker
     c_f1, c_f2 = st.columns([3, 1])
-    input_folder = c_f1.text_input("OR Folder Path", value=st.session_state.get("folder_path", ""), help="Path to a directory on your machine.")
-    
-    # Align button vertically with the text input. 
-    # Streamlit buttons have no label space by default, text_input does.
-    # 29-32px is usually the height of a standard label.
+    input_folder = c_f1.text_input(
+        "OR Folder Path", 
+        value=st.session_state.get("folder_path", ""), 
+        help="Path to a directory on your machine."
+    )
     c_f2.markdown("<div style='height: 29px;'></div>", unsafe_allow_html=True)
-    if c_f2.button("📁", help="Browse for folder", use_container_width=True):
-        try:
-            import tkinter as tk
-            from tkinter import filedialog
-            root = tk.Tk()
-            root.withdraw()
-            root.wm_attributes('-topmost', 1)
-            selected_folder = filedialog.askdirectory(master=root)
-            root.destroy()
-            if selected_folder:
-                st.session_state["folder_path"] = selected_folder
-                st.rerun()
-        except Exception as e:
-            st.error("Folder picker requires a local display.")
-            
-    input_folder = st.session_state.get("folder_path", "")
+    if c_f2.button("📁", key="browse_input", help="Browse for input folder", use_container_width=True):
+        selected = local_folder_picker("Select Input Folder")
+        if selected:
+            st.session_state["folder_path"] = selected
+            st.rerun()
     
+    # Output Folder Picker
+    c_o1, c_o2 = st.columns([3, 1])
+    output_folder_input = c_o1.text_input(
+        "Output Folder",
+        value=st.session_state.get("output_folder_path", ""),
+        help="Directory where results will be saved. Defaults to gui_results/<image_name>/ if left blank.",
+    )
+    c_o2.markdown("<div style='height: 29px;'></div>", unsafe_allow_html=True)
+    if c_o2.button("📁", key="browse_output", help="Browse for output folder", use_container_width=True):
+        selected = local_folder_picker("Select Output Folder")
+        if selected:
+            st.session_state["output_folder_path"] = selected
+            st.rerun()
+    
+    input_folder = st.session_state.get("folder_path", "")
+    output_folder_input = st.session_state.get("output_folder_path", "")
+
+
     st.divider()
 
     # 2. Pipeline Selection
@@ -105,6 +151,7 @@ with st.sidebar:
     
     # Defaults
     margin_default, min_area_default, min_circ_default = 0.08, 10, 0.7
+    interior_radius_default = 0.85
     
     if repro_file:
         try:
@@ -115,6 +162,7 @@ with st.sidebar:
             margin_default = float(steps.get('detect_plate', {}).get('margin_frac', 0.08))
             min_area_default = int(steps.get('threshold_segment', {}).get('min_area', 10))
             min_circ_default = float(steps.get('threshold_segment', {}).get('min_circularity', 0.7))
+            interior_radius_default = float(steps.get('classify_by_interior', {}).get('interior_radius_frac', 0.85))
         except Exception as e:
             st.error(f"Error loading config: {e}")
 
@@ -197,7 +245,7 @@ with st.sidebar:
 
     if st.button("Reset All Tuning Defaults"):
         # Reset main keys and their synced widget counterparts
-        for k, default in [("margin", 0.08), ("min_area", 10), ("min_circ", 0.7)]:
+        for k, default in [("margin", 0.08), ("min_area", 10), ("min_circ", 0.7), ("interior_radius", 0.85)]:
             st.session_state[k] = default
             st.session_state[f"num_{k}"] = default
             st.session_state[f"slide_{k}"] = default
@@ -220,6 +268,10 @@ with st.sidebar:
     min_circ = compact_control(
         "Min Circularity", "min_circ", 0.0, 1.0, min_circ_default, 0.05, 
         "Filter objects by roundness (1.0 is a perfect circle)."
+    )
+    interior_radius = compact_control(
+        "Interior Radius Frac", "interior_radius", 0.1, 1.0, interior_radius_default, 0.05,
+        "Fraction of the plate radius treated as the 'safe' interior zone for artifact rejection."
     )
     
     st.divider()
@@ -259,6 +311,8 @@ with st.sidebar:
     # 5. Masking
     st.header("5. Masking")
     enable_mask = st.checkbox("Enable Paint-to-Exclude", value=False)
+    enable_debug = st.checkbox("Save debug step images", value=False,
+                               help="Write intermediate images for every pipeline step to gui_debug/. Slower.")
     brush_size = st.slider("Brush Size", 1, 50, 20)
     
     # Initialize session state for manual interventions
@@ -405,168 +459,201 @@ else:
 
 if run_btn and input_source:
     output_dir = Path("gui_results")
-    debug_dir = Path("gui_debug")
+    debug_dir = Path("gui_debug") if enable_debug else None
     
+    # Clear previous result state when starting a new run
+    for _key in ("analysis_data", "analysis_stem", "analysis_pipeline",
+                 "analysis_output_dir", "results_editor"):
+        st.session_state.pop(_key, None)
+
     with st.status("Analyzing plates...", expanded=True) as status:
         st.write("Executing Blenny engine...")
         
-        # Determine input for CLI
+        # Determine input for Pipeline
         if input_source == "files":
-            cli_input = str(temp_dir if len(input_paths) > 1 else input_paths[0])
+            input_imgs = input_paths
         else:
-            cli_input = str(input_folder)
+            input_imgs = input_paths
 
-        cmd = [
-            "python3", cli_script, "run", 
-            pipeline_path, 
-            "--input", cli_input,
-            "--output", str(output_dir),
-            "--debug-dir", str(debug_dir),
-            "--json",
-            "--override", f"detect_plate.margin_frac={margin}",
-            "--override", f"threshold_segment.min_area={min_area}",
-            "--override", f"threshold_segment.min_circularity={min_circ}"
-        ]
-        
-        if plate_mode == "Manual Circle":
-            cmd.extend([
-                "--override", "detect_plate.crop=False",
-                "--override", f"detect_plate.radius_expand_frac=0",
-                "--override", f"detect_plate.margin_frac={margin}"
-            ])
-            # We'll need a way to pass these specific coordinates. 
-            # For now, we can use the identity preprocessor or similar, 
-            # but a better way is to allow detect_plate to take manual coords.
-            # I'll update detect_plate.py to support this.
-            cmd.extend([
-                "--override", f"detect_plate.force_cy={manual_cy}",
-                "--override", f"detect_plate.force_cx={manual_cx}",
-                "--override", f"detect_plate.force_r={manual_r}"
-            ])
-        
-        if plate_mode == "Manual Shape" and manual_shape_path:
-            cmd.extend([
-                "--override", "detect_plate.crop=False",
-                "--override", f"detect_plate.force_mask_path={manual_shape_path}"
-            ])
-
-        # Manual exclusions from the interactive table
-        if st.session_state.get("manual_exclude_ids"):
-            import json as py_json
-            cmd.extend([
-                "--override", f"filter_by_id.exclude_ids={py_json.dumps(st.session_state['manual_exclude_ids'])}"
-            ])
-
-        if enable_mask and 'mask_path' in locals() and mask_path:
-            cmd.extend(["--override", f"apply_exclusion_mask.mask_path={mask_path}"])
-        
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        
-        if result.returncode == 0:
-            try:
-                raw_out = result.stdout.strip()
-                start_bracket = raw_out.find('{')
-                if start_bracket == -1:
-                    raise ValueError("No JSON object found in output")
-                
-                json_payload = raw_out[start_bracket:]
-                json_data = json.loads(json_payload)
-                
-                status.update(label="Analysis Complete!", state="complete", expanded=False)
-                
-                if input_source == "files" and len(input_paths) == 1:
-                    with col2:
-                        st.subheader("Results")
-                        stem = input_paths[0].stem
-                        
-                        # Show annotated image
-                        annotated_path = output_dir / stem / "annotated.png"
-                        if annotated_path.exists():
-                            st.image(Image.open(annotated_path), caption="Annotated Colonies", use_container_width=True)
-                        
-                        # --- Phase 3: Consolidated Colony Data ---
-                        csv_path = output_dir / stem / "colonies.csv"
-                        if csv_path.exists():
-                            import pandas as pd
-                            # Load CSV, skipping the comment line if it exists
-                            df = pd.read_csv(csv_path, comment='#')
-                            
-                            st.subheader("Colony Data")
-                            
-                            # Clean up coordinates and decimals for readability
-                            for col in ['centroid_x', 'centroid_y']:
-                                if col in df.columns:
-                                    df[col] = df[col].round(1)
-                            
-                            # Select and reorder columns for display
-                            display_cols = [
-                                "label", "centroid_x", "centroid_y", "area_px", "eccentricity", 
-                                "mean_r", "mean_g", "mean_b", "mean_h", "mean_s", "mean_v",
-                                "is_artifact", "colony_count_estimate"
-                            ]
-                            actual_cols = [c for c in display_cols if c in df.columns]
-                            
-                            # Add a "Type" column for easier reading in the GUI
-                            if "is_artifact" in df.columns and "colony_count_estimate" in df.columns:
-                                def get_type(row):
-                                    if row["is_artifact"]: return "Artifact"
-                                    if row["colony_count_estimate"] >= 2: return f"Merged(x{int(row['colony_count_estimate'])})"
-                                    return "Colony"
-                                df["Type"] = df.apply(get_type, axis=1)
-                                if "Type" not in actual_cols:
-                                    actual_cols.insert(1, "Type")
-
-                            st.dataframe(df[actual_cols], hide_index=True, use_container_width=True)
-                            
-                            # Add download button for the full CSV
-                            st.download_button(
-                                label="📥 Download Colony Data (CSV)",
-                                data=df.to_csv(index=False),
-                                file_name=f"{stem}_colonies.csv",
-                                mime="text/csv",
-                            )
-
-                        # Show Processing Log in an expander
-                        log_path = output_dir / stem / "log.txt"
-                        if log_path.exists():
-                            with st.expander("📄 View Detailed Processing Log"):
-                                st.text_area("Log Content", value=log_path.read_text(), height=400, label_visibility="collapsed")
-                else:
-                    st.subheader("Batch Results")
-                    batch_log = output_dir / "batch_log.txt"
-                    if batch_log.exists():
-                        st.text_area("Batch Processing Log", value=batch_log.read_text(), height=400)
-                    
-                    if (output_dir / "summary.csv").exists():
-                        st.download_button(
-                            "Download Batch Summary (CSV)",
-                            data=(output_dir / "summary.csv").read_text(),
-                            file_name="batch_summary.csv",
-                            mime="text/csv"
-                        )
-                        
-                # Show Audit Trail (Debug Steps) - only for first image
-                with st.expander("View Step-by-Step Audit Trail (First Image)"):
-                    if input_paths:
-                        stem = input_paths[0].stem
-                        img_debug = debug_dir / stem
-                        if img_debug.exists():
-                            debug_files = sorted(img_debug.glob("*.jpg"))
-                            cols = st.columns(3)
-                            for i, df in enumerate(debug_files):
-                                cols[i % 3].image(Image.open(df), caption=df.stem, use_container_width=True)
-                            
-            except Exception as e:
-                st.error(f"Failed to parse engine output: {e}")
-                st.code(result.stdout)
+        # We'll use the Python API for single images to allow interactive review.
+        # For batch, we still use the CLI for now as it's more robust for large sets.
+        if len(input_imgs) == 1:
+            img_path = input_imgs[0]
+            
+            # 1. Build Pipeline manually so we can inject params
+            # We mimic the logic from CLI main.py
+            from blenny.config import extract_steps, load_yaml, substitute_paths
+            raw_config = load_yaml(pipeline_path)
+            raw_steps = extract_steps(raw_config)
+            
+            # Apply GUI overrides
+            overrides = {
+                "detect_plate": {"margin_frac": margin},
+                "threshold_segment": {"min_area": min_area, "min_circularity": min_circ},
+                "classify_by_interior": {"interior_radius_frac": interior_radius},
+            }
+            if plate_mode == "Manual Circle":
+                overrides["detect_plate"].update({
+                    "crop": False,
+                    "radius_expand_frac": 0.0,
+                    "force_cy": manual_cy,
+                    "force_cx": manual_cx,
+                    "force_r": manual_r
+                })
+            if plate_mode == "Manual Shape" and manual_shape_path:
+                overrides["detect_plate"].update({
+                    "crop": False,
+                    "force_mask_path": str(manual_shape_path)
+                })
+            if enable_mask and 'mask_path' in locals() and mask_path:
+                overrides["apply_exclusion_mask"] = {"mask_path": str(mask_path)}
+            
+            for step in raw_steps:
+                if step["name"] in overrides:
+                    step.setdefault("params", {}).update(overrides[step["name"]])
+            
+            resolved = substitute_paths(raw_steps, input_path=img_path, output_dir=output_dir)
+            pipe = Pipeline.from_config(resolved)
+            
+            # 2. Run
+            img_debug_dir = debug_dir / img_path.stem if debug_dir else None
+            data = pipe.run(img_path, debug_dir=img_debug_dir)
+            
+            # 3. Store in session state
+            st.session_state["analysis_data"] = data
+            st.session_state["analysis_stem"] = img_path.stem
+            st.session_state["analysis_output_dir"] = output_dir
+            st.session_state["analysis_pipeline"] = pipe
+            
+            status.update(label="Analysis Complete!", state="complete", expanded=False)
         else:
-            status.update(label="Analysis Failed", state="error")
-            st.error(result.stderr)
+            # BATCH MODE (existing CLI path)
+            cli_input = str(input_folder) if input_source == "folder" else str(temp_dir)
+            cmd = [
+                "python3", cli_script, "run", 
+                pipeline_path, 
+                "--input", cli_input,
+                "--output", str(output_dir),
+                "--json",
+                "--override", f"detect_plate.margin_frac={margin}",
+                "--override", f"threshold_segment.min_area={min_area}",
+                "--override", f"threshold_segment.min_circularity={min_circ}",
+                "--override", f"classify_by_interior.interior_radius_frac={interior_radius}",
+            ]
+            if plate_mode == "Manual Circle":
+                cmd.extend([
+                    "--override", f"detect_plate.force_cy={manual_cy}",
+                    "--override", f"detect_plate.force_cx={manual_cx}",
+                    "--override", f"detect_plate.force_r={manual_r}"
+                ])
+            
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode == 0:
+                st.session_state["batch_results"] = result.stdout
+                status.update(label="Batch Analysis Complete!", state="complete", expanded=False)
+            else:
+                st.error(result.stderr)
+
+# --- Render Results (Live or Batch) ---
+
+if "analysis_data" in st.session_state:
+    data = st.session_state["analysis_data"]
+    stem = st.session_state["analysis_stem"]
+    output_dir = st.session_state["analysis_output_dir"]
+    pipe = st.session_state["analysis_pipeline"]
     
-    # Cleanup (optional - in a real app we might want to keep session history)
-    # temp_input.unlink()
-else:
-    st.info("Please upload a plate image in the sidebar to begin.")
+    with col2:
+        st.subheader("Interactive Review")
+        
+        # 1. Get current measurements
+        import pandas as pd
+        df = pd.DataFrame(data.measurements)
+        
+        # Ensure ID order and counts are correct based on current status
+        # Note: We do NOT reassign IDs here during the review loop, as the user
+        # wants IDs to remain stable once the analysis has run.
+        InteriorColonyClassifier.update_count(data.measurements, data)
+        df = pd.DataFrame(data.measurements)
+
+        # 2. Setup rendering tools (reusing pipeline exporters)
+        # We find them in the pipeline or create defaults with dummy paths
+        annotator = next((s for s in pipe.steps if isinstance(s, AnnotatedImageExporter)), 
+                         AnnotatedImageExporter(output_path="dummy.png", outline_color=(255, 64, 64)))
+        summarizer = next((s for s in pipe.steps if isinstance(s, SummaryExporter)), 
+                          SummaryExporter(output_path="dummy.txt"))
+
+        # 3. Live render the image and summary
+        img = annotator.render(data)
+        st.image(img, caption=f"Reviewed Colonies: {data.metadata['colony_count']}", use_container_width=True)
+
+        # 4. Handle data editor changes
+        # We want to toggle 'is_artifact'
+        st.write("Check boxes below to mark objects as artifacts. Counts and images will update instantly.")
+        
+        # We define which columns to show and make 'is_artifact' editable
+        display_cols = ["label", "is_artifact", "centroid_x", "centroid_y", "area_px", "Type"]
+        if "Type" not in df.columns:
+            def get_type(row):
+                if row["is_artifact"]: return "Artifact"
+                if int(row["colony_count_estimate"]) >= 2: return f"Merged(x{int(row['colony_count_estimate'])})"
+                return "Colony"
+            df["Type"] = df.apply(get_type, axis=1)
+
+        edited_df = st.data_editor(
+            df[display_cols],
+            column_config={
+                "is_artifact": st.column_config.CheckboxColumn("Artifact?", default=False),
+                "label": st.column_config.TextColumn("ID", disabled=True),
+                "Type": st.column_config.TextColumn("Class", disabled=True),
+            },
+            disabled=["label", "centroid_x", "centroid_y", "area_px", "Type"],
+            hide_index=True,
+            use_container_width=True,
+            key="results_editor"
+        )
+        
+        # Apply changes from editor back to the ImageData
+        if st.session_state.get("results_editor"):
+            edits = st.session_state["results_editor"]["edited_rows"]
+            if edits:
+                changed = False
+                for idx, changes in edits.items():
+                    if "is_artifact" in changes:
+                        # Map index back to the measurements list
+                        data.measurements[idx]["is_artifact"] = changes["is_artifact"]
+                        changed = True
+                if changed:
+                    # Update counts but DO NOT reassign IDs during review
+                    InteriorColonyClassifier.update_count(data.measurements, data)
+                    st.rerun()
+
+        save_dir = Path(output_folder_input).resolve() if output_folder_input.strip() else output_dir / stem
+        if st.button("Save Results", type="primary", use_container_width=True):
+            save_dir.mkdir(parents=True, exist_ok=True)
+            # Re-point every exporter to the chosen directory, preserving filenames.
+            for step in pipe.steps:
+                if not hasattr(step, "export"):
+                    continue
+                orig_path = getattr(step.params, "output_path", None)
+                if orig_path is not None:
+                    filename = Path(orig_path).name
+                    step.params.output_path = str(save_dir / filename)
+                step.export(data)
+                if orig_path is not None:
+                    step.params.output_path = orig_path
+            st.success(f"Results saved to {save_dir}")
+
+        # Summary Log
+        with st.expander("📄 View Live Summary"):
+            st.text(summarizer.generate_text(data))
+
+elif "batch_results" in st.session_state:
+    st.subheader("Batch Results")
+    st.info("Interactive review is currently optimized for single-image analysis. See logs below.")
+    st.code(st.session_state["batch_results"])
+
+elif input_source:
+    st.info("Please run the analysis to see results.")
 
 # --- Footer ---
 st.divider()

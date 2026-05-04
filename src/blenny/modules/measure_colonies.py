@@ -101,6 +101,11 @@ class ColonyMeasurer(FeatureExtractor):
             
             row = {
                 "label": int(prop.label),
+                # Preserve the original segmentation label so downstream
+                # steps that reassign "label" (e.g. classify_by_interior)
+                # don't break exporters that need to look up pixels in the
+                # mask array.
+                "segment_label": int(prop.label),
                 "area_px": int(prop.area),
                 "centroid_y": float(prop.centroid[0]),
                 "centroid_x": float(prop.centroid[1]),

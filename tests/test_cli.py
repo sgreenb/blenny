@@ -107,14 +107,12 @@ def test_run_single_image_with_template(tmp_path: Path) -> None:
     # Per-image outputs landed where expected.
     assert (out_dir / "plate" / "colonies.csv").exists()
     assert (out_dir / "plate" / "annotated.png").exists()
-    assert (out_dir / "plate" / "provenance.json").exists()
-    # Resolved config + batch summary at the root.
-    assert (out_dir / "config.yaml").exists()
-    assert (out_dir / "summary.csv").exists()
-    # Provenance JSON has a step list and a colony count.
-    prov = json.loads((out_dir / "plate" / "provenance.json").read_text())
-    assert prov["colony_count"] is not None
-    assert any(p["step"] == "load_image" for p in prov["provenance"])
+    assert (out_dir / "plate" / "log.txt").exists()
+    # provenance.json is opt-in; should NOT be present by default.
+    assert not (out_dir / "plate" / "provenance.json").exists()
+    # Resolved config at the root; summary.csv only for batches.
+    assert (out_dir / "reproducible_config.yaml").exists()
+    assert not (out_dir / "summary.csv").exists()
 
 
 def test_run_batch_with_glob(tmp_path: Path) -> None:
@@ -145,9 +143,14 @@ def test_run_batch_with_glob(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.stdout
     for p in paths:
         assert (out_dir / p.stem / "colonies.csv").exists()
-        assert (out_dir / p.stem / "provenance.json").exists()
+        assert (out_dir / p.stem / "annotated.png").exists()
+        assert (out_dir / p.stem / "log.txt").exists()
+        # provenance.json is opt-in; should NOT be present by default.
+        assert not (out_dir / p.stem / "provenance.json").exists()
+    # summary.csv and batch_log.txt are auto-generated for batch runs.
     summary_csv = (out_dir / "summary.csv").read_text()
     assert summary_csv.count("\n") >= 4  # header + 3 data rows
+    assert (out_dir / "batch_log.txt").exists()
 
 
 def test_run_no_match_exits_with_error(tmp_path: Path) -> None:

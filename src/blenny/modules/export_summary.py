@@ -21,7 +21,11 @@ class SummaryExporter(Exporter):
     def export(self, data: ImageData) -> None:
         path = Path(self.params.output_path)
         path.parent.mkdir(parents=True, exist_ok=True)
+        text = self.generate_text(data)
+        path.write_text(text, encoding="utf-8")
 
+    def generate_text(self, data: ImageData) -> str:
+        """Generate the human-readable summary text."""
         m = data.metadata
         # We only want to summarize non-artifact colonies in the main stats,
         # but the table at the bottom will show everything.
@@ -101,4 +105,4 @@ class SummaryExporter(Exporter):
         provenance = " -> ".join(p.step for p in data.provenance)
         lines.append(provenance)
 
-        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return "\n".join(lines) + "\n"

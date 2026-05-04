@@ -25,16 +25,15 @@ class AnnotatedImageExporter(Exporter):
         mask_key: str = "objects"
         draw_numbers: bool = True
         outline_color: tuple[int, int, int] = (255, 64, 64)
+        """Default outline color for single colonies (red)."""
+
         artifact_outline_color: tuple[int, int, int] = (255, 0, 255)
-        """Outline color for detections marked ``is_artifact=True``.
-        Drawn without numbers so they're visually distinct from counted
-        colonies but remain auditable. Default is magenta.
-        """
-        merged_outline_color: tuple[int, int, int] = (200, 0, 255)
+        """Outline color for detections marked ``is_artifact=True`` (magenta)."""
+
+        merged_outline_color: tuple[int, int, int] = (255, 64, 64)
         """Outline color for detections tagged by ``estimate_multiplicity``
-        as merged colonies (``colony_count_estimate >= 2``). Their text
-        label is suffixed with ``xN`` so it's clear they contribute more
-        than one to the total count. Default is a deep purple/magenta.
+        as merged colonies (``colony_count_estimate >= 2``). Default matches
+        the singleton color (red) because they are valid colonies.
         """
         text_color: tuple[int, int, int] = (255, 255, 0)
         draw_plate_boundary: bool = True
@@ -56,13 +55,23 @@ class AnnotatedImageExporter(Exporter):
         """
 
     def export(self, data: ImageData) -> None:
+        im = self.render(data)
+        if im is None:
+            return
+
+        path = Path(self.params.output_path)  # type: ignore[attr-defined]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        im.save(path)
+
+    def render(self, data: ImageData) -> Image.Image | None:
+        """Generate the annotated PIL image without writing to disk."""
         if self.params.mask_key not in data.masks:  # type: ignore[attr-defined]
             data.add_flag(
                 "annotated_export_no_mask",
                 f"AnnotatedImageExporter: mask {self.params.mask_key!r} not found.",  # type: ignore[attr-defined]
                 severity="warning",
             )
-            return
+            return None
 
         labels = data.masks[self.params.mask_key]  # type: ignore[attr-defined]
         base = self._pick_base_image(data, labels.shape)
@@ -72,70 +81,70 @@ class AnnotatedImageExporter(Exporter):
                 "AnnotatedImageExporter: no image of matching shape to annotate.",
                 severity="warning",
             )
-            return
+            return None
 
-        # Split label IDs into three groups for separate colouring:
-        # artifacts (orange), merged colonies (magenta), and singletons (red).
-        artifact_ids = {
-            int(r["label"]) for r in data.measurements if r.get("is_artifact") and "label" in r
-        }
-        merged_ids = {
-            int(r["label"])
-            for r in data.measurements
-            if not r.get("is_artifact")
-            and int(r.get("colony_count_estimate", 1)) >= 2
-            and "label" in r
-        }
+        # Split SEGMENT label IDs into groups for separate colouring.
+        # We must use ``segment_label`` (the original integer in the mask
+        # array) rather than ``label``, because upstream steps re-number
+        # ``label`` for human-readable output but never rewrite the mask.
+        def _seg_id(r: dict) -> int | None:
+            sid = r.get("segment_label")
+            if sid is None:
+                sid = r.get("label")  # fallback for rows that predate segment_label
+            return int(sid) if isinstance(sid, (int, float)) else None
+
+        artifact_ids: set[int] = set()
+        merged_ids: set[int] = set()
+        for r in data.measurements:
+            sid = _seg_id(r)
+            if sid is None:
+                continue
+            if r.get("is_artifact"):
+                artifact_ids.add(sid)
+            elif int(r.get("colony_count_estimate", 1)) >= 2:
+                merged_ids.add(sid)
 
         # Convert to uint8 RGB for drawing.
         rgb = self._to_rgb_uint8(base)
 
-        if artifact_ids or merged_ids:
-            artifact_mask = (
-                np.isin(labels, list(artifact_ids))
-                if artifact_ids
-                else np.zeros_like(labels, dtype=bool)
-            )
-            merged_mask = (
-                np.isin(labels, list(merged_ids))
-                if merged_ids
-                else np.zeros_like(labels, dtype=bool)
-            )
-            
-            # Multi-class support: handle colonies with custom class colors
-            class_colored_rows = [
-                r for r in data.measurements 
-                if not r.get("is_artifact") 
-                and "class_color" in r 
-                and "label" in r
-            ]
-            
-            normal_mask = (labels > 0) & ~artifact_mask & ~merged_mask
-            
-            # Remove custom colored ones from the normal mask
-            for r in class_colored_rows:
-                normal_mask &= (labels != int(r["label"]))
+        # Build masks for each group
+        artifact_mask = np.zeros(labels.shape, dtype=bool)
+        if artifact_ids:
+            artifact_mask = np.isin(labels, list(artifact_ids))
 
-            normal_labels = np.where(normal_mask, labels, 0)
-            artifact_labels_arr = np.where(artifact_mask, labels, 0)
-            merged_labels_arr = np.where(merged_mask, labels, 0)
-            
-            normal_bounds = segmentation.find_boundaries(normal_labels, mode="outer")
-            artifact_bounds = segmentation.find_boundaries(artifact_labels_arr, mode="outer")
-            merged_bounds = segmentation.find_boundaries(merged_labels_arr, mode="outer")
-            
-            rgb[normal_bounds] = np.array(self.params.outline_color, dtype=np.uint8)  # type: ignore[attr-defined]
-            rgb[artifact_bounds] = np.array(self.params.artifact_outline_color, dtype=np.uint8)  # type: ignore[attr-defined]
-            rgb[merged_bounds] = np.array(self.params.merged_outline_color, dtype=np.uint8)  # type: ignore[attr-defined]
-            
-            # Draw each class-colored colony
-            for r in class_colored_rows:
-                m = (labels == int(r["label"]))
-                b = segmentation.find_boundaries(m, mode="outer")
-                rgb[b] = np.array(r["class_color"], dtype=np.uint8)
-        else:
-            boundaries = segmentation.find_boundaries(labels, mode="outer")
-            rgb[boundaries] = np.array(self.params.outline_color, dtype=np.uint8)  # type: ignore[attr-defined]
+        merged_mask = np.zeros(labels.shape, dtype=bool)
+        if merged_ids:
+            merged_mask = np.isin(labels, list(merged_ids))
+
+        # Multi-class support: handle colonies with custom class colors
+        class_colored_rows = [
+            r for r in data.measurements
+            if not r.get("is_artifact") and "class_color" in r and _seg_id(r) is not None
+        ]
+
+        normal_mask = (labels > 0) & ~artifact_mask & ~merged_mask
+
+        # Remove custom-colored ones from the normal/merged masks
+        for r in class_colored_rows:
+            sid = _seg_id(r)
+            normal_mask &= (labels != sid)
+            merged_mask &= (labels != sid)
+
+        # Compute boundaries
+        normal_bounds = segmentation.find_boundaries(np.where(normal_mask, labels, 0), mode="outer")
+        artifact_bounds = segmentation.find_boundaries(np.where(artifact_mask, labels, 0), mode="outer")
+        merged_bounds = segmentation.find_boundaries(np.where(merged_mask, labels, 0), mode="outer")
+
+        # Apply colors
+        rgb[normal_bounds] = np.array(self.params.outline_color, dtype=np.uint8)  # type: ignore[attr-defined]
+        rgb[artifact_bounds] = np.array(self.params.artifact_outline_color, dtype=np.uint8)  # type: ignore[attr-defined]
+        rgb[merged_bounds] = np.array(self.params.merged_outline_color, dtype=np.uint8)  # type: ignore[attr-defined]
+
+        # Draw each class-colored colony
+        for r in class_colored_rows:
+            m = (labels == _seg_id(r))
+            b = segmentation.find_boundaries(m, mode="outer")
+            rgb[b] = np.array(r["class_color"], dtype=np.uint8)
 
         # Draw the plate boundary ring over the colony outlines so it's
         # always visible regardless of what's beneath it.
@@ -148,10 +157,8 @@ class AnnotatedImageExporter(Exporter):
             # Draw numbers for ALL detections now that artifacts have sequential IDs
             # following the colony IDs.
             self._draw_numbers(im, data.measurements)
-
-        path = Path(self.params.output_path)  # type: ignore[attr-defined]
-        path.parent.mkdir(parents=True, exist_ok=True)
-        im.save(path)
+        
+        return im
 
     @staticmethod
     def _pick_base_image(data: ImageData, target_shape: tuple[int, int]) -> Any:
