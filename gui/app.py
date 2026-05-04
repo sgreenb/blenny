@@ -339,6 +339,8 @@ elif input_folder and Path(input_folder).exists() and Path(input_folder).is_dir(
     from blenny.modules.load_image import IMAGE_EXTENSIONS
     input_paths = sorted([f for f in folder_path.iterdir() if f.suffix.lower() in IMAGE_EXTENSIONS])
 
+col1, col2 = st.columns(2)
+
 if input_source:
     if input_paths:
         # For masking, we use a 'reference image' (the first one)
@@ -427,8 +429,6 @@ if input_source:
                         mask_path = Path("gui_mask_batch_exclusion.png")
                         mask_im.save(mask_path)
 
-        col1, col2 = st.columns(2)
-        
         with col1:
             # We only show the "Input Preview" if no drawing canvas is visible
             # to avoid cluttering the screen.
