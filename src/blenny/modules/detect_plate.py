@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import math
 import numpy as np
 from skimage import color, feature, transform
 from skimage.draw import disk
@@ -70,31 +71,87 @@ class PlateDetector(Preprocessor):
         shots where the plate ellipse is visible.
         """
 
+        force_cy: int | None = None
+        """Force the plate center Y coordinate (bypasses detection)."""
+
+        force_cx: int | None = None
+        """Force the plate center X coordinate (bypasses detection)."""
+
+        force_r: int | None = None
+        """Force the plate radius (bypasses detection)."""
+
+        force_mask_path: str | None = None
+        """Path to a binary mask file to use as the plate ROI (bypasses detection)."""
+
     def process(self, image: Any, data: ImageData) -> Any:
         gray = color.rgb2gray(image) if image.ndim == 3 else image.astype(float) / 255.0
         h, w = gray.shape
-        edges = feature.canny(gray, sigma=self.params.canny_sigma)  # type: ignore[attr-defined]
 
-        rmin = int(self.params.min_radius_frac * min(h, w))  # type: ignore[attr-defined]
-        rmax = int(self.params.max_radius_frac * min(h, w))  # type: ignore[attr-defined]
-        radii = np.linspace(rmin, rmax, self.params.n_radii).astype(int)  # type: ignore[attr-defined]
-        radii = np.unique(radii)
+        # Scale forced coordinates if the image was resized during loading.
+        # This ensures GUI-derived coords (from full-res display) match the
+        # current 'image' frame.
+        scale = data.metadata.get("resize_scale", 1.0)
 
-        hough = transform.hough_circle(edges, radii)
-        accums, cxs, cys, rs = transform.hough_circle_peaks(hough, radii, total_num_peaks=1)
-
-        if len(accums) == 0:
-            data.add_flag(
-                "plate_not_found",
-                "PlateDetector could not locate a circular plate; "
-                "downstream steps will run on the full image.",
-                severity="warning",
-            )
-            # Still write a "everything" mask so FeatureExtractors don't break.
-            data.masks[self.params.mask_key] = np.ones((h, w), dtype=bool)  # type: ignore[attr-defined]
+        # --- Case A: Manual Mask File ---
+        if self.params.force_mask_path:
+            from PIL import Image
+            mask_im = Image.open(self.params.force_mask_path).convert("L")
+            mask = np.asarray(mask_im) > 127
+            if mask.shape != (h, w):
+                # Resize if needed (e.g. if mask was drawn on a thumb)
+                from skimage.transform import resize
+                mask = resize(mask, (h, w), order=0, anti_aliasing=False)
+            
+            data.masks[self.params.mask_key] = mask
+            # For non-circular plates, we estimate a "center" and "radius" 
+            # so downstream radial modules (like InteriorClassifier) still work
+            # somewhat logically, though they are optimized for circles.
+            ys, xs = np.where(mask)
+            if len(ys) > 0:
+                cy, cx = int(ys.mean()), int(xs.mean())
+                r = int(math.sqrt(mask.sum() / math.pi))
+                data.metadata["plate_center"] = (cy, cx)
+                data.metadata["plate_radius"] = r
             return image
 
-        cy, cx, r_hough = int(cys[0]), int(cxs[0]), int(rs[0])
+        # --- Case B: Forced Circle Coords ---
+        if self.params.force_cy is not None and self.params.force_cx is not None and self.params.force_r is not None:
+            cy = int(round(self.params.force_cy * scale))
+            cx = int(round(self.params.force_cx * scale))
+            r_hough = int(round(self.params.force_r * scale))
+            score = 1.0
+        else:
+            edges = feature.canny(gray, sigma=self.params.canny_sigma)  # type: ignore[attr-defined]
+
+            rmin = int(self.params.min_radius_frac * min(h, w))  # type: ignore[attr-defined]
+            rmax = int(self.params.max_radius_frac * min(h, w))  # type: ignore[attr-defined]
+            radii = np.linspace(rmin, rmax, self.params.n_radii).astype(int)  # type: ignore[attr-defined]
+            radii = np.unique(radii)
+
+            hough = transform.hough_circle(edges, radii)
+            accums, cxs, cys, rs = transform.hough_circle_peaks(hough, radii, total_num_peaks=1)
+
+            if len(accums) == 0:
+                data.add_flag(
+                    "plate_not_found",
+                    "PlateDetector could not locate a circular plate; "
+                    "downstream steps will run on the full image.",
+                    severity="warning",
+                )
+                # Still write a "everything" mask so FeatureExtractors don't break.
+                data.masks[self.params.mask_key] = np.ones((h, w), dtype=bool)  # type: ignore[attr-defined]
+                return image
+
+            cy, cx, r_hough = int(cys[0]), int(cxs[0]), int(rs[0])
+            score = float(accums[0])
+
+            if score < 0.35:
+                data.add_flag(
+                    "low_plate_confidence",
+                    f"Plate detection confidence is low (score={score:.2f}). "
+                    "The detected region might not be the actual plate.",
+                    severity="warning",
+                )
 
         # Apply optional expansion *before* margin trimming. The bbox, mask,
         # and stored ``plate_radius`` all use the expanded radius so downstream
@@ -119,10 +176,12 @@ class PlateDetector(Preprocessor):
             data.metadata["plate_center"] = (int(cy), int(cx))
             data.metadata["plate_radius"] = int(r)
             data.metadata["plate_radius_hough"] = int(r_hough)
+            data.metadata["plate_hough_score"] = score
             return cropped
 
         data.masks[self.params.mask_key] = mask  # type: ignore[attr-defined]
         data.metadata["plate_center"] = (int(cy), int(cx))
         data.metadata["plate_radius"] = int(r)
         data.metadata["plate_radius_hough"] = int(r_hough)
+        data.metadata["plate_hough_score"] = score
         return image

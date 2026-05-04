@@ -30,9 +30,15 @@ from blenny.pipeline import MODULES, Pipeline
 
 app = typer.Typer(
     name="blenny",
-    help="Blenny: a toolkit for analyzing plates and microscopy images.",
+    help="Blenny: A toolkit for analyzing plates and microscopy images.\n\n"
+    "Documentation: https://github.com/your-org/blenny\n\n"
+    "CORE WORKFLOW:\n"
+    "  1. Initialize a pipeline:  blenny init\n"
+    "  2. Run the analysis:       blenny run pipeline.yaml --input 'plates/*.jpg' --output results/\n"
+    "  3. Inspect modules:        blenny modules",
     no_args_is_help=True,
     add_completion=False,
+    rich_markup_mode="rich",
 )
 
 
@@ -88,6 +94,13 @@ def run(
             help="Directory to write per-image outputs into. Created if missing.",
         ),
     ],
+    debug_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--debug-dir",
+            help="If set, write intermediate artifacts to per-image subdirs here.",
+        ),
+    ] = None,
     fail_fast: Annotated[
         bool,
         typer.Option(
@@ -95,6 +108,18 @@ def run(
             help="Stop on first error vs. log and continue (default: keep going).",
         ),
     ] = False,
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Emit the batch summary as JSON to stdout."),
+    ] = False,
+    override: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--override",
+            "-v",
+            help="Override module parameters (e.g., -v threshold_segment.min_area=20).",
+        ),
+    ] = None,
 ) -> None:
     inputs = sorted(_expand_input(input_pattern))
     if not inputs:
@@ -105,12 +130,49 @@ def run(
     raw_config = load_yaml(pipeline_path)
     raw_steps = extract_steps(raw_config)
 
+    # Apply command-line overrides to the raw steps
+    if override:
+        for item in override:
+            try:
+                key, value = item.split("=", 1)
+                mod_name, param_name = key.split(".", 1)
+                
+                # Try to parse value as JSON, float, int, or bool
+                parsed_val: Any
+                if (value.startswith("[") and value.endswith("]")) or (value.startswith("{") and value.endswith("}")):
+                    try:
+                        parsed_val = json.loads(value)
+                    except json.JSONDecodeError:
+                        parsed_val = value
+                elif value.lower() == "true":
+                    parsed_val = True
+                elif value.lower() == "false":
+                    parsed_val = False
+                else:
+                    try:
+                        parsed_val = float(value) if "." in value else int(value)
+                    except ValueError:
+                        parsed_val = value
+
+                # Find the module in the steps and update it
+                found = False
+                for step in raw_steps:
+                    if step["name"] == mod_name:
+                        step.setdefault("params", {})[param_name] = parsed_val
+                        found = True
+                if not found:
+                    typer.echo(f"Warning: Module '{mod_name}' not found in pipeline.", err=True)
+            except ValueError:
+                typer.echo(f"Error: Invalid override format '{item}'. Use mod.param=val", err=True)
+                raise typer.Exit(1)
+
     # Sanity-check that the pipeline makes a Pipeline at all (no inputs yet).
     # Substitution leaves placeholders untouched if no values are provided,
     # which would later fail to format. Catch unknown registry names early.
     _ = Pipeline.from_config(_resolve_for_validation(raw_steps))
 
-    typer.echo(f"Running pipeline {pipeline_path.name} on {len(inputs)} image(s) -> {output_dir}/")
+    if not as_json:
+        typer.echo(f"Running pipeline {pipeline_path.name} on {len(inputs)} image(s) -> {output_dir}/")
 
     summary_rows: list[dict[str, Any]] = []
     failures = 0
@@ -128,7 +190,8 @@ def run(
         t0 = time.perf_counter()
         try:
             pipe = Pipeline.from_config(resolved)
-            data = pipe.run(img)
+            img_debug_dir = debug_dir / stem if debug_dir else None
+            data = pipe.run(img, debug_dir=img_debug_dir)
         except Exception as e:
             elapsed = time.perf_counter() - t0
             typer.echo(f"  [FAIL] {img.name}: {type(e).__name__}: {e}", err=True)
@@ -155,16 +218,33 @@ def run(
                 "status": "ok",
                 "colony_count": data.metadata.get("colony_count"),
                 "n_quality_flags": len(data.quality_flags),
+                "flag_codes": "|".join(f.code for f in data.quality_flags),
                 "duration_s": round(elapsed, 3),
             }
         )
-        count = data.metadata.get("colony_count", "?")
-        typer.echo(f"  [OK]   {img.name}  colonies={count}  ({elapsed:.1f}s)")
+        if not as_json:
+            count = data.metadata.get("colony_count", "?")
+            typer.echo(f"  [OK]   {img.name}  colonies={count}  ({elapsed:.1f}s)")
 
     if first_resolved is not None:
+        # For the reproducible config, we want a "template" version where
+        # per-image placeholders like {stem} are preserved, but global
+        # parameters (including CLI overrides) are baked in.
+        reproducible_steps = substitute_paths(
+            raw_steps, 
+            output_dir="{output_dir}",
+            input_path="{input_path_placeholder}"
+        )
+        # Fix the dummy input path back to placeholders
+        for step in reproducible_steps:
+            if "params" in step:
+                for k, v in step["params"].items():
+                    if isinstance(v, str) and "{input_path_placeholder}" in v:
+                        step["params"][k] = v.replace("{input_path_placeholder}.stem", "{stem}").replace("{input_path_placeholder}", "{input}")
+
         dump_resolved_config(
-            first_resolved,
-            output_dir / "config.yaml",
+            raw_steps, # raw_steps already has CLI overrides but preserves placeholders
+            output_dir / "reproducible_config.yaml",
             extra={
                 "_blenny_version": __version__,
                 "_pipeline_source": str(pipeline_path.resolve()),
@@ -172,11 +252,57 @@ def run(
             },
         )
     _write_summary_csv(output_dir / "summary.csv", summary_rows)
+    _write_batch_log_txt(output_dir / "batch_log.txt", summary_rows, time.perf_counter() - t_batch)
 
     total = time.perf_counter() - t_batch
     succ = len(inputs) - failures
-    typer.echo(f"Done: {succ}/{len(inputs)} succeeded in {total:.1f}s")
+    
+    if as_json:
+        # Emit a clean machine-readable summary for GUI/script consumption
+        report = {
+            "total_images": len(inputs),
+            "succeeded": succ,
+            "failed": failures,
+            "duration_s": round(total, 3),
+            "results": summary_rows
+        }
+        typer.echo(json.dumps(report, indent=2))
+    else:
+        typer.echo(f"Done: {succ}/{len(inputs)} succeeded in {total:.1f}s")
+    
     if failures:
+        raise typer.Exit(code=1)
+
+
+@app.command(help="Launch the Blenny GUI.")
+def gui() -> None:
+    """Launch the Streamlit GUI.
+
+    This command finds the ``gui/app.py`` file relative to the package
+    installation and executes it via ``streamlit run``.
+    """
+    import subprocess
+    import sys
+
+    # Find the app.py file relative to this script
+    gui_dir = Path(__file__).parent.parent.parent.parent / "gui"
+    app_path = gui_dir / "app.py"
+
+    if not app_path.exists():
+        # Try local dev path
+        app_path = Path(__file__).parent.parent.parent.parent / "gui" / "app.py"
+
+    if not app_path.exists():
+        typer.echo(f"Error: Could not find GUI source at {app_path}", err=True)
+        raise typer.Exit(code=1)
+
+    typer.echo(f"Launching Blenny GUI from {app_path}...")
+    try:
+        subprocess.run([sys.executable, "-m", "streamlit", "run", str(app_path)], check=True)
+    except KeyboardInterrupt:
+        pass
+    except Exception as e:
+        typer.echo(f"Error launching GUI: {e}", err=True)
         raise typer.Exit(code=1)
 
 
@@ -234,13 +360,13 @@ def init(
         typer.Argument(help="Template name (run `blenny init --list` to see options)."),
     ] = "count-colonies",
     out: Annotated[
-        Path | None,
+        Path,
         typer.Option(
             "--out",
             "-o",
-            help="Where to write the YAML. Defaults to stdout.",
+            help="Where to write the YAML.",
         ),
-    ] = None,
+    ] = Path("pipeline.yaml"),
     list_templates: Annotated[
         bool,
         typer.Option("--list", help="List the available templates and exit."),
@@ -257,22 +383,30 @@ def init(
     except KeyError as e:
         typer.echo(str(e), err=True)
         raise typer.Exit(code=1) from None
-    if out is None:
-        typer.echo(text, nl=False)
-    else:
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(text, encoding="utf-8")
-        typer.echo(f"Wrote {template} template to {out}")
+    
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(text, encoding="utf-8")
+    typer.echo(f"Wrote {template} template to {out}")
 
 
 # --- helpers -----------------------------------------------------------------
 
 
 def _expand_input(pattern: str) -> list[Path]:
-    """Resolve a single path or a glob pattern to a list of existing files."""
+    """Resolve a single path, a directory, or a glob pattern to a list of images."""
+    from blenny.modules.load_image import IMAGE_EXTENSIONS
+    
     p = Path(pattern)
     if any(c in pattern for c in "*?["):
-        return [Path(m) for m in glob_module.glob(pattern, recursive=True) if Path(m).is_file()]
+        return [
+            Path(m) for m in glob_module.glob(pattern, recursive=True) 
+            if Path(m).is_file() and Path(m).suffix.lower() in IMAGE_EXTENSIONS
+        ]
+    if p.is_dir():
+        return sorted([
+            f for f in p.iterdir() 
+            if f.is_file() and f.suffix.lower() in IMAGE_EXTENSIONS
+        ])
     if p.is_file():
         return [p]
     return []
@@ -332,6 +466,30 @@ def _to_jsonable(obj: Any) -> Any:
     if hasattr(obj, "tolist"):  # numpy arrays / scalars
         return obj.tolist()
     return obj
+
+
+def _write_batch_log_txt(path: Path, rows: list[dict[str, Any]], duration: float) -> None:
+    """Dump a human-readable batch_log.txt for the entire batch."""
+    if not rows:
+        path.write_text("No images processed.\n", encoding="utf-8")
+        return
+
+    lines = [
+        "=== Blenny Batch Processing Log ===",
+        f"Total images:    {len(rows)}",
+        f"Total duration:  {duration:.1f}s",
+        "",
+        f"{'Image':<30} {'Status':<10} {'Count':<10} {'Flags':<10}",
+        "-" * 65
+    ]
+    for r in rows:
+        name = r.get("stem", "unknown")[:30]
+        status = r.get("status", "failed")
+        count = str(r.get("colony_count", "-"))
+        flags = str(r.get("n_quality_flags", "-"))
+        lines.append(f"{name:<30} {status:<10} {count:<10} {flags:<10}")
+    
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _write_summary_csv(path: Path, rows: list[dict[str, Any]]) -> None:

@@ -22,8 +22,12 @@ class IlluminationCorrection(Preprocessor):
         method: Literal["white_tophat", "black_tophat"] = "white_tophat"
         """``white_tophat`` for bright objects on dark background, and vice versa."""
 
-        radius: int = 25
-        """Structuring-element radius in pixels. Should exceed the largest object."""
+        radius: int | None = None
+        """Structuring-element radius in pixels. Should exceed the largest object.
+
+        If ``None`` (the default), the radius is automatically set to
+        ``plate_radius / 15`` if a plate was detected, falling back to 25.
+        """
 
         to_gray: bool = True
         """If True, output a single-channel float image. Most segmenters want this."""
@@ -36,7 +40,16 @@ class IlluminationCorrection(Preprocessor):
         else:
             work = util.img_as_float(image)
 
-        selem = morphology.disk(self.params.radius)  # type: ignore[attr-defined]
+        # Determine radius: explicit param > scale-aware default > fallback.
+        radius = self.params.radius  # type: ignore[attr-defined]
+        if radius is None:
+            plate_r = data.metadata.get("plate_radius")
+            if plate_r is not None:
+                radius = max(5, round(float(plate_r) / 15.0))
+            else:
+                radius = 25
+
+        selem = morphology.disk(radius)
 
         if work.ndim == 2:
             corrected = self._tophat(work, selem)

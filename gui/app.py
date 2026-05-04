@@ -1,0 +1,573 @@
+import streamlit as st
+import subprocess
+import json
+import os
+import numpy as np
+from pathlib import Path
+from PIL import Image, ImageOps
+
+# Monkey-patch for streamlit-drawable-canvas compatibility with newer Streamlit versions
+import streamlit.elements.image as st_image
+if not hasattr(st_image, "image_to_url"):
+    try:
+        from streamlit.elements.lib.image_utils import image_to_url as _image_to_url
+        st_image.image_to_url = _image_to_url
+    except ImportError:
+        # Try another location if needed for even newer versions
+        pass
+
+# Fix for streamlit-drawable-canvas compatibility with Streamlit 1.34+ 
+# where image_to_url expects a LayoutConfig object instead of a width integer.
+_orig_image_to_url = st_image.image_to_url
+def _compat_image_to_url(image_data, width, *args, **kwargs):
+    if isinstance(width, int):
+        from dataclasses import dataclass
+        @dataclass
+        class FakeLayoutConfig:
+            width: int
+        return _orig_image_to_url(image_data, FakeLayoutConfig(width=width), *args, **kwargs)
+    return _orig_image_to_url(image_data, width, *args, **kwargs)
+st_image.image_to_url = _compat_image_to_url
+
+from streamlit_drawable_canvas import st_canvas
+
+# Set page config for a clean, professional look
+st.set_page_config(
+    page_title="Blenny Plate Reader",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+st.title("Blenny Plate Reader")
+
+# Allow the drawable-canvas iframe (and its column) to scroll horizontally
+# instead of clipping the right edge of the plate preview when the browser
+# window is narrower than the canvas pixel width. Streamlit components live
+# inside an <iframe> whose enclosing block has overflow:hidden by default.
+st.markdown(
+    """
+    <style>
+    /* The component iframe itself */
+    iframe[title="streamlit_drawable_canvas.st_canvas"] {
+        max-width: 100%;
+        overflow: auto !important;
+    }
+    /* The Streamlit-generated wrapper around components */
+    div[data-testid="stCustomComponentV1"],
+    div[data-testid="stIFrame"] {
+        overflow-x: auto !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# Find the CLI script relative to this app.py file
+cli_script = str((Path(__file__).parent.parent / "blenny-cli.py").resolve())
+
+# --- Sidebar: Configuration ---
+with st.sidebar:
+    st.title("Blenny Control Panel")
+    
+    # 1. Input Selection (Moved to top)
+    st.header("1. Data Input")
+    input_files = st.file_uploader("Upload Plate Images", type=["jpg", "jpeg", "png", "tif"], accept_multiple_files=True)
+    
+    # Folder picker with Browse button
+    c_f1, c_f2 = st.columns([3, 1])
+    input_folder = c_f1.text_input("OR Folder Path", value=st.session_state.get("folder_path", ""), help="Path to a directory on your machine.")
+    
+    # Align button vertically with the text input. 
+    # Streamlit buttons have no label space by default, text_input does.
+    # 29-32px is usually the height of a standard label.
+    c_f2.markdown("<div style='height: 29px;'></div>", unsafe_allow_html=True)
+    if c_f2.button("📁", help="Browse for folder", use_container_width=True):
+        try:
+            import tkinter as tk
+            from tkinter import filedialog
+            root = tk.Tk()
+            root.withdraw()
+            root.wm_attributes('-topmost', 1)
+            selected_folder = filedialog.askdirectory(master=root)
+            root.destroy()
+            if selected_folder:
+                st.session_state["folder_path"] = selected_folder
+                st.rerun()
+        except Exception as e:
+            st.error("Folder picker requires a local display.")
+            
+    input_folder = st.session_state.get("folder_path", "")
+    
+    st.divider()
+
+    # 2. Pipeline Selection
+    st.header("2. Analysis Pipeline")
+    repro_file = st.file_uploader("Load Reproducible Config", type=["yaml", "yml"], help="Load settings from a previous run.")
+    
+    # Defaults
+    margin_default, min_area_default, min_circ_default = 0.08, 10, 0.7
+    
+    if repro_file:
+        try:
+            import yaml
+            repro_data = yaml.safe_load(repro_file)
+            st.success("Config loaded. Settings applied below.")
+            steps = {s['name']: s.get('params', {}) for s in repro_data.get('steps', [])}
+            margin_default = float(steps.get('detect_plate', {}).get('margin_frac', 0.08))
+            min_area_default = int(steps.get('threshold_segment', {}).get('min_area', 10))
+            min_circ_default = float(steps.get('threshold_segment', {}).get('min_circularity', 0.7))
+        except Exception as e:
+            st.error(f"Error loading config: {e}")
+
+    if not Path("pipeline.yaml").exists():
+        if st.button("Generate Default Pipeline"):
+            subprocess.run(["python3", cli_script, "init"])
+            st.success("Created pipeline.yaml")
+
+    default_pipeline = "pipeline.yaml"
+    if not Path(default_pipeline).exists():
+        # Try finding it relative to the app root if it doesn't exist in CWD
+        root_pipeline = Path(__file__).parent.parent / "pipeline.yaml"
+        if root_pipeline.exists():
+            default_pipeline = str(root_pipeline.resolve())
+
+    pipeline_path = st.text_input("Pipeline Path", value=default_pipeline)
+    
+    st.divider()
+
+    # 3. Tuning Parameters
+    st.header("3. Tuning")
+    
+    # Compact Sliders with editable values and individual resets
+    def compact_control(label, key, min_val, max_val, default_val, step, help_text):
+        if key not in st.session_state:
+            st.session_state[key] = default_val
+        
+        # Label Row
+        st.markdown(f"**{label}**")
+        
+        # Control Row: [Input] [Slider] [Reset]
+        c1, c2, c3 = st.columns([1.2, 3, 0.8])
+        
+        # Use on_change to sync the two widgets without lag
+        def sync_num():
+            new_val = st.session_state[f"num_{key}"]
+            st.session_state[key] = new_val
+            st.session_state[f"slide_{key}"] = new_val
+        def sync_slide():
+            new_val = st.session_state[f"slide_{key}"]
+            st.session_state[key] = new_val
+            st.session_state[f"num_{key}"] = new_val
+        
+        # Ensure sub-keys are initialized
+        if f"num_{key}" not in st.session_state:
+            st.session_state[f"num_{key}"] = st.session_state[key]
+        if f"slide_{key}" not in st.session_state:
+            st.session_state[f"slide_{key}"] = st.session_state[key]
+
+        val = c1.number_input(
+            label, 
+            value=float(st.session_state[key]) if isinstance(step, float) else int(st.session_state[key]), 
+            min_value=float(min_val) if isinstance(step, float) else int(min_val), 
+            max_value=float(max_val) if isinstance(step, float) else int(max_val), 
+            step=step, 
+            key=f"num_{key}", 
+            label_visibility="collapsed",
+            on_change=sync_num
+        )
+        
+        val = c2.slider(
+            label, 
+            min_value=float(min_val) if isinstance(step, float) else int(min_val), 
+            max_value=float(max_val) if isinstance(step, float) else int(max_val), 
+            value=float(st.session_state[key]) if isinstance(step, float) else int(st.session_state[key]), 
+            step=step, 
+            key=f"slide_{key}", 
+            label_visibility="collapsed", 
+            help=help_text,
+            on_change=sync_slide
+        )
+        
+        if c3.button("↺", key=f"reset_{key}", help=f"Reset {label}"):
+            st.session_state[key] = default_val
+            st.session_state[f"num_{key}"] = default_val
+            st.session_state[f"slide_{key}"] = default_val
+            st.rerun()
+            
+        return st.session_state[key]
+
+    if st.button("Reset All Tuning Defaults"):
+        # Reset main keys and their synced widget counterparts
+        for k, default in [("margin", 0.08), ("min_area", 10), ("min_circ", 0.7)]:
+            st.session_state[k] = default
+            st.session_state[f"num_{k}"] = default
+            st.session_state[f"slide_{k}"] = default
+        st.session_state["manual_plate_mode"] = "Auto"
+        st.rerun()
+    
+    if st.session_state.get("manual_exclude_ids"):
+        if st.button("🗑️ Clear Manual Exclusions", help="Remove all manually excluded colonies."):
+            st.session_state["manual_exclude_ids"] = []
+            st.rerun()
+
+    margin = compact_control(
+        "Plate Rim Margin", "margin", 0.0, 0.2, margin_default, 0.01, 
+        "The fraction of the plate radius to exclude from the edge to avoid rim reflections."
+    )
+    min_area = compact_control(
+        "Min Colony Area (px)", "min_area", 0, 1000, min_area_default, 1, 
+        "Minimum number of pixels a group must occupy to be counted as a colony."
+    )
+    min_circ = compact_control(
+        "Min Circularity", "min_circ", 0.0, 1.0, min_circ_default, 0.05, 
+        "Filter objects by roundness (1.0 is a perfect circle)."
+    )
+    
+    st.divider()
+
+    # 4. Plate Area
+    st.header("4. Plate Area")
+    plate_mode = st.radio("Detection Mode", ["Auto", "Manual Circle", "Manual Shape"], index=0, key="manual_plate_mode", horizontal=True)
+    
+    manual_cy, manual_cx, manual_r = None, None, None
+    manual_shape_path = None
+    
+    if plate_mode == "Manual Circle":
+        st.info("Tune center and radius with the controls below.")
+        
+        # Determine smart defaults if an image is loaded
+        def_cy, def_cx, def_r = 1000, 1000, 800
+        if input_files and len(input_files) == 1:
+            try:
+                # We need to peek at the image size
+                from PIL import Image
+                img_peek = Image.open(input_files[0])
+                w, h = img_peek.size
+                def_cx, def_cy = w // 2, h // 2
+                def_r = int(min(w, h) * 0.4)
+            except:
+                pass
+
+        manual_cy = compact_control("Center Y", "manual_cy", 0, 4000, def_cy, 1, "Y coordinate of the plate center.")
+        manual_cx = compact_control("Center X", "manual_cx", 0, 4000, def_cx, 1, "X coordinate of the plate center.")
+        manual_r = compact_control("Radius", "manual_r", 0, 2000, def_r, 1, "Radius of the plate in pixels.")
+    
+    elif plate_mode == "Manual Shape":
+        st.info("Use the canvas on the right to define the plate boundary. **Left-click** to add points and **Right-click** to close the shape.")
+
+    st.divider()
+
+    # 5. Masking
+    st.header("5. Masking")
+    enable_mask = st.checkbox("Enable Paint-to-Exclude", value=False)
+    brush_size = st.slider("Brush Size", 1, 50, 20)
+    
+    # Initialize session state for manual interventions
+    if "manual_exclude_ids" not in st.session_state:
+        st.session_state["manual_exclude_ids"] = []
+    
+    st.divider()
+    
+    run_btn = st.button("Run Analysis", type="primary", use_container_width=True)
+
+# --- Main Area ---
+input_source = None
+input_paths = []
+if input_files:
+    input_source = "files"
+    # Save the uploaded files temporarily
+    temp_dir = Path("gui_uploads")
+    temp_dir.mkdir(exist_ok=True)
+    for f in input_files:
+        p = temp_dir / f.name
+        p.write_bytes(f.getvalue())
+        input_paths.append(p)
+elif input_folder and Path(input_folder).exists() and Path(input_folder).is_dir():
+    input_source = "folder"
+    folder_path = Path(input_folder)
+    from blenny.modules.load_image import IMAGE_EXTENSIONS
+    input_paths = sorted([f for f in folder_path.iterdir() if f.suffix.lower() in IMAGE_EXTENSIONS])
+
+if input_source:
+    if input_paths:
+        # For masking, we use a 'reference image' (the first one)
+        ref_image_path = input_paths[0]
+        bg_image = Image.open(ref_image_path)
+        bg_image = ImageOps.exif_transpose(bg_image)
+        if bg_image.mode != "RGB":
+            bg_image = bg_image.convert("RGB")
+        
+        # Determine canvas size
+        max_ui_width = 800
+        max_ui_height = 600
+        scale = min(max_ui_width / bg_image.width, max_ui_height / bg_image.height, 1.0)
+        canvas_width = int(bg_image.width * scale)
+        canvas_height = int(bg_image.height * scale)
+        
+        # --- Visual Context for Canvas ---
+        # If we are in Manual Circle mode, we want to see the blue circle 
+        # while we are painting the exclusion mask.
+        canvas_bg_img = bg_image.copy()
+        if plate_mode == "Manual Circle" and manual_cy is not None:
+            from PIL import ImageDraw
+            draw = ImageDraw.Draw(canvas_bg_img)
+            # Draw at original scale, then we resize for canvas
+            r = manual_r
+            draw.ellipse([manual_cx - r, manual_cy - r, manual_cx + r, manual_cy + r], outline="blue", width=max(1, int(5/scale)))
+            r_eff = r * (1.0 - margin)
+            draw.ellipse([manual_cx - r_eff, manual_cy - r_eff, manual_cx + r_eff, manual_cy + r_eff], outline="cyan", width=max(1, int(3/scale)))
+        
+        canvas_bg = canvas_bg_img.resize((canvas_width, canvas_height), Image.Resampling.LANCZOS)
+
+        if len(input_paths) > 1:
+            st.info(f"Batch Mode: Drawing on **{ref_image_path.name}** as reference. Mask will apply to all {len(input_paths)} images.")
+
+        # --- Integrated Drawing Area ---
+        manual_shape_path = None
+        mask_path = None
+        
+        # If both Manual Shape and Masking are enabled, we need a toggle to switch tool
+        canvas_mode = "Inclusion"
+        if plate_mode == "Manual Shape" and enable_mask:
+            canvas_mode = st.radio("Canvas Tool", ["1. Define Plate Shape", "2. Paint Exclusion Mask"], horizontal=True)
+        elif enable_mask:
+            canvas_mode = "Exclusion"
+        
+        if plate_mode == "Manual Shape" or enable_mask:
+            st.subheader(f"Manual Drawing: {canvas_mode}")
+            
+            if "Inclusion" in canvas_mode or "Define Plate Shape" in canvas_mode:
+                st.info("**Left-click** to add vertices around the plate. **Right-click** to close and submit.")
+                drawing_mode = "polygon"
+                fill_color = "rgba(0, 0, 255, 0.3)"
+                stroke_color = "#0000FF"
+                canvas_key = "shape_canvas"
+            else:
+                st.info("Paint over areas you want to EXCLUDE (contaminants, sharpie, etc.)")
+                drawing_mode = "freedraw"
+                fill_color = "rgba(255, 0, 255, 0.3)"
+                stroke_color = "#FF00FF"
+                canvas_key = "exclusion_canvas"
+
+            working_canvas = st_canvas(
+                fill_color=fill_color,
+                stroke_width=2 if drawing_mode == "polygon" else brush_size,
+                stroke_color=stroke_color,
+                background_image=canvas_bg,
+                update_streamlit=True,
+                height=canvas_height,
+                width=canvas_width,
+                drawing_mode=drawing_mode,
+                display_toolbar=True,
+                key=canvas_key,
+            )
+            
+            # Process results from whichever canvas is active
+            if working_canvas.image_data is not None:
+                alpha = working_canvas.image_data[:, :, 3]
+                if np.any(alpha > 0):
+                    mask_canvas = Image.fromarray((alpha > 0).astype(np.uint8) * 255)
+                    mask_im = mask_canvas.resize(bg_image.size, Image.Resampling.NEAREST)
+                    
+                    if "Inclusion" in canvas_mode or "Shape" in canvas_mode:
+                        manual_shape_path = Path("gui_plate_batch_mask.png")
+                        mask_im.save(manual_shape_path)
+                    else:
+                        mask_path = Path("gui_mask_batch_exclusion.png")
+                        mask_im.save(mask_path)
+
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # We only show the "Input Preview" if no drawing canvas is visible
+            # to avoid cluttering the screen.
+            if not (plate_mode == "Manual Shape" or enable_mask):
+                st.subheader("Input Preview")
+                display_img = bg_image
+                if plate_mode == "Manual Circle" and manual_cy is not None:
+                    from PIL import ImageDraw
+                    draw_img = display_img.copy()
+                    draw = ImageDraw.Draw(draw_img)
+                    r = manual_r
+                    draw.ellipse([manual_cx - r, manual_cy - r, manual_cx + r, manual_cy + r], outline="blue", width=5)
+                    r_eff = r * (1.0 - margin)
+                    draw.ellipse([manual_cx - r_eff, manual_cy - r_eff, manual_cx + r_eff, manual_cy + r_eff], outline="cyan", width=3)
+                    draw.line([manual_cx-20, manual_cy, manual_cx+20, manual_cy], fill="blue", width=3)
+                    draw.line([manual_cx, manual_cy-20, manual_cx, manual_cy+20], fill="blue", width=3)
+                    display_img = draw_img
+                st.image(display_img, use_container_width=True, caption=f"Reference: {ref_image_path.name}")
+            
+            if len(input_paths) > 1:
+                st.write(f"Batch processing {len(input_paths)} images starting with {ref_image_path.name}")
+    else:
+        st.warning("No images found in the selected input.")
+else:
+    st.info("Please upload plate images or provide a folder path in the sidebar to begin.")
+
+if run_btn and input_source:
+    output_dir = Path("gui_results")
+    debug_dir = Path("gui_debug")
+    
+    with st.status("Analyzing plates...", expanded=True) as status:
+        st.write("Executing Blenny engine...")
+        
+        # Determine input for CLI
+        if input_source == "files":
+            cli_input = str(temp_dir if len(input_paths) > 1 else input_paths[0])
+        else:
+            cli_input = str(input_folder)
+
+        cmd = [
+            "python3", cli_script, "run", 
+            pipeline_path, 
+            "--input", cli_input,
+            "--output", str(output_dir),
+            "--debug-dir", str(debug_dir),
+            "--json",
+            "--override", f"detect_plate.margin_frac={margin}",
+            "--override", f"threshold_segment.min_area={min_area}",
+            "--override", f"threshold_segment.min_circularity={min_circ}"
+        ]
+        
+        if plate_mode == "Manual Circle":
+            cmd.extend([
+                "--override", "detect_plate.crop=False",
+                "--override", f"detect_plate.radius_expand_frac=0",
+                "--override", f"detect_plate.margin_frac={margin}"
+            ])
+            # We'll need a way to pass these specific coordinates. 
+            # For now, we can use the identity preprocessor or similar, 
+            # but a better way is to allow detect_plate to take manual coords.
+            # I'll update detect_plate.py to support this.
+            cmd.extend([
+                "--override", f"detect_plate.force_cy={manual_cy}",
+                "--override", f"detect_plate.force_cx={manual_cx}",
+                "--override", f"detect_plate.force_r={manual_r}"
+            ])
+        
+        if plate_mode == "Manual Shape" and manual_shape_path:
+            cmd.extend([
+                "--override", "detect_plate.crop=False",
+                "--override", f"detect_plate.force_mask_path={manual_shape_path}"
+            ])
+
+        # Manual exclusions from the interactive table
+        if st.session_state.get("manual_exclude_ids"):
+            import json as py_json
+            cmd.extend([
+                "--override", f"filter_by_id.exclude_ids={py_json.dumps(st.session_state['manual_exclude_ids'])}"
+            ])
+
+        if enable_mask and 'mask_path' in locals() and mask_path:
+            cmd.extend(["--override", f"apply_exclusion_mask.mask_path={mask_path}"])
+        
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            try:
+                raw_out = result.stdout.strip()
+                start_bracket = raw_out.find('{')
+                if start_bracket == -1:
+                    raise ValueError("No JSON object found in output")
+                
+                json_payload = raw_out[start_bracket:]
+                json_data = json.loads(json_payload)
+                
+                status.update(label="Analysis Complete!", state="complete", expanded=False)
+                
+                if input_source == "files" and len(input_paths) == 1:
+                    with col2:
+                        st.subheader("Results")
+                        stem = input_paths[0].stem
+                        
+                        # Show annotated image
+                        annotated_path = output_dir / stem / "annotated.png"
+                        if annotated_path.exists():
+                            st.image(Image.open(annotated_path), caption="Annotated Colonies", use_container_width=True)
+                        
+                        # --- Phase 3: Consolidated Colony Data ---
+                        csv_path = output_dir / stem / "colonies.csv"
+                        if csv_path.exists():
+                            import pandas as pd
+                            # Load CSV, skipping the comment line if it exists
+                            df = pd.read_csv(csv_path, comment='#')
+                            
+                            st.subheader("Colony Data")
+                            
+                            # Clean up coordinates and decimals for readability
+                            for col in ['centroid_x', 'centroid_y']:
+                                if col in df.columns:
+                                    df[col] = df[col].round(1)
+                            
+                            # Select and reorder columns for display
+                            display_cols = [
+                                "label", "centroid_x", "centroid_y", "area_px", "eccentricity", 
+                                "mean_r", "mean_g", "mean_b", "mean_h", "mean_s", "mean_v",
+                                "is_artifact", "colony_count_estimate"
+                            ]
+                            actual_cols = [c for c in display_cols if c in df.columns]
+                            
+                            # Add a "Type" column for easier reading in the GUI
+                            if "is_artifact" in df.columns and "colony_count_estimate" in df.columns:
+                                def get_type(row):
+                                    if row["is_artifact"]: return "Artifact"
+                                    if row["colony_count_estimate"] >= 2: return f"Merged(x{int(row['colony_count_estimate'])})"
+                                    return "Colony"
+                                df["Type"] = df.apply(get_type, axis=1)
+                                if "Type" not in actual_cols:
+                                    actual_cols.insert(1, "Type")
+
+                            st.dataframe(df[actual_cols], hide_index=True, use_container_width=True)
+                            
+                            # Add download button for the full CSV
+                            st.download_button(
+                                label="📥 Download Colony Data (CSV)",
+                                data=df.to_csv(index=False),
+                                file_name=f"{stem}_colonies.csv",
+                                mime="text/csv",
+                            )
+
+                        # Show Processing Log in an expander
+                        log_path = output_dir / stem / "log.txt"
+                        if log_path.exists():
+                            with st.expander("📄 View Detailed Processing Log"):
+                                st.text_area("Log Content", value=log_path.read_text(), height=400, label_visibility="collapsed")
+                else:
+                    st.subheader("Batch Results")
+                    batch_log = output_dir / "batch_log.txt"
+                    if batch_log.exists():
+                        st.text_area("Batch Processing Log", value=batch_log.read_text(), height=400)
+                    
+                    if (output_dir / "summary.csv").exists():
+                        st.download_button(
+                            "Download Batch Summary (CSV)",
+                            data=(output_dir / "summary.csv").read_text(),
+                            file_name="batch_summary.csv",
+                            mime="text/csv"
+                        )
+                        
+                # Show Audit Trail (Debug Steps) - only for first image
+                with st.expander("View Step-by-Step Audit Trail (First Image)"):
+                    if input_paths:
+                        stem = input_paths[0].stem
+                        img_debug = debug_dir / stem
+                        if img_debug.exists():
+                            debug_files = sorted(img_debug.glob("*.jpg"))
+                            cols = st.columns(3)
+                            for i, df in enumerate(debug_files):
+                                cols[i % 3].image(Image.open(df), caption=df.stem, use_container_width=True)
+                            
+            except Exception as e:
+                st.error(f"Failed to parse engine output: {e}")
+                st.code(result.stdout)
+        else:
+            status.update(label="Analysis Failed", state="error")
+            st.error(result.stderr)
+    
+    # Cleanup (optional - in a real app we might want to keep session history)
+    # temp_input.unlink()
+else:
+    st.info("Please upload a plate image in the sidebar to begin.")
+
+# --- Footer ---
+st.divider()
+st.caption("Blenny GUI Skeleton v0.1 • Local Engine: " + subprocess.run(["python3", cli_script, "--version"], capture_output=True, text=True).stdout.strip())

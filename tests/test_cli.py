@@ -49,11 +49,18 @@ def test_modules_command_json_output() -> None:
 # --- init --------------------------------------------------------------------
 
 
-def test_init_writes_count_colonies_to_stdout() -> None:
-    result = runner.invoke(app, ["init"])
-    assert result.exit_code == 0
-    assert "steps:" in result.stdout
-    assert "load_image" in result.stdout
+def test_init_writes_to_default_file(tmp_path: Path) -> None:
+    import os
+    orig_cwd = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        result = runner.invoke(app, ["init"])
+        assert result.exit_code == 0
+        assert "Wrote count-colonies template to pipeline.yaml" in result.stdout
+        assert Path("pipeline.yaml").exists()
+        assert "steps:" in Path("pipeline.yaml").read_text()
+    finally:
+        os.chdir(orig_cwd)
 
 
 def test_init_writes_to_file(tmp_path: Path) -> None:

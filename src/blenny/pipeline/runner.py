@@ -71,9 +71,24 @@ class Pipeline:
 
     # --- Execution -----------------------------------------------------------
 
-    def run(self, data: ImageData | str | Path | None = None) -> ImageData:
-        """Run the pipeline. Accepts an `ImageData`, a source path/string, or nothing."""
+    def run(
+        self,
+        data: ImageData | str | Path | None = None,
+        *,
+        debug_dir: str | Path | None = None,
+    ) -> ImageData:
+        """Run the pipeline. Accepts an `ImageData`, a source path/string, or nothing.
+
+        If ``debug_dir`` is provided, intermediate images and masks are saved
+        after each step into that directory.
+        """
         ctx = self._coerce_input(data)
+        dwriter = None
+        if debug_dir is not None:
+            from blenny.pipeline.debug import DebugWriter
+
+            dwriter = DebugWriter(Path(debug_dir))
+
         for step in self.steps:
             t0 = time.perf_counter()
             ctx = step.run(ctx)
@@ -90,6 +105,13 @@ class Pipeline:
             for flag in ctx.quality_flags:
                 if not flag.step:
                     flag.step = step.name
+
+            if dwriter is not None:
+                dwriter.write_step(step.name, ctx)
+
+        if dwriter is not None:
+            dwriter.write_summary(ctx)
+
         return ctx
 
     @staticmethod

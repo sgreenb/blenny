@@ -45,34 +45,94 @@ class ColonyMeasurer(FeatureExtractor):
             )
             return []
 
+        # Intensity image for basic props (roundness, etc)
         # regionprops wants either no intensity image or one that matches
         # ``labels.shape``. Our image may be RGB and/or float.
-        intensity = color.rgb2gray(image) if image.ndim == 3 else util.img_as_float(image)
+        is_color = image.ndim == 3 and image.shape[-1] in (3, 4)
+        if is_color:
+            color_img = image[:, :, :3]
+            intensity = color.rgb2gray(color_img)
+            hsv = color.rgb2hsv(color_img)
+        else:
+            intensity = util.img_as_float(image)
+            # Try to find a color version of this same-sized image for HSV props
+            # (e.g. stashed by IlluminationCorrection before grayscale conversion)
+            hsv = None
+            color_img = None
+            pre_illum = data.artifacts.get("pre_illumination")
+            if pre_illum is not None and pre_illum.shape[:2] == image.shape[:2] and pre_illum.ndim == 3:
+                color_img = pre_illum[:, :, :3]
+                hsv = color.rgb2hsv(color_img)
 
         h, w = labels.shape
         rows: list[dict[str, Any]] = []
         edge_touches = 0
-        for prop in measure.regionprops(labels, intensity_image=intensity):
+
+        # Pre-calculate region properties for intensity and color
+        props = measure.regionprops(labels, intensity_image=intensity)
+        if hsv is not None:
+            # We also want mean H, S, V. regionprops only takes one intensity image,
+            # so we'll grab mean intensity for the color channels separately.
+            h_props = measure.regionprops(labels, intensity_image=hsv[:, :, 0])
+            s_props = measure.regionprops(labels, intensity_image=hsv[:, :, 1])
+            v_props = measure.regionprops(labels, intensity_image=hsv[:, :, 2])
+            
+            # Map labels to their HSV means for quick lookup
+            h_means = {p.label: p.intensity_mean for p in h_props}
+            s_means = {p.label: p.intensity_mean for p in s_props}
+            v_means = {p.label: p.intensity_mean for p in v_props}
+            
+            # Also get RGB means (use the 3-channel color_img)
+            r_means = {p.label: p.intensity_mean for p in measure.regionprops(labels, intensity_image=color_img[:, :, 0])}
+            g_means = {p.label: p.intensity_mean for p in measure.regionprops(labels, intensity_image=color_img[:, :, 1])}
+            b_means = {p.label: p.intensity_mean for p in measure.regionprops(labels, intensity_image=color_img[:, :, 2])}
+        else:
+            h_means = s_means = v_means = {}
+            r_means = g_means = b_means = {}
+
+        for prop in props:
             min_row, min_col, max_row, max_col = prop.bbox
             touches_edge = min_row == 0 or min_col == 0 or max_row >= h or max_col >= w
             if touches_edge:
                 edge_touches += 1
-            rows.append(
-                {
-                    "label": int(prop.label),
-                    "area_px": int(prop.area),
-                    "centroid_y": float(prop.centroid[0]),
-                    "centroid_x": float(prop.centroid[1]),
-                    "equivalent_diameter_px": float(prop.equivalent_diameter_area),
-                    "eccentricity": float(prop.eccentricity),
-                    "mean_intensity": float(prop.intensity_mean),
-                    "bbox_y0": int(min_row),
-                    "bbox_x0": int(min_col),
-                    "bbox_y1": int(max_row),
-                    "bbox_x1": int(max_col),
-                    "touches_edge": bool(touches_edge),
-                }
-            )
+            # Circularity = 4π·area / perimeter² (1.0 = perfect circle).
+            perim = float(prop.perimeter)
+            circularity = float(4 * np.pi * prop.area / (perim * perim)) if perim > 0 else 0.0
+            
+            row = {
+                "label": int(prop.label),
+                "area_px": int(prop.area),
+                "centroid_y": float(prop.centroid[0]),
+                "centroid_x": float(prop.centroid[1]),
+                "equivalent_diameter_px": float(prop.equivalent_diameter_area),
+                "eccentricity": float(prop.eccentricity),
+                "solidity": float(prop.solidity),
+                "circularity": round(circularity, 4),
+                "perimeter_px": round(perim, 2),
+                "mean_intensity": float(prop.intensity_mean),
+                "bbox_y0": int(min_row),
+                "bbox_x0": int(min_col),
+                "bbox_y1": int(max_row),
+                "bbox_x1": int(max_col),
+                "touches_edge": bool(touches_edge),
+                # Default multiplicity — the estimate_multiplicity module
+                # may upgrade this for bilobed / merged colonies.
+                "colony_count_estimate": 1,
+            }
+            
+            # Add color features if available
+            if hsv is not None:
+                l_id = prop.label
+                row.update({
+                    "mean_r": round(float(r_means[l_id]), 4),
+                    "mean_g": round(float(g_means[l_id]), 4),
+                    "mean_b": round(float(b_means[l_id]), 4),
+                    "mean_h": round(float(h_means[l_id]), 4),
+                    "mean_s": round(float(s_means[l_id]), 4),
+                    "mean_v": round(float(v_means[l_id]), 4),
+                })
+            
+            rows.append(row)
 
         if rows:
             frac = edge_touches / len(rows)

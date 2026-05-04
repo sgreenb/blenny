@@ -10,6 +10,8 @@ from PIL import Image, ImageOps
 
 from blenny.pipeline import BlennyParams, Loader, register
 
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
+
 
 @register("load_image")
 class ImageFileLoader(Loader):

@@ -24,8 +24,27 @@ class CSVExporter(Exporter):
         path.parent.mkdir(parents=True, exist_ok=True)
 
         rows = data.measurements
-        # Stable, predictable column order: collect keys in first-seen order.
+        
+        # Ensure 'is_artifact' column is present even if no module set it.
+        for row in rows:
+            row.setdefault("is_artifact", False)
+            row.setdefault("artifact_reason", "")
+
+        # Define a nice column order for researchers. 
+        # Any remaining columns found in the data will follow these.
+        preferred_order = [
+            "label", "centroid_x", "centroid_y", "area_px", "eccentricity", 
+            "mean_r", "mean_g", "mean_b", "mean_h", "mean_s", "mean_v", 
+            "is_artifact", "artifact_reason", "source"
+        ]
+        
         fieldnames: list[str] = []
+        # 1. Add preferred columns if they exist in the data
+        for p in preferred_order:
+            if any(p in r for r in rows):
+                fieldnames.append(p)
+        
+        # 2. Add any other columns found in the data
         for row in rows:
             for k in row:
                 if k not in fieldnames:

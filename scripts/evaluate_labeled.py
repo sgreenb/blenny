@@ -43,6 +43,7 @@ PIPELINE_STEPS = [
     {"name": "correct_illumination", "params": {"radius": 25}},
     {"name": "threshold_segment", "params": {"roi_mask_key": "plate", "split_touching": True}},
     {"name": "measure_colonies"},
+    {"name": "estimate_multiplicity"},
     {"name": "classify_by_interior"},
     {"name": "export_annotated", "params": {"output_path": ""}},  # filled per-image
 ]

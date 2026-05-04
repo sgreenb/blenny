@@ -132,7 +132,8 @@ class InteriorColonyClassifier(Classifier):
                 "skipping edge classification. Ensure detect_plate ran before this step.",
                 severity="warning",
             )
-            return rows
+            # Re-label anyway just in case measure_colonies left a mess
+            return self._reassign_ids(rows, data)
 
         # --- 2. Compute radial position for every detection ---
         for row in rows:
@@ -181,7 +182,7 @@ class InteriorColonyClassifier(Classifier):
                     severity="info",
                 )
             self._update_count(rows, data)
-            return rows
+            return self._reassign_ids(rows, data)
 
         # --- 4. Fit reference distribution from interior colonies ---
         ref = self._fit_reference(interior)
@@ -192,8 +193,14 @@ class InteriorColonyClassifier(Classifier):
         data.metadata["edge_zone_n"] = len(edge)
 
         # --- 5. Score edge-zone detections ---
+        # Detections already tagged as merged colonies (count_estimate >= 2)
+        # bypass classification: an upstream geometric step has vouched for
+        # them, and they would otherwise look like area outliers and be
+        # rejected here.
         n_rejected = 0
         for row in edge:
+            if int(row.get("colony_count_estimate", 1)) >= 2:
+                continue
             reasons = self._score(row, ref)
             if reasons:
                 row["is_artifact"] = True
@@ -213,7 +220,41 @@ class InteriorColonyClassifier(Classifier):
                 severity="info",
             )
 
-        return rows
+        return self._reassign_ids(rows, data)
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    def _reassign_ids(self, rows: list[dict[str, Any]], data: ImageData) -> list[dict[str, Any]]:
+        """Re-assign IDs: colonies first (1..N), then artifacts (N+1..M).
+
+        This ensures IDs in annotated images and tables match the count.
+        """
+        colonies = [r for r in rows if not r.get("is_artifact")]
+        artifacts = [r for r in rows if r.get("is_artifact")]
+
+        # Sort each group by their original label (or spatial position) to
+        # maintain consistency across runs.
+        def sort_key(row):
+            return (row.get("centroid_y", 0), row.get("centroid_x", 0))
+
+        colonies.sort(key=sort_key)
+        artifacts.sort(key=sort_key)
+
+        new_rows = []
+        for i, row in enumerate(colonies, 1):
+            row["label"] = i
+            new_rows.append(row)
+
+        n_colonies = len(colonies)
+        for i, row in enumerate(artifacts, 1):
+            row["label"] = n_colonies + i
+            new_rows.append(row)
+
+        # Replace data.measurements with the re-ordered and re-labeled list.
+        data.measurements[:] = new_rows
+        return data.measurements
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -288,10 +329,17 @@ class InteriorColonyClassifier(Classifier):
         return False, ""
 
     def _apply_strict_fallback(self, rows: list[dict[str, Any]]) -> int:
-        """Mark anything insufficiently round as an artifact. Returns count."""
+        """Mark anything insufficiently round as an artifact. Returns count.
+
+        Detections already tagged with ``colony_count_estimate >= 2`` are
+        skipped: the multiplicity estimator has already vouched for them as
+        merged colonies (which legitimately have eccentricity > 0.55).
+        """
         max_ecc: float = self.params.strict_fallback_max_eccentricity  # type: ignore[attr-defined]
         n = 0
         for row in rows:
+            if int(row.get("colony_count_estimate", 1)) >= 2:
+                continue
             ecc = row.get("eccentricity")
             if isinstance(ecc, (int, float)) and float(ecc) > max_ecc:
                 row["is_artifact"] = True
@@ -351,8 +399,16 @@ class InteriorColonyClassifier(Classifier):
 
     @staticmethod
     def _update_count(rows: list[dict[str, Any]], data: ImageData) -> None:
-        """Rewrite colony_count in metadata to exclude artifacts."""
-        n_colonies = sum(1 for r in rows if not r.get("is_artifact", False))
+        """Rewrite colony_count in metadata to exclude artifacts.
+
+        ``colony_count`` is the sum of ``colony_count_estimate`` across
+        non-artifact rows so that merged-colony detections (tagged by
+        ``estimate_multiplicity``) contribute their estimated multiplicity.
+        ``detection_count`` is the raw row count for cross-reference.
+        """
+        kept = [r for r in rows if not r.get("is_artifact", False)]
         n_artifacts = sum(1 for r in rows if r.get("is_artifact", False))
+        n_colonies = sum(int(r.get("colony_count_estimate", 1)) for r in kept)
         data.metadata["colony_count"] = n_colonies
+        data.metadata["detection_count"] = len(kept)
         data.metadata["artifact_count"] = n_artifacts

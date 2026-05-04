@@ -25,12 +25,16 @@ class AnnotatedImageExporter(Exporter):
         mask_key: str = "objects"
         draw_numbers: bool = True
         outline_color: tuple[int, int, int] = (255, 64, 64)
-        artifact_outline_color: tuple[int, int, int] = (255, 140, 0)
+        artifact_outline_color: tuple[int, int, int] = (255, 0, 255)
         """Outline color for detections marked ``is_artifact=True``.
         Drawn without numbers so they're visually distinct from counted
-        colonies but remain auditable. Default is orange so artifacts are
-        visible against any plate background; gray (130, 130, 130) is
-        a more subtle alternative if you find orange too distracting.
+        colonies but remain auditable. Default is magenta.
+        """
+        merged_outline_color: tuple[int, int, int] = (200, 0, 255)
+        """Outline color for detections tagged by ``estimate_multiplicity``
+        as merged colonies (``colony_count_estimate >= 2``). Their text
+        label is suffixed with ``xN`` so it's clear they contribute more
+        than one to the total count. Default is a deep purple/magenta.
         """
         text_color: tuple[int, int, int] = (255, 255, 0)
         draw_plate_boundary: bool = True
@@ -38,8 +42,8 @@ class AnnotatedImageExporter(Exporter):
         exclusion) as a blue ring. Useful for diagnosing plate detection and
         seeing exactly which colonies fall inside the analysis region.
         """
-        plate_boundary_color: tuple[int, int, int] = (30, 144, 255)
-        """Color of the plate boundary ring (default: dodger blue)."""
+        plate_boundary_color: tuple[int, int, int] = (0, 255, 0)
+        """Color of the plate boundary ring (default: bright green)."""
         plate_mask_key: str = "plate"
         """Key in ``data.masks`` for the plate interior mask used to draw
         the boundary ring."""
@@ -70,22 +74,65 @@ class AnnotatedImageExporter(Exporter):
             )
             return
 
-        # Split label IDs into normal vs. artifact for separate colouring.
+        # Split label IDs into three groups for separate colouring:
+        # artifacts (orange), merged colonies (magenta), and singletons (red).
         artifact_ids = {
             int(r["label"]) for r in data.measurements if r.get("is_artifact") and "label" in r
+        }
+        merged_ids = {
+            int(r["label"])
+            for r in data.measurements
+            if not r.get("is_artifact")
+            and int(r.get("colony_count_estimate", 1)) >= 2
+            and "label" in r
         }
 
         # Convert to uint8 RGB for drawing.
         rgb = self._to_rgb_uint8(base)
 
-        if artifact_ids:
-            artifact_mask = np.isin(labels, list(artifact_ids))
-            normal_labels = np.where(~artifact_mask, labels, 0)
+        if artifact_ids or merged_ids:
+            artifact_mask = (
+                np.isin(labels, list(artifact_ids))
+                if artifact_ids
+                else np.zeros_like(labels, dtype=bool)
+            )
+            merged_mask = (
+                np.isin(labels, list(merged_ids))
+                if merged_ids
+                else np.zeros_like(labels, dtype=bool)
+            )
+            
+            # Multi-class support: handle colonies with custom class colors
+            class_colored_rows = [
+                r for r in data.measurements 
+                if not r.get("is_artifact") 
+                and "class_color" in r 
+                and "label" in r
+            ]
+            
+            normal_mask = (labels > 0) & ~artifact_mask & ~merged_mask
+            
+            # Remove custom colored ones from the normal mask
+            for r in class_colored_rows:
+                normal_mask &= (labels != int(r["label"]))
+
+            normal_labels = np.where(normal_mask, labels, 0)
             artifact_labels_arr = np.where(artifact_mask, labels, 0)
+            merged_labels_arr = np.where(merged_mask, labels, 0)
+            
             normal_bounds = segmentation.find_boundaries(normal_labels, mode="outer")
             artifact_bounds = segmentation.find_boundaries(artifact_labels_arr, mode="outer")
+            merged_bounds = segmentation.find_boundaries(merged_labels_arr, mode="outer")
+            
             rgb[normal_bounds] = np.array(self.params.outline_color, dtype=np.uint8)  # type: ignore[attr-defined]
             rgb[artifact_bounds] = np.array(self.params.artifact_outline_color, dtype=np.uint8)  # type: ignore[attr-defined]
+            rgb[merged_bounds] = np.array(self.params.merged_outline_color, dtype=np.uint8)  # type: ignore[attr-defined]
+            
+            # Draw each class-colored colony
+            for r in class_colored_rows:
+                m = (labels == int(r["label"]))
+                b = segmentation.find_boundaries(m, mode="outer")
+                rgb[b] = np.array(r["class_color"], dtype=np.uint8)
         else:
             boundaries = segmentation.find_boundaries(labels, mode="outer")
             rgb[boundaries] = np.array(self.params.outline_color, dtype=np.uint8)  # type: ignore[attr-defined]
@@ -96,10 +143,11 @@ class AnnotatedImageExporter(Exporter):
             self._draw_plate_boundary(rgb, data, labels.shape)
 
         im = Image.fromarray(rgb)
-        # Only draw numbers for non-artifact detections.
-        countable = [r for r in data.measurements if not r.get("is_artifact")]
+        
         if self.params.draw_numbers:  # type: ignore[attr-defined]
-            self._draw_numbers(im, countable)
+            # Draw numbers for ALL detections now that artifacts have sequential IDs
+            # following the colony IDs.
+            self._draw_numbers(im, data.measurements)
 
         path = Path(self.params.output_path)  # type: ignore[attr-defined]
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -151,14 +199,84 @@ class AnnotatedImageExporter(Exporter):
 
     def _draw_numbers(self, im: Image.Image, measurements: list[dict[str, Any]]) -> None:
         draw = ImageDraw.Draw(im)
+        w, h = im.size
+        # Heuristic for font size: roughly 1.5% of the image's min dimension.
+        fs = max(10, int(min(w, h) * 0.015))
         try:
+            font = ImageFont.load_default(size=fs)
+        except TypeError:
             font = ImageFont.load_default()
-        except OSError:
-            font = None
+
+        # Offset labels based on font size.
+        off_x = int(fs * 0.4)
+        off_y = -int(fs * 0.6)
+
+        # Collision avoidance: keep track of occupied areas (rectangles).
+        # We use a simple grid or list of bboxes. Since N is usually < 500,
+        # a list is fine.
+        occupied_bboxes: list[tuple[float, float, float, float]] = []
+
         for row in measurements:
             if "centroid_x" not in row or "centroid_y" not in row:
                 continue
+            
             x = float(row["centroid_x"])
             y = float(row["centroid_y"])
             label = str(row.get("label", "?"))
-            draw.text((x + 4, y - 6), label, fill=self.params.text_color, font=font)  # type: ignore[attr-defined]
+            est = int(row.get("colony_count_estimate", 1))
+            if est >= 2:
+                label = f"{label}x{est}"
+            
+            # Determine text size to calculate bounding box
+            left, top, right, bottom = draw.textbbox((x + off_x, y + off_y), label, font=font)
+            
+            # Add a small buffer to the bbox
+            buffer = fs * 0.2
+            curr_bbox = (left - buffer, top - buffer, right + buffer, bottom + buffer)
+            
+            # Check for collisions with previously placed labels
+            overlap = False
+            for other_bbox in occupied_bboxes:
+                # Standard AABB collision check
+                if not (curr_bbox[2] < other_bbox[0] or 
+                        curr_bbox[0] > other_bbox[2] or 
+                        curr_bbox[3] < other_bbox[1] or 
+                        curr_bbox[1] > other_bbox[3]):
+                    overlap = True
+                    break
+            
+            if not overlap:
+                draw.text((x + off_x, y + off_y), label, fill=self.params.text_color, font=font)  # type: ignore[attr-defined]
+                occupied_bboxes.append(curr_bbox)
+            else:
+                # If it overlaps, try a few alternative positions (above, below, left, right)
+                found_alt = False
+                # 8 compass directions to try shifting the label
+                angles = [np.pi/2, -np.pi/2, 0, np.pi, np.pi/4, -np.pi/4, 3*np.pi/4, -3*np.pi/4]
+                dist = fs * 1.2
+                
+                for angle in angles:
+                    ax = x + np.cos(angle) * dist
+                    ay = y + np.sin(angle) * dist
+                    
+                    a_left, a_top, a_right, a_bottom = draw.textbbox((ax, ay), label, font=font)
+                    a_curr_bbox = (a_left - buffer, a_top - buffer, a_right + buffer, a_bottom + buffer)
+                    
+                    a_overlap = False
+                    for other_bbox in occupied_bboxes:
+                        if not (a_curr_bbox[2] < other_bbox[0] or 
+                                a_curr_bbox[0] > other_bbox[2] or 
+                                a_curr_bbox[3] < other_bbox[1] or 
+                                a_curr_bbox[1] > other_bbox[3]):
+                            a_overlap = True
+                            break
+                    
+                    if not a_overlap:
+                        draw.text((ax, ay), label, fill=self.params.text_color, font=font)  # type: ignore[attr-defined]
+                        occupied_bboxes.append(a_curr_bbox)
+                        found_alt = True
+                        break
+                
+                # If still no room, we skip drawing this specific number to avoid
+                # unreadable unholy messes, or we could draw it with high transparency.
+                # For now, skipping is cleaner for professional output.
