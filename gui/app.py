@@ -261,6 +261,13 @@ with st.sidebar:
             st.session_state[key] = new_val
             st.session_state[f"num_{key}"] = new_val
         
+        # Handle individual reset BEFORE widgets are instantiated
+        if c3.button("↺", key=f"reset_{key}", help=f"Reset {label}"):
+            st.session_state[key] = default_val
+            st.session_state[f"num_{key}"] = default_val
+            st.session_state[f"slide_{key}"] = default_val
+            st.rerun()
+
         # Ensure sub-keys are initialized
         if f"num_{key}" not in st.session_state:
             st.session_state[f"num_{key}"] = st.session_state[key]
@@ -287,12 +294,6 @@ with st.sidebar:
             help=help_text,
             on_change=sync_slide
         )
-        
-        if c3.button("↺", key=f"reset_{key}", help=f"Reset {label}"):
-            st.session_state[key] = default_val
-            st.session_state[f"num_{key}"] = default_val
-            st.session_state[f"slide_{key}"] = default_val
-            st.rerun()
             
         return st.session_state[key]
 
