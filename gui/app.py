@@ -119,7 +119,7 @@ with st.sidebar:
         help="Path to a directory on your machine."
     )
     c_f2.markdown("<div style='height: 29px;'></div>", unsafe_allow_html=True)
-    if c_f2.button("📁", key="browse_input", help="Browse for input folder", use_container_width=True):
+    if c_f2.button("📁", key="browse_input", help="Browse for input folder", width="stretch"):
         selected = local_folder_picker("Select Input Folder")
         if selected:
             st.session_state["folder_path"] = selected
@@ -133,7 +133,7 @@ with st.sidebar:
         help="Directory where results will be saved. Defaults to gui_results/<image_name>/ if left blank.",
     )
     c_o2.markdown("<div style='height: 29px;'></div>", unsafe_allow_html=True)
-    if c_o2.button("📁", key="browse_output", help="Browse for output folder", use_container_width=True):
+    if c_o2.button("📁", key="browse_output", help="Browse for output folder", width="stretch"):
         selected = local_folder_picker("Select Output Folder")
         if selected:
             st.session_state["output_folder_path"] = selected
@@ -152,7 +152,9 @@ with st.sidebar:
     # Defaults
     margin_default, min_area_default, min_circ_default = 0.08, 10, 0.7
     interior_radius_default = 0.85
-    
+    max_dimension_default = 2000
+    resize_default = False
+
     if repro_file:
         try:
             import yaml
@@ -163,6 +165,10 @@ with st.sidebar:
             min_area_default = int(steps.get('threshold_segment', {}).get('min_area', 10))
             min_circ_default = float(steps.get('threshold_segment', {}).get('min_circularity', 0.7))
             interior_radius_default = float(steps.get('classify_by_interior', {}).get('interior_radius_frac', 0.85))
+            loaded_max_dim = steps.get('load_image', {}).get('max_dimension')
+            if loaded_max_dim is not None:
+                max_dimension_default = int(loaded_max_dim)
+                resize_default = True
         except Exception as e:
             st.error(f"Error loading config: {e}")
 
@@ -184,7 +190,58 @@ with st.sidebar:
 
     # 3. Tuning Parameters
     st.header("3. Tuning")
-    
+
+    # Image resize
+    if "resize_enabled" not in st.session_state:
+        st.session_state["resize_enabled"] = resize_default
+    if "max_dimension" not in st.session_state:
+        st.session_state["max_dimension"] = max_dimension_default
+
+    resize_enabled = st.checkbox(
+        "Resize images before analysis",
+        key="resize_enabled",
+        help="Downscale each image so its longest side is at most the value below. "
+             "Preserves aspect ratio. Useful for speeding up large phone photos."
+    )
+
+    # When the checkbox is first ticked, auto-populate max_dimension with the
+    # actual longest side of the current image so the user has a meaningful
+    # starting point rather than a hardcoded default.
+    _prev_resize = st.session_state.get("_prev_resize_enabled", False)
+    if resize_enabled and not _prev_resize:
+        _src = None
+        if input_files:
+            _src = input_files[0]
+        elif input_folder and Path(input_folder).is_dir():
+            from blenny.modules.load_image import IMAGE_EXTENSIONS
+            _candidates = sorted(
+                p for p in Path(input_folder).iterdir()
+                if p.suffix.lower() in IMAGE_EXTENSIONS
+            )
+            if _candidates:
+                _src = _candidates[0]
+        if _src is not None:
+            try:
+                _img = Image.open(_src)
+                st.session_state["max_dimension"] = max(_img.size)
+            except Exception:
+                pass
+    st.session_state["_prev_resize_enabled"] = resize_enabled
+
+    max_dimension = st.number_input(
+        "Max dimension (px)",
+        min_value=100,
+        max_value=10000,
+        step=100,
+        key="max_dimension",
+        disabled=not resize_enabled,
+        help="Longest side of the image will be scaled down to this many pixels. "
+             "Non-square images are scaled proportionally — no stretching.",
+        label_visibility="visible",
+    )
+
+    st.divider()
+
     # Compact Sliders with editable values and individual resets
     def compact_control(label, key, min_val, max_val, default_val, step, help_text):
         if key not in st.session_state:
@@ -319,7 +376,7 @@ with st.sidebar:
     
     st.divider()
     
-    run_btn = st.button("Run Analysis", type="primary", use_container_width=True)
+    run_btn = st.button("Run Analysis", type="primary", width="stretch")
 
 # --- Main Area ---
 input_source = None
@@ -451,7 +508,7 @@ if input_source:
                     draw.line([manual_cx-20, manual_cy, manual_cx+20, manual_cy], fill="blue", width=3)
                     draw.line([manual_cx, manual_cy-20, manual_cx, manual_cy+20], fill="blue", width=3)
                     display_img = draw_img
-                st.image(display_img, use_container_width=True, caption=f"Reference: {ref_image_path.name}")
+                st.image(display_img, width="stretch", caption=f"Reference: {ref_image_path.name}")
             
             if len(input_paths) > 1:
                 st.write(f"Batch processing {len(input_paths)} images starting with {ref_image_path.name}")
@@ -491,6 +548,7 @@ if run_btn and input_source:
             
             # Apply GUI overrides
             overrides = {
+                "load_image": {"max_dimension": int(max_dimension) if resize_enabled else None},
                 "detect_plate": {"margin_frac": margin},
                 "threshold_segment": {"min_area": min_area, "min_circularity": min_circ},
                 "classify_by_interior": {"interior_radius_frac": interior_radius},
@@ -542,6 +600,7 @@ if run_btn and input_source:
                 "--override", f"threshold_segment.min_area={min_area}",
                 "--override", f"threshold_segment.min_circularity={min_circ}",
                 "--override", f"classify_by_interior.interior_radius_frac={interior_radius}",
+                "--override", f"load_image.max_dimension={int(max_dimension) if resize_enabled else 'null'}",
             ]
             if plate_mode == "Manual Circle":
                 cmd.extend([
@@ -587,7 +646,7 @@ if "analysis_data" in st.session_state:
 
         # 3. Live render the image and summary
         img = annotator.render(data)
-        st.image(img, caption=f"Reviewed Colonies: {data.metadata['colony_count']}", use_container_width=True)
+        st.image(img, caption=f"Reviewed Colonies: {data.metadata['colony_count']}", width="stretch")
 
         # 4. Handle data editor changes
         # We want to toggle 'is_artifact'
@@ -611,7 +670,7 @@ if "analysis_data" in st.session_state:
             },
             disabled=["label", "centroid_x", "centroid_y", "area_px", "Type"],
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
             key="results_editor"
         )
         
@@ -631,7 +690,7 @@ if "analysis_data" in st.session_state:
                     st.rerun()
 
         save_dir = Path(output_folder_input).resolve() if output_folder_input.strip() else output_dir / stem
-        if st.button("Save Results", type="primary", use_container_width=True):
+        if st.button("Save Results", type="primary", width="stretch"):
             save_dir.mkdir(parents=True, exist_ok=True)
             # Re-point every exporter to the chosen directory, preserving filenames.
             for step in pipe.steps:
