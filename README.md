@@ -15,6 +15,12 @@ cd blenny
 pip install -e .
 ```
 
+> **Windows note:** If `blenny` isn't recognized as a command after install, your
+> virtual environment's `Scripts\` folder may not be on your PATH. Either activate
+> the venv first (`.\.venv\Scripts\activate`) or use the `python -m blenny`
+> equivalents throughout — e.g. `python -m blenny init`, `python -m blenny gui`.
+> Both forms work identically on all platforms.
+
 ### 2. Run your first analysis
 ```bash
 # Generate a starter pipeline (creates pipeline.yaml)
