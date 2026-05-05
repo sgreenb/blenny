@@ -137,9 +137,12 @@ class ThresholdSegmenter(Segmenter):
             min_sol: float = self.params.min_solidity  # type: ignore[attr-defined]
             
             n_rejected_circ = 0
+            min_a: int = self.params.min_area  # type: ignore[attr-defined]
             for prop in measure.regionprops(labels):
                 drop = False
                 if prop.area > max_area:
+                    drop = True
+                elif prop.area < min_a:
                     drop = True
                 elif min_circ > 0 and prop.perimeter > 0:
                     circ = 4.0 * math.pi * prop.area / (prop.perimeter * prop.perimeter)
