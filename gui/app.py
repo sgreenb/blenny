@@ -19,7 +19,6 @@ from blenny.modules.classify_interior import InteriorColonyClassifier
 def local_folder_picker(title="Select Folder"):
     """
     Open a native folder picker via a subprocess to avoid threading crashes.
-    Currently optimized for macOS.
     """
     if sys.platform == "darwin":
         # macOS: Use AppleScript for a native, thread-safe picker
@@ -31,16 +30,21 @@ def local_folder_picker(title="Select Folder"):
         except Exception:
             pass
     elif sys.platform == "win32":
-        # Windows: Use PowerShell for a native picker
-        cmd = (
-            'powershell -Command "Add-Type -AssemblyName System.Windows.Forms; '
-            '$f = New-Object System.Windows.Forms.FolderBrowserDialog; '
-            f'$f.Description = \\"{title}\\"; '
-            'if ($f.ShowDialog() -eq \\"OK\\") { $f.SelectedPath }"'
+        # Windows: Pass args as a list (avoids cmd.exe quoting issues) and use
+        # -STA so PowerShell runs in Single-Threaded Apartment mode, which is
+        # required by System.Windows.Forms dialogs.
+        script = (
+            "Add-Type -AssemblyName System.Windows.Forms; "
+            "$f = New-Object System.Windows.Forms.FolderBrowserDialog; "
+            f"$f.Description = '{title}'; "
+            "if ($f.ShowDialog() -eq 'OK') { Write-Output $f.SelectedPath }"
         )
         try:
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-            if result.returncode == 0:
+            result = subprocess.run(
+                ["powershell", "-STA", "-Command", script],
+                capture_output=True, text=True, timeout=120,
+            )
+            if result.returncode == 0 and result.stdout.strip():
                 return result.stdout.strip()
         except Exception:
             pass
