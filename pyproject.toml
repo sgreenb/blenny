@@ -29,7 +29,11 @@ dependencies = [
     "pyyaml>=6.0",
     "pillow>=10",
     "scikit-image>=0.22",
+    "scipy>=1.10",
     "typer>=0.12",
+    "streamlit>=1.35",
+    "streamlit-drawable-canvas>=0.9",
+    "pandas>=2.0",
 ]
 
 [project.optional-dependencies]
