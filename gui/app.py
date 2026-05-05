@@ -1,5 +1,6 @@
 import streamlit as st
 import subprocess
+import shutil
 import json
 import os
 import sys
@@ -520,10 +521,18 @@ else:
 if run_btn and input_source:
     output_dir = Path("gui_results")
     debug_dir = Path("gui_debug") if enable_debug else None
-    
+
+    # Wipe the temp working directories so stale results from previous runs
+    # never bleed into the current one.
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    if debug_dir and debug_dir.exists():
+        shutil.rmtree(debug_dir)
+
     # Clear previous result state when starting a new run
     for _key in ("analysis_data", "analysis_stem", "analysis_pipeline",
-                 "analysis_output_dir", "results_editor"):
+                 "analysis_output_dir", "results_editor", "batch_results", "batch_output_dir"):
         st.session_state.pop(_key, None)
 
     with st.status("Analyzing plates...", expanded=True) as status:
@@ -600,7 +609,7 @@ if run_btn and input_source:
                 "--override", f"threshold_segment.min_area={min_area}",
                 "--override", f"threshold_segment.min_circularity={min_circ}",
                 "--override", f"classify_by_interior.interior_radius_frac={interior_radius}",
-                "--override", f"load_image.max_dimension={int(max_dimension) if resize_enabled else 'null'}",
+                *((["--override", f"load_image.max_dimension={int(max_dimension)}"] if resize_enabled else [])),
             ]
             if plate_mode == "Manual Circle":
                 cmd.extend([
@@ -612,6 +621,7 @@ if run_btn and input_source:
             result = subprocess.run(cmd, capture_output=True, text=True)
             if result.returncode == 0:
                 st.session_state["batch_results"] = result.stdout
+                st.session_state["batch_output_dir"] = str(output_dir.resolve())
                 status.update(label="Batch Analysis Complete!", state="complete", expanded=False)
             else:
                 st.error(result.stderr)
@@ -711,8 +721,31 @@ if "analysis_data" in st.session_state:
 
 elif "batch_results" in st.session_state:
     st.subheader("Batch Results")
-    st.info("Interactive review is currently optimized for single-image analysis. See logs below.")
-    st.code(st.session_state["batch_results"])
+    st.info("Interactive review is available for single-image runs. Batch results are saved to disk.")
+
+    # Show the JSON summary
+    with st.expander("📊 View Batch Summary", expanded=True):
+        st.code(st.session_state["batch_results"], language="json")
+
+    # Save / copy results
+    default_batch_out = st.session_state.get("batch_output_dir", "gui_results")
+    save_dest = Path(output_folder_input).resolve() if output_folder_input.strip() else None
+
+    if save_dest and str(save_dest) != default_batch_out:
+        if st.button("💾 Copy Results to Output Folder", type="primary", width="stretch"):
+            src = Path(default_batch_out)
+            save_dest.mkdir(parents=True, exist_ok=True)
+            for item in src.iterdir():
+                dest_item = save_dest / item.name
+                if item.is_dir():
+                    shutil.copytree(item, dest_item, dirs_exist_ok=True)
+                else:
+                    shutil.copy2(item, dest_item)
+            st.success(f"Results copied to {save_dest}")
+    else:
+        st.success(f"Results already saved to **{default_batch_out}**")
+        st.caption("To save to a different location, set the Output Folder in the sidebar before running, "
+                   "or set it now and click the button that will appear above.")
 
 elif input_source:
     st.info("Please run the analysis to see results.")

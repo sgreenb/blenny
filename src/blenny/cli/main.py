@@ -167,6 +167,8 @@ def run(
                         parsed_val = json.loads(value)
                     except json.JSONDecodeError:
                         parsed_val = value
+                elif value.lower() in ("null", "none"):
+                    parsed_val = None
                 elif value.lower() == "true":
                     parsed_val = True
                 elif value.lower() == "false":
