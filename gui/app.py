@@ -341,6 +341,11 @@ elif input_folder and Path(input_folder).exists() and Path(input_folder).is_dir(
 
 col1, col2 = st.columns(2)
 
+if not input_source:
+    for _key in ("analysis_data", "analysis_stem", "analysis_pipeline",
+                 "analysis_output_dir", "results_editor", "batch_results"):
+        st.session_state.pop(_key, None)
+
 if input_source:
     if input_paths:
         # For masking, we use a 'reference image' (the first one)
