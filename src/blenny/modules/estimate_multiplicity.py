@@ -43,6 +43,11 @@ class MultiplicityEstimator(Classifier):
     """Tag merged-colony detections with ``colony_count_estimate >= 2``."""
 
     class Params(BlennyParams):
+        enabled: bool = True
+        """Set to False to skip multiplicity estimation entirely. All detections
+        will keep ``colony_count_estimate=1`` and no merged-colony flags are raised.
+        """
+
         # ---- "Clean singleton" definition (used to build the reference) ----
         singleton_min_circularity: float = 0.85
         """A detection is considered a clean singleton (used to compute the
@@ -96,6 +101,9 @@ class MultiplicityEstimator(Classifier):
 
     def classify(self, rows: list[dict[str, Any]], data: ImageData) -> list[dict[str, Any]]:
         if not rows:
+            return rows
+
+        if not self.params.enabled:  # type: ignore[attr-defined]
             return rows
 
         # 1. Identify clean singletons and compute the per-plate reference.

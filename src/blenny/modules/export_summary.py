@@ -43,7 +43,7 @@ class SummaryExporter(Exporter):
             f"Total Colonies:   {m.get('colony_count', 0)}",
             f"Artifacts Found:  {m.get('artifact_count', 0)}",
             "",
-            "--- Size Distribution (pixels) ---"
+            "--- Size Distribution of Counted Colonies (pixels) ---"
         ]
 
         if areas:

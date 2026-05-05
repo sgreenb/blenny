@@ -329,7 +329,16 @@ with st.sidebar:
         "Interior Radius Frac", "interior_radius", 0.1, 1.0, interior_radius_default, 0.05,
         "Fraction of the plate radius treated as the 'safe' interior zone for artifact rejection."
     )
-    
+
+    enable_multiplicity = st.checkbox(
+        "Enable multiplicity estimation",
+        value=True,
+        key="enable_multiplicity",
+        help="When enabled, detections that look like fused colonies (large area, low "
+             "circularity, high solidity) are scored as multiple colonies. Uncheck to "
+             "count every detection as exactly one colony."
+    )
+
     st.divider()
 
     # 4. Plate Area
@@ -561,6 +570,7 @@ if run_btn and input_source:
                 "detect_plate": {"margin_frac": margin},
                 "threshold_segment": {"min_area": min_area, "min_circularity": min_circ},
                 "classify_by_interior": {"interior_radius_frac": interior_radius},
+                "estimate_multiplicity": {"enabled": enable_multiplicity},
             }
             if plate_mode == "Manual Circle":
                 overrides["detect_plate"].update({
@@ -609,6 +619,7 @@ if run_btn and input_source:
                 "--override", f"threshold_segment.min_area={min_area}",
                 "--override", f"threshold_segment.min_circularity={min_circ}",
                 "--override", f"classify_by_interior.interior_radius_frac={interior_radius}",
+                *([] if enable_multiplicity else ["--no-multiplicity"]),
                 *((["--override", f"load_image.max_dimension={int(max_dimension)}"] if resize_enabled else [])),
             ]
             if plate_mode == "Manual Circle":
@@ -732,7 +743,7 @@ elif "batch_results" in st.session_state:
     save_dest = Path(output_folder_input).resolve() if output_folder_input.strip() else None
 
     if save_dest and str(save_dest) != default_batch_out:
-        if st.button("💾 Copy Results to Output Folder", type="primary", width="stretch"):
+        if st.button("Copy Results to Output Folder", type="primary", width="stretch"):
             src = Path(default_batch_out)
             save_dest.mkdir(parents=True, exist_ok=True)
             for item in src.iterdir():

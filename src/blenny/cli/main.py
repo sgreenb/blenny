@@ -124,6 +124,13 @@ def run(
             help="Save batch summary.csv and batch_log.txt. Defaults to True if multiple images are processed.",
         ),
     ] = None,
+    multiplicity: Annotated[
+        bool,
+        typer.Option(
+            "--multiplicity/--no-multiplicity",
+            help="Enable or disable merged-colony multiplicity estimation (default: enabled).",
+        ),
+    ] = True,
     fail_fast: Annotated[
         bool,
         typer.Option(
@@ -154,6 +161,11 @@ def run(
     raw_steps = extract_steps(raw_config)
 
     # Apply command-line overrides to the raw steps
+    if not multiplicity:
+        for step in raw_steps:
+            if step["name"] == "estimate_multiplicity":
+                step.setdefault("params", {})["enabled"] = False
+
     if override:
         for item in override:
             try:
