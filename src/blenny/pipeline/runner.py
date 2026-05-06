@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
@@ -76,11 +76,15 @@ class Pipeline:
         data: ImageData | str | Path | None = None,
         *,
         debug_dir: str | Path | None = None,
+        progress_callback: Callable[[int, int, str], None] | None = None,
     ) -> ImageData:
         """Run the pipeline. Accepts an `ImageData`, a source path/string, or nothing.
 
         If ``debug_dir`` is provided, intermediate images and masks are saved
         after each step into that directory.
+
+        The ``progress_callback`` (if provided) is called after each step with
+        ``(step_index, total_steps, step_name)``.
         """
         ctx = self._coerce_input(data)
         dwriter = None
@@ -89,7 +93,11 @@ class Pipeline:
 
             dwriter = DebugWriter(Path(debug_dir))
 
-        for step in self.steps:
+        n_steps = len(self.steps)
+        for i, step in enumerate(self.steps):
+            if progress_callback:
+                progress_callback(i + 1, n_steps, step.name)
+            
             t0 = time.perf_counter()
             ctx = step.run(ctx)
             duration = time.perf_counter() - t0

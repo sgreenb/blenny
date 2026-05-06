@@ -543,8 +543,16 @@ if run_btn and input_source:
                  "analysis_output_dir", "results_editor", "batch_results", "batch_output_dir"):
         st.session_state.pop(_key, None)
 
-    with st.status("Analyzing plates...", expanded=True) as status:
-        st.write("Executing Blenny engine...")
+    with st.status("Analyzing plates...", expanded=True) as status_box:
+        log_container = st.empty()
+        def log_message(msg):
+            # We keep a log in session state so it persists during the run
+            if "gui_log" not in st.session_state:
+                st.session_state["gui_log"] = ""
+            st.session_state["gui_log"] += msg + "\n"
+            log_container.text(st.session_state["gui_log"])
+
+        st.session_state["gui_log"] = "" # Clear previous log
         
         # Determine input for Pipeline
         if input_source == "files":
@@ -556,6 +564,7 @@ if run_btn and input_source:
         # For batch, we still use the CLI for now as it's more robust for large sets.
         if len(input_imgs) == 1:
             img_path = input_imgs[0]
+            log_message(f"Processing single image: {img_path.name}")
             
             # 1. Build Pipeline manually so we can inject params
             # We mimic the logic from CLI main.py
@@ -596,7 +605,13 @@ if run_btn and input_source:
             
             # 2. Run
             img_debug_dir = debug_dir / img_path.stem if debug_dir else None
-            data = pipe.run(img_path, debug_dir=img_debug_dir)
+            
+            def gui_progress(current, total, name):
+                log_message(f"  [{current}/{total}] {name}...")
+
+            data = pipe.run(img_path, debug_dir=img_debug_dir, progress_callback=gui_progress)
+            
+            log_message("Analysis complete.")
             
             # 3. Store in session state
             st.session_state["analysis_data"] = data
@@ -604,10 +619,12 @@ if run_btn and input_source:
             st.session_state["analysis_output_dir"] = output_dir
             st.session_state["analysis_pipeline"] = pipe
             
-            status.update(label="Analysis Complete!", state="complete", expanded=False)
+            status_box.update(label="Analysis Complete!", state="complete", expanded=False)
         else:
             # BATCH MODE (existing CLI path)
             cli_input = str(input_folder) if input_source == "folder" else str(temp_dir)
+            log_message(f"Starting batch process on {len(input_imgs)} images...")
+            
             cmd = [
                 "python3", cli_script, "run", 
                 pipeline_path, 
@@ -628,13 +645,29 @@ if run_btn and input_source:
                     "--override", f"detect_plate.force_r={manual_r}"
                 ])
             
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            if result.returncode == 0:
-                st.session_state["batch_results"] = result.stdout
+            # Use Popen to read stdout line by line
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+            
+            full_stdout = []
+            if process.stdout:
+                for line in process.stdout:
+                    clean_line = line.strip()
+                    if clean_line:
+                        # If it's the JSON result at the end, don't log it to the text box
+                        if clean_line.startswith("{") or clean_line.startswith("}") or clean_line.startswith("  \""):
+                            full_stdout.append(line)
+                            continue
+                        log_message(clean_line)
+                        full_stdout.append(line)
+            
+            _, stderr = process.communicate()
+            if process.returncode == 0:
+                st.session_state["batch_results"] = "".join(full_stdout)
                 st.session_state["batch_output_dir"] = str(output_dir.resolve())
-                status.update(label="Batch Analysis Complete!", state="complete", expanded=False)
+                status_box.update(label="Batch Analysis Complete!", state="complete", expanded=False)
             else:
-                st.error(result.stderr)
+                st.error(stderr)
+                log_message(f"ERROR: {stderr}")
 
 # --- Render Results (Live or Batch) ---
 
