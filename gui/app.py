@@ -367,14 +367,42 @@ with st.sidebar:
         manual_cx = compact_control("Center X", "manual_cx", 0, 4000, def_cx, 1, "X coordinate of the plate center.")
         manual_r = compact_control("Radius", "manual_r", 0, 2000, def_r, 1, "Radius of the plate in pixels.")
     
-    elif plate_mode == "Manual Shape":
+    if plate_mode == "Manual Shape":
         st.info("Use the canvas on the right to define the plate boundary. **Left-click** to add points and **Right-click** to close the shape.")
+        if Path("gui_plate_batch_mask.png").exists():
+            if st.button("Clear Plate Shape"):
+                os.remove("gui_plate_batch_mask.png")
+                st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
+                st.rerun()
+    
+    # If user switches away from Manual Shape mode, wipe the mask file
+    if "prev_plate_mode" in st.session_state and plate_mode != "Manual Shape" and st.session_state["prev_plate_mode"] == "Manual Shape":
+        if os.path.exists("gui_plate_batch_mask.png"):
+            os.remove("gui_plate_batch_mask.png")
+            st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
+            st.rerun()
+    st.session_state["prev_plate_mode"] = plate_mode
 
     st.divider()
 
     # 5. Masking
     st.header("5. Masking")
     enable_mask = st.checkbox("Enable Paint-to-Exclude", value=False)
+    
+    # If user disables masking, wipe the mask file
+    if "prev_enable_mask" in st.session_state and not enable_mask and st.session_state["prev_enable_mask"]:
+        if os.path.exists("gui_mask_batch_exclusion.png"):
+            os.remove("gui_mask_batch_exclusion.png")
+            st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
+            st.rerun()
+    st.session_state["prev_enable_mask"] = enable_mask
+
+    if enable_mask:
+        if Path("gui_mask_batch_exclusion.png").exists():
+            if st.button("Clear Exclusion Mask"):
+                os.remove("gui_mask_batch_exclusion.png")
+                st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
+                st.rerun()
     enable_debug = st.checkbox("Save debug step images", value=False,
                                help="Write intermediate images for every pipeline step to gui_debug/. Slower.")
     brush_size = st.slider("Brush Size", 1, 50, 20)
@@ -404,6 +432,18 @@ elif input_folder and Path(input_folder).exists() and Path(input_folder).is_dir(
     folder_path = Path(input_folder)
     from blenny.modules.load_image import IMAGE_EXTENSIONS
     input_paths = sorted([f for f in folder_path.iterdir() if f.suffix.lower() in IMAGE_EXTENSIONS])
+
+# --- Input Change Detection ---
+# Clear manual masks if the input images change
+if "last_input_paths" not in st.session_state:
+    st.session_state["last_input_paths"] = []
+
+current_input_names = [str(p) for p in input_paths]
+if current_input_names != st.session_state["last_input_paths"]:
+    for p in ["gui_plate_batch_mask.png", "gui_mask_batch_exclusion.png"]:
+        if os.path.exists(p):
+            os.remove(p)
+    st.session_state["last_input_paths"] = current_input_names
 
 col1, col2 = st.columns(2)
 
@@ -441,37 +481,49 @@ if input_source:
             r_eff = r * (1.0 - margin)
             draw.ellipse([manual_cx - r_eff, manual_cy - r_eff, manual_cx + r_eff, manual_cy + r_eff], outline="cyan", width=max(1, int(3/scale)))
         
+        # --- Integrated Drawing Area ---
+        manual_shape_path = Path("gui_plate_batch_mask.png") if Path("gui_plate_batch_mask.png").exists() else None
+        mask_path = Path("gui_mask_batch_exclusion.png") if Path("gui_mask_batch_exclusion.png").exists() else None
+        
+        # Tool Selection
+        tool = None
+        if plate_mode == "Manual Shape" and enable_mask:
+            tool = st.radio("Active Drawing Tool", ["Define Plate Area", "Paint Exclusion Mask"], horizontal=True)
+        elif enable_mask:
+            tool = "Paint Exclusion Mask"
+        elif plate_mode == "Manual Shape":
+            tool = "Define Plate Area"
+
+        # Overlay existing masks as translucent context guides
+        if manual_shape_path:
+            mask_im = Image.open(manual_shape_path).convert("L")
+            blue_img = Image.new("RGB", bg_image.size, (0, 0, 255))
+            blended = Image.blend(canvas_bg_img, blue_img, 0.15)
+            canvas_bg_img = Image.composite(blended, canvas_bg_img, mask_im)
+        
+        if mask_path:
+            mask_im = Image.open(mask_path).convert("L")
+            magenta_img = Image.new("RGB", bg_image.size, (255, 0, 255))
+            blended = Image.blend(canvas_bg_img, magenta_img, 0.15)
+            canvas_bg_img = Image.composite(blended, canvas_bg_img, mask_im)
+
         canvas_bg = canvas_bg_img.resize((canvas_width, canvas_height), Image.Resampling.LANCZOS)
 
-        if len(input_paths) > 1:
-            st.info(f"Batch Mode: Drawing on **{ref_image_path.name}** as reference. Mask will apply to all {len(input_paths)} images.")
-
-        # --- Integrated Drawing Area ---
-        manual_shape_path = None
-        mask_path = None
-        
-        # If both Manual Shape and Masking are enabled, we need a toggle to switch tool
-        canvas_mode = "Inclusion"
-        if plate_mode == "Manual Shape" and enable_mask:
-            canvas_mode = st.radio("Canvas Tool", ["1. Define Plate Shape", "2. Paint Exclusion Mask"], horizontal=True)
-        elif enable_mask:
-            canvas_mode = "Exclusion"
-        
-        if plate_mode == "Manual Shape" or enable_mask:
-            st.subheader(f"Manual Drawing: {canvas_mode}")
+        if tool:
+            st.subheader(f"Manual Drawing: {tool}")
             
-            if "Inclusion" in canvas_mode or "Define Plate Shape" in canvas_mode:
+            if tool == "Define Plate Area":
                 st.info("**Left-click** to add vertices around the plate. **Right-click** to close and submit.")
                 drawing_mode = "polygon"
                 fill_color = "rgba(0, 0, 255, 0.3)"
                 stroke_color = "#0000FF"
-                canvas_key = "shape_canvas"
+                canvas_key = f"shape_canvas_v{st.session_state.get('canvas_version', 0)}"
             else:
                 st.info("Paint over areas you want to EXCLUDE (contaminants, sharpie, etc.)")
                 drawing_mode = "freedraw"
                 fill_color = "rgba(255, 0, 255, 0.3)"
                 stroke_color = "#FF00FF"
-                canvas_key = "exclusion_canvas"
+                canvas_key = f"exclusion_canvas_v{st.session_state.get('canvas_version', 0)}"
 
             working_canvas = st_canvas(
                 fill_color=fill_color,
@@ -486,14 +538,14 @@ if input_source:
                 key=canvas_key,
             )
             
-            # Process results from whichever canvas is active
+            # Process results from whichever tool is active
             if working_canvas.image_data is not None:
                 alpha = working_canvas.image_data[:, :, 3]
                 if np.any(alpha > 0):
                     mask_canvas = Image.fromarray((alpha > 0).astype(np.uint8) * 255)
                     mask_im = mask_canvas.resize(bg_image.size, Image.Resampling.NEAREST)
                     
-                    if "Inclusion" in canvas_mode or "Shape" in canvas_mode:
+                    if tool == "Define Plate Area":
                         manual_shape_path = Path("gui_plate_batch_mask.png")
                         mask_im.save(manual_shape_path)
                     else:
@@ -593,7 +645,7 @@ if run_btn and input_source:
                     "crop": False,
                     "force_mask_path": str(manual_shape_path)
                 })
-            if enable_mask and 'mask_path' in locals() and mask_path:
+            if enable_mask and mask_path:
                 overrides["apply_exclusion_mask"] = {"mask_path": str(mask_path)}
             
             for step in raw_steps:
@@ -643,6 +695,15 @@ if run_btn and input_source:
                     "--override", f"detect_plate.force_cy={manual_cy}",
                     "--override", f"detect_plate.force_cx={manual_cx}",
                     "--override", f"detect_plate.force_r={manual_r}"
+                ])
+            if plate_mode == "Manual Shape" and manual_shape_path:
+                cmd.extend([
+                    "--override", "detect_plate.crop=False",
+                    "--override", f"detect_plate.force_mask_path={manual_shape_path}"
+                ])
+            if enable_mask and mask_path:
+                cmd.extend([
+                    "--override", f"apply_exclusion_mask.mask_path={mask_path}"
                 ])
             
             # Use Popen to read stdout line by line
