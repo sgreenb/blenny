@@ -118,7 +118,7 @@ Tunable parameters in the sidebar mirror the CLI overrides:
 | :--- | :--- |
 | Plate Rim Margin | `detect_plate.margin_frac` (default 0.08) |
 | Min Colony Area (px) | `threshold_segment.min_area` (default 10) |
-| Min Circularity | `threshold_segment.min_circularity` (default 0.7) |
+| Min Circularity | `threshold_segment.min_circularity` (default 0.75) |
 | Interior Radius Frac | `classify_by_interior.interior_radius_frac` (default 0.85) |
 
 ---
@@ -177,6 +177,10 @@ in `log.txt`, in `summary.csv` (as `flag_codes`), and at the terminal.
 - [x] Manual exclusion masking (paint-to-exclude)
 - [x] Interactive colony review (toggle artifact status without rerunning)
 - [x] Per-image provenance / reproducibility export (`--provenance`)
+- [x] Multi-feature artifact rejection (Area, Eccentricity, Intensity, and RGB Color)
+- [x] Enforce `min_area` post-watershed split in `ThresholdSegmenter`
+- [x] Switched Windows folder picker to tkinter (fixed GUI crash)
+- [x] Fixed GUI tuning reset bug (widget ordering)
 - [ ] **Next:** Sector counting (quadrant analysis)
 - [ ] **Next:** ML-based segmentation (Cellpose integration)
 - [ ] **Next:** Support for Time-lapse / Growth curves

@@ -37,7 +37,7 @@ class ThresholdSegmenter(Segmenter):
         max_area_frac: float = 0.25
         """Drop regions covering more than this fraction of the ROI (likely artefacts)."""
 
-        min_circularity: float = 0.7
+        min_circularity: float = 0.75
         """Drop regions whose 4π·area / perimeter² falls below this.
 
         A perfect disk has circularity 1.0. The plate-rim arcs and pen scribbles
@@ -46,7 +46,7 @@ class ThresholdSegmenter(Segmenter):
         cells or filaments).
         """
 
-        min_solidity: float = 0.85
+        min_solidity: float = 0.90
         """Drop regions whose area / convex-hull-area falls below this.
 
         Compact, round colonies have solidity near 1.0. Irregular pen marks,

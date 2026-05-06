@@ -59,6 +59,11 @@ class MultiplicityEstimator(Classifier):
         singleton_min_solidity: float = 0.92
         """Solidity bound for clean singletons (see above)."""
 
+        singleton_min_area: int = 15
+        """Minimum area for a clean singleton. Prevents tiny noise specks
+        from biasing the reference median area downward.
+        """
+
         min_singletons: int = 5
         """Minimum number of clean singletons needed to build a reliable
         reference. Below this, multiplicity estimation is skipped and a
@@ -79,9 +84,9 @@ class MultiplicityEstimator(Classifier):
         gives a clear "intermediate" zone we don't claim either way.
         """
 
-        merge_min_area_ratio: float = 1.5
+        merge_min_area_ratio: float = 1.8
         """Detection area must be at least this multiple of the median
-        singleton area to be considered a merged blob. Below 1.5x, area
+        singleton area to be considered a merged blob. Below 1.8x, area
         differences are within normal colony-to-colony variation.
         """
 
@@ -186,9 +191,11 @@ class MultiplicityEstimator(Classifier):
     def _is_clean_singleton(self, row: dict[str, Any]) -> bool:
         circ = row.get("circularity")
         sol = row.get("solidity")
-        if not isinstance(circ, (int, float)) or not isinstance(sol, (int, float)):
+        area = row.get("area_px")
+        if not all(isinstance(v, (int, float)) for v in (circ, sol, area)):
             return False
         return (
             float(circ) >= self.params.singleton_min_circularity  # type: ignore[attr-defined]
             and float(sol) >= self.params.singleton_min_solidity  # type: ignore[attr-defined]
+            and float(area) >= self.params.singleton_min_area  # type: ignore[attr-defined]
         )

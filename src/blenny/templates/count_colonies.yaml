@@ -50,8 +50,8 @@ steps:
       split_touching: true
       # Shape filters drop rim arcs (low circularity) and pen scribbles
       # (low solidity). Set either to 0 to disable.
-      min_circularity: 0.7
-      min_solidity: 0.85
+      min_circularity: 0.75
+      min_solidity: 0.90
 
   - name: add_manual_colonies
     # Used for manual researcher-in-the-loop interventions in the GUI.
@@ -64,7 +64,7 @@ steps:
 
   - name: estimate_multiplicity
     # Tag detections that look like fused / bilobed colonies (high solidity
-    # but low circularity, area >= 1.5x a typical singleton) with
+    # but low circularity, area >= 1.8x a typical singleton) with
     # colony_count_estimate >= 2 so they contribute their estimated
     # multiplicity to the count instead of being rejected as area outliers.
     # Tagged detections are drawn in magenta with an x N suffix in the
@@ -72,8 +72,8 @@ steps:
 
   - name: classify_by_interior
     # Validates edge-zone detections against the interior colony profile.
-    # Detections that don't match interior size/intensity/eccentricity are
-    # marked is_artifact=True and excluded from the count. They remain in
+    # Detections that don't match interior size/intensity/eccentricity/color
+    # are marked is_artifact=True and excluded from the count. They remain in
     # the CSV for inspection. Tune interior_radius_frac and iqr_multiplier
     # if too many real edge colonies are being rejected.
 

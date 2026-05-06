@@ -55,8 +55,7 @@ class InteriorColonyClassifier(Classifier):
         """Acceptable range = [Q1 - k·IQR, Q3 + k·IQR] where k is this value.
 
         The standard Tukey boxplot rule is 1.5 (identifies mild outliers).
-        2.0 is more permissive — only clear outliers are rejected. Raise to
-        3.0 for maximum tolerance; lower to 1.5 to be stricter.
+        2.0 is the default; 3.0 is more permissive.
         """
 
         min_interior_samples: int = 5
@@ -65,12 +64,13 @@ class InteriorColonyClassifier(Classifier):
         ``interior_classifier_insufficient_samples`` info flag is raised.
         """
 
-        features: list[str] = ["area_px", "mean_intensity", "eccentricity"]  # noqa: RUF012
+        features: list[str] = ["area_px", "mean_intensity", "eccentricity", "mean_r", "mean_g", "mean_b"]  # noqa: RUF012
         """Measurement columns to include in the reference model.
 
         ``area_px`` is the most discriminative: rim fragments are typically
         far smaller than real colonies. ``mean_intensity`` catches specular
         highlights. ``eccentricity`` catches elongated arc fragments.
+        Color features (R, G, B) help reject pen marks and writing.
         """
 
         plate_mask_key: str = "plate"
@@ -91,7 +91,7 @@ class InteriorColonyClassifier(Classifier):
         agar texture and crack fragments are elongated.
         """
 
-        degenerate_max_area_cv: float = 1.2
+        degenerate_max_area_cv: float = 1.5
         """If the coefficient of variation (std/mean) of detection areas
         exceeds this, the plate is treated as degenerate. Real colonies
         cluster tightly in size on a given plate (CV typically 0.3-0.7);

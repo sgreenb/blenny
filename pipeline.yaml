@@ -50,8 +50,8 @@ steps:
       split_touching: true
       # Shape filters drop rim arcs (low circularity) and pen scribbles
       # (low solidity). Set either to 0 to disable.
-      min_circularity: 0.7
-      min_solidity: 0.85
+      min_circularity: 0.75
+      min_solidity: 0.90
 
   - name: add_manual_colonies
     # Used for manual researcher-in-the-loop interventions in the GUI.
