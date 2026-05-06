@@ -22,7 +22,13 @@ class CSVExporter(Exporter):
     def export(self, data: ImageData) -> None:
         path = Path(self.params.output_path)  # type: ignore[attr-defined]
         path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", newline="", encoding="utf-8") as fh:
+            fh.write(self.generate_csv(data))
 
+    def generate_csv(self, data: ImageData) -> str:
+        """Return the CSV as a string."""
+        import io
+        fh = io.StringIO()
         rows = data.measurements
         
         # Ensure 'is_artifact' column is present even if no module set it.
@@ -46,20 +52,22 @@ class CSVExporter(Exporter):
         # 2. In default export, we only keep the minimal set requested by the user.
         # We don't add "any other columns" here.
 
-        with path.open("w", newline="", encoding="utf-8") as fh:
-            if self.params.include_provenance:  # type: ignore[attr-defined]
-                steps = " -> ".join(p.step for p in data.provenance)
-                fh.write(f"# provenance: {steps}\n")
-            if not fieldnames:
-                # No data — still write an empty file with a header comment so
-                # downstream tools don't trip on missing files.
-                fh.write("# (no measurements)\n")
-                return
-            writer = csv.DictWriter(
-                fh,
-                fieldnames=fieldnames,
-                delimiter=self.params.delimiter,  # type: ignore[attr-defined]
-                extrasaction="ignore",
-            )
-            writer.writeheader()
-            writer.writerows(rows)
+        if self.params.include_provenance:  # type: ignore[attr-defined]
+            steps = " -> ".join(p.step for p in data.provenance)
+            fh.write(f"# provenance: {steps}\n")
+        
+        if not fieldnames:
+            # No data — still write an empty file with a header comment so
+            # downstream tools don't trip on missing files.
+            fh.write("# (no measurements)\n")
+            return fh.getvalue()
+
+        writer = csv.DictWriter(
+            fh,
+            fieldnames=fieldnames,
+            delimiter=self.params.delimiter,  # type: ignore[attr-defined]
+            extrasaction="ignore",
+        )
+        writer.writeheader()
+        writer.writerows(rows)
+        return fh.getvalue()

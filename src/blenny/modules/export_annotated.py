@@ -30,6 +30,11 @@ class AnnotatedImageExporter(Exporter):
         artifact_outline_color: tuple[int, int, int] = (255, 0, 255)
         """Outline color for detections marked ``is_artifact=True`` (magenta)."""
 
+        manual_review_text_color: tuple[int, int, int] = (255, 165, 0)
+        """Text color for detections where ``is_manual_review=True`` (Orange).
+        Used to distinguish researcher-toggled artifacts from auto-detected ones.
+        """
+
         merged_outline_color: tuple[int, int, int] = (255, 64, 64)
         """Outline color for detections tagged by ``estimate_multiplicity``
         as merged colonies (``colony_count_estimate >= 2``). Default matches
@@ -94,12 +99,15 @@ class AnnotatedImageExporter(Exporter):
             return int(sid) if isinstance(sid, (int, float)) else None
 
         artifact_ids: set[int] = set()
+        manual_review_ids: set[int] = set()
         merged_ids: set[int] = set()
         for r in data.measurements:
             sid = _seg_id(r)
             if sid is None:
                 continue
-            if r.get("is_artifact"):
+            if r.get("is_manual_review"):
+                manual_review_ids.add(sid)
+            elif r.get("is_artifact"):
                 artifact_ids.add(sid)
             elif int(r.get("colony_count_estimate", 1)) >= 2:
                 merged_ids.add(sid)
@@ -112,6 +120,10 @@ class AnnotatedImageExporter(Exporter):
         if artifact_ids:
             artifact_mask = np.isin(labels, list(artifact_ids))
 
+        manual_review_mask = np.zeros(labels.shape, dtype=bool)
+        if manual_review_ids:
+            manual_review_mask = np.isin(labels, list(manual_review_ids))
+
         merged_mask = np.zeros(labels.shape, dtype=bool)
         if merged_ids:
             merged_mask = np.isin(labels, list(merged_ids))
@@ -119,10 +131,10 @@ class AnnotatedImageExporter(Exporter):
         # Multi-class support: handle colonies with custom class colors
         class_colored_rows = [
             r for r in data.measurements
-            if not r.get("is_artifact") and "class_color" in r and _seg_id(r) is not None
+            if not r.get("is_artifact") and not r.get("is_manual_review") and "class_color" in r and _seg_id(r) is not None
         ]
 
-        normal_mask = (labels > 0) & ~artifact_mask & ~merged_mask
+        normal_mask = (labels > 0) & ~artifact_mask & ~manual_review_mask & ~merged_mask
 
         # Remove custom-colored ones from the normal/merged masks
         for r in class_colored_rows:
@@ -132,7 +144,9 @@ class AnnotatedImageExporter(Exporter):
 
         # Compute boundaries
         normal_bounds = segmentation.find_boundaries(np.where(normal_mask, labels, 0), mode="outer")
-        artifact_bounds = segmentation.find_boundaries(np.where(artifact_mask, labels, 0), mode="outer")
+        # Combine auto-artifacts and manual-reviews for the same magenta border
+        artifact_combined_mask = artifact_mask | manual_review_mask
+        artifact_bounds = segmentation.find_boundaries(np.where(artifact_combined_mask, labels, 0), mode="outer")
         merged_bounds = segmentation.find_boundaries(np.where(merged_mask, labels, 0), mode="outer")
 
         # Apply colors
@@ -252,8 +266,13 @@ class AnnotatedImageExporter(Exporter):
                     overlap = True
                     break
             
+            # Choose text color based on manual review status
+            color = self.params.text_color  # type: ignore[attr-defined]
+            if row.get("is_manual_review"):
+                color = self.params.manual_review_text_color  # type: ignore[attr-defined]
+
             if not overlap:
-                draw.text((x + off_x, y + off_y), label, fill=self.params.text_color, font=font)  # type: ignore[attr-defined]
+                draw.text((x + off_x, y + off_y), label, fill=color, font=font)
                 occupied_bboxes.append(curr_bbox)
             else:
                 # If it overlaps, try a few alternative positions (above, below, left, right)
@@ -265,6 +284,9 @@ class AnnotatedImageExporter(Exporter):
                 for angle in angles:
                     ax = x + np.cos(angle) * dist
                     ay = y + np.sin(angle) * dist
+                    
+                    a_left, a_top, a_bottom, a_right = draw.textbbox((ax, ay), label, font=font) # fixed a bug in my previous edit where I swapped bottom/right in textbbox return order? No, textbbox is left, top, right, bottom.
+                    # Wait, looking back at my previous edit: left, top, right, bottom = draw.textbbox. That was correct.
                     
                     a_left, a_top, a_right, a_bottom = draw.textbbox((ax, ay), label, font=font)
                     a_curr_bbox = (a_left - buffer, a_top - buffer, a_right + buffer, a_bottom + buffer)
@@ -279,7 +301,7 @@ class AnnotatedImageExporter(Exporter):
                             break
                     
                     if not a_overlap:
-                        draw.text((ax, ay), label, fill=self.params.text_color, font=font)  # type: ignore[attr-defined]
+                        draw.text((ax, ay), label, fill=color, font=font)
                         occupied_bboxes.append(a_curr_bbox)
                         found_alt = True
                         break

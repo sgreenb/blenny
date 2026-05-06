@@ -14,6 +14,7 @@ from PIL import Image, ImageOps
 from blenny.pipeline import Pipeline
 from blenny.modules.export_annotated import AnnotatedImageExporter
 from blenny.modules.export_summary import SummaryExporter
+from blenny.modules.export_csv import CSVExporter
 from blenny.modules.classify_interior import InteriorColonyClassifier
 
 # --- Helpers ---
@@ -117,7 +118,7 @@ with st.sidebar:
         help="Path to a directory on your machine."
     )
     c_f2.markdown("<div style='height: 29px;'></div>", unsafe_allow_html=True)
-    if c_f2.button("📁", key="browse_input", help="Browse for input folder", width="stretch"):
+    if c_f2.button("Browse", key="browse_input", help="Browse for input folder", width="stretch"):
         selected = local_folder_picker("Select Input Folder")
         if selected:
             st.session_state["folder_path"] = selected
@@ -131,7 +132,7 @@ with st.sidebar:
         help="Directory where results will be saved. Defaults to gui_results/<image_name>/ if left blank.",
     )
     c_o2.markdown("<div style='height: 29px;'></div>", unsafe_allow_html=True)
-    if c_o2.button("📁", key="browse_output", help="Browse for output folder", width="stretch"):
+    if c_o2.button("Browse", key="browse_output", help="Browse for output folder", width="stretch"):
         selected = local_folder_picker("Select Output Folder")
         if selected:
             st.session_state["output_folder_path"] = selected
@@ -262,7 +263,7 @@ with st.sidebar:
             st.session_state[f"num_{key}"] = new_val
         
         # Handle individual reset BEFORE widgets are instantiated
-        if c3.button("↺", key=f"reset_{key}", help=f"Reset {label}"):
+        if c3.button("Reset", key=f"reset_{key}", help=f"Reset {label}"):
             st.session_state[key] = default_val
             st.session_state[f"num_{key}"] = default_val
             st.session_state[f"slide_{key}"] = default_val
@@ -307,7 +308,7 @@ with st.sidebar:
         st.rerun()
     
     if st.session_state.get("manual_exclude_ids"):
-        if st.button("🗑️ Clear Manual Exclusions", help="Remove all manually excluded colonies."):
+        if st.button("Clear Manual Exclusions", help="Remove all manually excluded colonies."):
             st.session_state["manual_exclude_ids"] = []
             st.rerun()
 
@@ -662,17 +663,53 @@ if "analysis_data" in st.session_state:
                          AnnotatedImageExporter(output_path="dummy.png", outline_color=(255, 64, 64)))
         summarizer = next((s for s in pipe.steps if isinstance(s, SummaryExporter)), 
                           SummaryExporter(output_path="dummy.txt"))
+        csv_exporter = next((s for s in pipe.steps if isinstance(s, CSVExporter)),
+                            CSVExporter(output_path="dummy.csv"))
 
         # 3. Live render the image and summary
         img = annotator.render(data)
         st.image(img, caption=f"Reviewed Colonies: {data.metadata['colony_count']}", width="stretch")
+
+        # --- Download Section ---
+        c_dl1, c_dl2, c_dl3 = st.columns(3)
+        c_dl1.download_button(
+            "Download CSV",
+            csv_exporter.generate_csv(data),
+            file_name=f"{stem}_colonies.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+        
+        # Log download
+        c_dl2.download_button(
+            "Download Log",
+            summarizer.generate_text(data),
+            file_name=f"{stem}_log.txt",
+            mime="text/plain",
+            use_container_width=True
+        )
+
+        # Annotated image download
+        import io
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        c_dl3.download_button(
+            "Download Image",
+            buf.getvalue(),
+            file_name=f"{stem}_annotated.png",
+            mime="image/png",
+            use_container_width=True
+        )
+        # --- End Download Section ---
 
         # 4. Handle data editor changes
         # We want to toggle 'is_artifact'
         st.write("Check boxes below to mark objects as artifacts. Counts and images will update instantly.")
         
         # We define which columns to show and make 'is_artifact' editable
-        display_cols = ["label", "is_artifact", "centroid_x", "centroid_y", "area_px", "Type"]
+        display_cols = ["label", "is_artifact", "is_manual_review", "centroid_x", "centroid_y", "area_px", "Type"]
+        if "is_manual_review" not in df.columns:
+            df["is_manual_review"] = False
         if "Type" not in df.columns:
             def get_type(row):
                 if row["is_artifact"]: return "Artifact"
@@ -685,9 +722,10 @@ if "analysis_data" in st.session_state:
             column_config={
                 "is_artifact": st.column_config.CheckboxColumn("Artifact?", default=False),
                 "label": st.column_config.TextColumn("ID", disabled=True),
+                "is_manual_review": st.column_config.CheckboxColumn("Manual?", disabled=True),
                 "Type": st.column_config.TextColumn("Class", disabled=True),
             },
-            disabled=["label", "centroid_x", "centroid_y", "area_px", "Type"],
+            disabled=["label", "is_manual_review", "centroid_x", "centroid_y", "area_px", "Type"],
             hide_index=True,
             width="stretch",
             key="results_editor"
@@ -702,6 +740,7 @@ if "analysis_data" in st.session_state:
                     if "is_artifact" in changes:
                         # Map index back to the measurements list
                         data.measurements[idx]["is_artifact"] = changes["is_artifact"]
+                        data.measurements[idx]["is_manual_review"] = True
                         changed = True
                 if changed:
                     # Update counts but DO NOT reassign IDs during review
@@ -725,7 +764,7 @@ if "analysis_data" in st.session_state:
             st.success(f"Results saved to {save_dir}")
 
         # Summary Log
-        with st.expander("📄 View Live Summary"):
+        with st.expander("View Live Summary"):
             st.text(summarizer.generate_text(data))
 
 elif "batch_results" in st.session_state:
