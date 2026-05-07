@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "blenny"
 version = "0.0.1"
-description = "A free, open-source toolkit for analyzing plates and microscopy images."
+description = "A free, open-source toolkit for analyzing colonies on petri plates."
 readme = "README.md"
 license = { text = "GPL-3.0-or-later" }
 requires-python = ">=3.11"

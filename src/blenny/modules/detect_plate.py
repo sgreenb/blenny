@@ -13,9 +13,9 @@ untouched (downstream steps then operate on the whole frame).
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
-import math
 import numpy as np
 from skimage import color, feature, transform
 from skimage.draw import disk
@@ -108,9 +108,9 @@ class PlateDetector(Preprocessor):
                 # Resize if needed (e.g. if mask was drawn on a thumb)
                 from skimage.transform import resize
                 mask = resize(mask, (h, w), order=0, anti_aliasing=False)
-            
+
             data.masks[self.params.mask_key] = mask
-            # For non-circular plates, we estimate a "center" and "radius" 
+            # For non-circular plates, we estimate a "center" and "radius"
             # so downstream radial modules (like InteriorClassifier) still work
             # somewhat logically, though they are optimized for circles.
             ys, xs = np.where(mask)
@@ -123,9 +123,9 @@ class PlateDetector(Preprocessor):
 
         # --- Case B: Forced Circle Coords ---
         if self.params.force_cy is not None and self.params.force_cx is not None and self.params.force_r is not None:
-            cy = int(round(self.params.force_cy * scale))
-            cx = int(round(self.params.force_cx * scale))
-            r_hough = int(round(self.params.force_r * scale))
+            cy = round(self.params.force_cy * scale)
+            cx = round(self.params.force_cx * scale)
+            r_hough = round(self.params.force_r * scale)
             score = 1.0
         else:
             edges = feature.canny(gray, sigma=self.params.canny_sigma)  # type: ignore[attr-defined]

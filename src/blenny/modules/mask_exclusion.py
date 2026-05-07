@@ -7,7 +7,6 @@ from typing import Any
 
 import numpy as np
 from PIL import Image
-from skimage import util
 
 from blenny.pipeline import BlennyParams, ImageData, Preprocessor, register
 
@@ -41,20 +40,20 @@ class ExclusionMasker(Preprocessor):
 
         # Load mask and convert to boolean (True = areas to EXCLUDE)
         with Image.open(path) as im:
-            # The mask from the GUI is typically drawn on a resized version 
-            # of the original image. We first stretch it back to the 
+            # The mask from the GUI is typically drawn on a resized version
+            # of the original image. We first stretch it back to the
             # original image's dimensions to recover the global coordinate frame.
             orig = data.original_image
             if orig is None:
                 orig = image # Fallback
-            
+
             orig_h, orig_w = orig.shape[:2]
             if im.size != (orig_w, orig_h):
                 im = im.resize((orig_w, orig_h), Image.Resampling.NEAREST)
-            
+
             mask_full = np.asarray(im.convert("L")) > 0
 
-        # Now, if the image has been CROPPED (by detect_plate), we must crop 
+        # Now, if the image has been CROPPED (by detect_plate), we must crop
         # the mask using the same bounding box.
         bbox = data.metadata.get("plate_bbox") # (y0, x0, y1, x1)
         if bbox is not None:

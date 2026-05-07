@@ -135,14 +135,12 @@ class ThresholdSegmenter(Segmenter):
             max_area = self.params.max_area_frac * roi_area  # type: ignore[attr-defined]
             min_circ: float = self.params.min_circularity  # type: ignore[attr-defined]
             min_sol: float = self.params.min_solidity  # type: ignore[attr-defined]
-            
+
             n_rejected_circ = 0
             min_a: int = self.params.min_area  # type: ignore[attr-defined]
             for prop in measure.regionprops(labels):
                 drop = False
-                if prop.area > max_area:
-                    drop = True
-                elif prop.area < min_a:
+                if prop.area > max_area or prop.area < min_a:
                     drop = True
                 elif min_circ > 0 and prop.perimeter > 0:
                     circ = 4.0 * math.pi * prop.area / (prop.perimeter * prop.perimeter)
@@ -153,7 +151,7 @@ class ThresholdSegmenter(Segmenter):
                     drop = True
                 if drop:
                     labels[labels == prop.label] = 0
-            
+
             if n_rejected_circ > 20:
                 data.add_flag(
                     "many_low_circularity_rejected",
@@ -161,7 +159,7 @@ class ThresholdSegmenter(Segmenter):
                     "This often indicates plate-rim contamination or high noise.",
                     severity="warning",
                 )
-            
+
             # Re-pack labels so they're contiguous 1..N.
             labels = measure.label(labels > 0)
 

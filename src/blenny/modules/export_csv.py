@@ -30,32 +30,35 @@ class CSVExporter(Exporter):
         import io
         fh = io.StringIO()
         rows = data.measurements
-        
+
         # Ensure 'is_artifact' column is present even if no module set it.
         for row in rows:
             row.setdefault("is_artifact", False)
             row.setdefault("artifact_reason", "")
 
-        # Define a nice column order for researchers. 
+        # Define a nice column order for researchers.
         # Any remaining columns found in the data will follow these.
         preferred_order = [
-            "label", "centroid_x", "centroid_y", "area_px", "mean_r", "mean_g", "mean_b",
-            "mean_h", "mean_s", "mean_v", "is_artifact", "source"
+            "label", "centroid_x", "centroid_y", "area_px",
+            "circularity", "solidity", "eccentricity",
+            "mean_r", "mean_g", "mean_b",
+            "mean_h", "mean_s", "mean_v",
+            "is_artifact", "artifact_reason", "source"
         ]
-        
+
         fieldnames: list[str] = []
         # 1. Add preferred columns if they exist in the data
         for p in preferred_order:
             if any(p in r for r in rows):
                 fieldnames.append(p)
-        
+
         # 2. In default export, we only keep the minimal set requested by the user.
         # We don't add "any other columns" here.
 
         if self.params.include_provenance:  # type: ignore[attr-defined]
             steps = " -> ".join(p.step for p in data.provenance)
             fh.write(f"# provenance: {steps}\n")
-        
+
         if not fieldnames:
             # No data — still write an empty file with a header comment so
             # downstream tools don't trip on missing files.

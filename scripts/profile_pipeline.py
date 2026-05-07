@@ -26,16 +26,15 @@ from __future__ import annotations
 import argparse
 import sys
 import time
-from pathlib import Path
 from collections import defaultdict
+from pathlib import Path
 
 # Make sure the local src/ tree is importable when run from the repo root.
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
 
-from blenny.config import extract_steps, load_yaml, substitute_paths
-from blenny.pipeline import Pipeline
-from blenny.pipeline.context import ImageData
+from blenny.config import extract_steps, load_yaml, substitute_paths  # noqa: E402
+from blenny.pipeline import Pipeline  # noqa: E402
 
 DEFAULT_PIPELINE = REPO / "pipeline.yaml"
 
@@ -52,7 +51,7 @@ def run_once(pipeline_path: Path, image_path: Path) -> list[tuple[str, str, floa
 
 
 def format_bar(frac: float, width: int = 30) -> str:
-    filled = int(round(frac * width))
+    filled = round(frac * width)
     return "█" * filled + "░" * (width - filled)
 
 

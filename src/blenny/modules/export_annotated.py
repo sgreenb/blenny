@@ -166,12 +166,12 @@ class AnnotatedImageExporter(Exporter):
             self._draw_plate_boundary(rgb, data, labels.shape)
 
         im = Image.fromarray(rgb)
-        
+
         if self.params.draw_numbers:  # type: ignore[attr-defined]
             # Draw numbers for ALL detections now that artifacts have sequential IDs
             # following the colony IDs.
             self._draw_numbers(im, data.measurements)
-        
+
         return im
 
     @staticmethod
@@ -240,32 +240,32 @@ class AnnotatedImageExporter(Exporter):
         for row in measurements:
             if "centroid_x" not in row or "centroid_y" not in row:
                 continue
-            
+
             x = float(row["centroid_x"])
             y = float(row["centroid_y"])
             label = str(row.get("label", "?"))
             est = int(row.get("colony_count_estimate", 1))
             if est >= 2:
                 label = f"{label}x{est}"
-            
+
             # Determine text size to calculate bounding box
             left, top, right, bottom = draw.textbbox((x + off_x, y + off_y), label, font=font)
-            
+
             # Add a small buffer to the bbox
             buffer = fs * 0.2
             curr_bbox = (left - buffer, top - buffer, right + buffer, bottom + buffer)
-            
+
             # Check for collisions with previously placed labels
             overlap = False
             for other_bbox in occupied_bboxes:
                 # Standard AABB collision check
-                if not (curr_bbox[2] < other_bbox[0] or 
-                        curr_bbox[0] > other_bbox[2] or 
-                        curr_bbox[3] < other_bbox[1] or 
+                if not (curr_bbox[2] < other_bbox[0] or
+                        curr_bbox[0] > other_bbox[2] or
+                        curr_bbox[3] < other_bbox[1] or
                         curr_bbox[1] > other_bbox[3]):
                     overlap = True
                     break
-            
+
             # Choose text color based on manual review status
             color = self.params.text_color  # type: ignore[attr-defined]
             if row.get("is_manual_review"):
@@ -276,36 +276,31 @@ class AnnotatedImageExporter(Exporter):
                 occupied_bboxes.append(curr_bbox)
             else:
                 # If it overlaps, try a few alternative positions (above, below, left, right)
-                found_alt = False
                 # 8 compass directions to try shifting the label
                 angles = [np.pi/2, -np.pi/2, 0, np.pi, np.pi/4, -np.pi/4, 3*np.pi/4, -3*np.pi/4]
                 dist = fs * 1.2
-                
+
                 for angle in angles:
                     ax = x + np.cos(angle) * dist
                     ay = y + np.sin(angle) * dist
-                    
-                    a_left, a_top, a_bottom, a_right = draw.textbbox((ax, ay), label, font=font) # fixed a bug in my previous edit where I swapped bottom/right in textbbox return order? No, textbbox is left, top, right, bottom.
-                    # Wait, looking back at my previous edit: left, top, right, bottom = draw.textbbox. That was correct.
-                    
+
                     a_left, a_top, a_right, a_bottom = draw.textbbox((ax, ay), label, font=font)
                     a_curr_bbox = (a_left - buffer, a_top - buffer, a_right + buffer, a_bottom + buffer)
-                    
+
                     a_overlap = False
                     for other_bbox in occupied_bboxes:
-                        if not (a_curr_bbox[2] < other_bbox[0] or 
-                                a_curr_bbox[0] > other_bbox[2] or 
-                                a_curr_bbox[3] < other_bbox[1] or 
+                        if not (a_curr_bbox[2] < other_bbox[0] or
+                                a_curr_bbox[0] > other_bbox[2] or
+                                a_curr_bbox[3] < other_bbox[1] or
                                 a_curr_bbox[1] > other_bbox[3]):
                             a_overlap = True
                             break
-                    
+
                     if not a_overlap:
                         draw.text((ax, ay), label, fill=color, font=font)
                         occupied_bboxes.append(a_curr_bbox)
-                        found_alt = True
                         break
-                
+
                 # If still no room, we skip drawing this specific number to avoid
                 # unreadable unholy messes, or we could draw it with high transparency.
                 # For now, skipping is cleaner for professional output.

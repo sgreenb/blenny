@@ -171,7 +171,7 @@ def run(
             try:
                 key, value = item.split("=", 1)
                 mod_name, param_name = key.split(".", 1)
-                
+
                 # Try to parse value as JSON, float, int, or bool
                 parsed_val: Any
                 if (value.startswith("[") and value.endswith("]")) or (value.startswith("{") and value.endswith("}")):
@@ -199,9 +199,9 @@ def run(
                         found = True
                 if not found:
                     typer.echo(f"Warning: Module '{mod_name}' not found in pipeline.", err=True)
-            except ValueError:
+            except ValueError as e:
                 typer.echo(f"Error: Invalid override format '{item}'. Use mod.param=val", err=True)
-                raise typer.Exit(1)
+                raise typer.Exit(1) from e
 
     # Sanity-check that the pipeline makes a Pipeline at all (no inputs yet).
     # Substitution leaves placeholders untouched if no values are provided,
@@ -269,7 +269,7 @@ def run(
         # per-image placeholders like {stem} are preserved, but global
         # parameters (including CLI overrides) are baked in.
         reproducible_steps = substitute_paths(
-            raw_steps, 
+            raw_steps,
             output_dir="{output_dir}",
             input_path="{input_path_placeholder}"
         )
@@ -298,7 +298,7 @@ def run(
 
     total = time.perf_counter() - t_batch
     succ = len(inputs) - failures
-    
+
     if as_json:
         # Emit a clean machine-readable summary for GUI/script consumption
         report = {
@@ -311,7 +311,7 @@ def run(
         typer.echo(json.dumps(report, indent=2))
     else:
         typer.echo(f"Done: {succ}/{len(inputs)} succeeded in {total:.1f}s")
-    
+
     if failures:
         raise typer.Exit(code=1)
 
@@ -345,7 +345,7 @@ def gui() -> None:
         pass
     except Exception as e:
         typer.echo(f"Error launching GUI: {e}", err=True)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
 
 # --- modules -----------------------------------------------------------------
@@ -425,7 +425,7 @@ def init(
     except KeyError as e:
         typer.echo(str(e), err=True)
         raise typer.Exit(code=1) from None
-    
+
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(text, encoding="utf-8")
     typer.echo(f"Wrote {template} template to {out}")
@@ -437,16 +437,16 @@ def init(
 def _expand_input(pattern: str) -> list[Path]:
     """Resolve a single path, a directory, or a glob pattern to a list of images."""
     from blenny.modules.load_image import IMAGE_EXTENSIONS
-    
+
     p = Path(pattern)
     if any(c in pattern for c in "*?["):
         return [
-            Path(m) for m in glob_module.glob(pattern, recursive=True) 
+            Path(m) for m in glob_module.glob(pattern, recursive=True)
             if Path(m).is_file() and Path(m).suffix.lower() in IMAGE_EXTENSIONS
         ]
     if p.is_dir():
         return sorted([
-            f for f in p.iterdir() 
+            f for f in p.iterdir()
             if f.is_file() and f.suffix.lower() in IMAGE_EXTENSIONS
         ])
     if p.is_file():
@@ -531,7 +531,7 @@ def _write_batch_log_txt(path: Path, rows: list[dict[str, Any]], duration: float
         count = str(r.get("colony_count", "-"))
         flags = str(r.get("n_quality_flags", "-"))
         lines.append(f"{name:<30} {status:<10} {count:<10} {flags:<10}")
-    
+
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 

@@ -97,7 +97,7 @@ class Pipeline:
         for i, step in enumerate(self.steps):
             if progress_callback:
                 progress_callback(i + 1, n_steps, step.name)
-            
+
             t0 = time.perf_counter()
             ctx = step.run(ctx)
             duration = time.perf_counter() - t0

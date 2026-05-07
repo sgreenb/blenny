@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from pydantic import Field
+
 from blenny.pipeline import BlennyParams, Classifier, ImageData, register
 
 
@@ -16,7 +18,7 @@ class IDFilter(Classifier):
     """Exclude specific detections by their ID number."""
 
     class Params(BlennyParams):
-        exclude_ids: list[int] = []
+        exclude_ids: list[int] = Field(default_factory=list)
         """List of colony IDs (labels) to mark as artifacts."""
 
         reason: str = "Manual exclusion"

@@ -76,12 +76,12 @@ class ColonyMeasurer(FeatureExtractor):
             h_props = measure.regionprops(labels, intensity_image=hsv[:, :, 0])
             s_props = measure.regionprops(labels, intensity_image=hsv[:, :, 1])
             v_props = measure.regionprops(labels, intensity_image=hsv[:, :, 2])
-            
+
             # Map labels to their HSV means for quick lookup
             h_means = {p.label: p.intensity_mean for p in h_props}
             s_means = {p.label: p.intensity_mean for p in s_props}
             v_means = {p.label: p.intensity_mean for p in v_props}
-            
+
             # Also get RGB means (use the 3-channel color_img)
             r_means = {p.label: p.intensity_mean for p in measure.regionprops(labels, intensity_image=color_img[:, :, 0])}
             g_means = {p.label: p.intensity_mean for p in measure.regionprops(labels, intensity_image=color_img[:, :, 1])}
@@ -98,7 +98,7 @@ class ColonyMeasurer(FeatureExtractor):
             # Circularity = 4π·area / perimeter² (1.0 = perfect circle).
             perim = float(prop.perimeter)
             circularity = float(4 * np.pi * prop.area / (perim * perim)) if perim > 0 else 0.0
-            
+
             row = {
                 "label": int(prop.label),
                 # Preserve the original segmentation label so downstream
@@ -124,7 +124,7 @@ class ColonyMeasurer(FeatureExtractor):
                 # may upgrade this for bilobed / merged colonies.
                 "colony_count_estimate": 1,
             }
-            
+
             # Add color features if available
             if hsv is not None:
                 l_id = prop.label
@@ -136,7 +136,7 @@ class ColonyMeasurer(FeatureExtractor):
                     "mean_s": round(float(s_means[l_id]), 4),
                     "mean_v": round(float(v_means[l_id]), 4),
                 })
-            
+
             rows.append(row)
 
         if rows:

@@ -1,21 +1,20 @@
-import tkinter as tk
-from tkinter import filedialog
-import streamlit as st
-import subprocess
-import shutil
-import json
 import os
+import shutil
+import subprocess
 import sys
-import time
-import numpy as np
+import tkinter as tk
 from pathlib import Path
+from tkinter import filedialog
+
+import numpy as np
+import streamlit as st
 from PIL import Image, ImageOps
 
-from blenny.pipeline import Pipeline
-from blenny.modules.export_annotated import AnnotatedImageExporter
-from blenny.modules.export_summary import SummaryExporter
-from blenny.modules.export_csv import CSVExporter
 from blenny.modules.classify_interior import InteriorColonyClassifier
+from blenny.modules.export_annotated import AnnotatedImageExporter
+from blenny.modules.export_csv import CSVExporter
+from blenny.modules.export_summary import SummaryExporter
+from blenny.pipeline import Pipeline
 
 # --- Helpers ---
 
@@ -45,7 +44,8 @@ def local_folder_picker(title="Select Folder"):
     return None
 
 # Monkey-patch for streamlit-drawable-canvas compatibility with newer Streamlit versions
-import streamlit.elements.image as st_image
+import streamlit.elements.image as st_image  # noqa: E402
+
 if not hasattr(st_image, "image_to_url"):
     try:
         from streamlit.elements.lib.image_utils import image_to_url as _image_to_url
@@ -54,7 +54,7 @@ if not hasattr(st_image, "image_to_url"):
         # Try another location if needed for even newer versions
         pass
 
-# Fix for streamlit-drawable-canvas compatibility with Streamlit 1.34+ 
+# Fix for streamlit-drawable-canvas compatibility with Streamlit 1.34+
 # where image_to_url expects a LayoutConfig object instead of a width integer.
 _orig_image_to_url = st_image.image_to_url
 def _compat_image_to_url(image_data, width, *args, **kwargs):
@@ -67,7 +67,7 @@ def _compat_image_to_url(image_data, width, *args, **kwargs):
     return _orig_image_to_url(image_data, width, *args, **kwargs)
 st_image.image_to_url = _compat_image_to_url
 
-from streamlit_drawable_canvas import st_canvas
+from streamlit_drawable_canvas import st_canvas  # noqa: E402
 
 # Set page config for a clean, professional look
 st.set_page_config(
@@ -105,16 +105,16 @@ cli_script = str((Path(__file__).parent.parent / "blenny-cli.py").resolve())
 # --- Sidebar: Configuration ---
 with st.sidebar:
     st.title("Blenny Control Panel")
-    
+
     # 1. Input Selection (Moved to top)
     st.header("1. Data Input")
     input_files = st.file_uploader("Upload Plate Images", type=["jpg", "jpeg", "png", "tif"], accept_multiple_files=True)
-    
+
     # Input Folder Picker
     c_f1, c_f2 = st.columns([3, 1])
     input_folder = c_f1.text_input(
-        "OR Folder Path", 
-        value=st.session_state.get("folder_path", ""), 
+        "OR Folder Path",
+        value=st.session_state.get("folder_path", ""),
         help="Path to a directory on your machine."
     )
     c_f2.markdown("<div style='height: 29px;'></div>", unsafe_allow_html=True)
@@ -123,7 +123,7 @@ with st.sidebar:
         if selected:
             st.session_state["folder_path"] = selected
             st.rerun()
-    
+
     # Output Folder Picker
     c_o1, c_o2 = st.columns([3, 1])
     output_folder_input = c_o1.text_input(
@@ -137,7 +137,7 @@ with st.sidebar:
         if selected:
             st.session_state["output_folder_path"] = selected
             st.rerun()
-    
+
     input_folder = st.session_state.get("folder_path", "")
     output_folder_input = st.session_state.get("output_folder_path", "")
 
@@ -147,7 +147,7 @@ with st.sidebar:
     # 2. Pipeline Selection
     st.header("2. Analysis Pipeline")
     repro_file = st.file_uploader("Load Reproducible Config", type=["yaml", "yml"], help="Load settings from a previous run.")
-    
+
     # Defaults
     margin_default, min_area_default, min_circ_default = 0.08, 10, 0.7
     interior_radius_default = 0.85
@@ -171,10 +171,9 @@ with st.sidebar:
         except Exception as e:
             st.error(f"Error loading config: {e}")
 
-    if not Path("pipeline.yaml").exists():
-        if st.button("Generate Default Pipeline"):
-            subprocess.run(["python3", cli_script, "init"])
-            st.success("Created pipeline.yaml")
+    if not Path("pipeline.yaml").exists() and st.button("Generate Default Pipeline"):
+        subprocess.run(["python3", cli_script, "init"])
+        st.success("Created pipeline.yaml")
 
     default_pipeline = "pipeline.yaml"
     if not Path(default_pipeline).exists():
@@ -184,7 +183,7 @@ with st.sidebar:
             default_pipeline = str(root_pipeline.resolve())
 
     pipeline_path = st.text_input("Pipeline Path", value=default_pipeline)
-    
+
     st.divider()
 
     # 3. Tuning Parameters
@@ -245,13 +244,13 @@ with st.sidebar:
     def compact_control(label, key, min_val, max_val, default_val, step, help_text):
         if key not in st.session_state:
             st.session_state[key] = default_val
-        
+
         # Label Row
         st.markdown(f"**{label}**")
-        
+
         # Control Row: [Input] [Slider] [Reset]
         c1, c2, c3 = st.columns([1.2, 3, 0.8])
-        
+
         # Use on_change to sync the two widgets without lag
         def sync_num():
             new_val = st.session_state[f"num_{key}"]
@@ -261,7 +260,7 @@ with st.sidebar:
             new_val = st.session_state[f"slide_{key}"]
             st.session_state[key] = new_val
             st.session_state[f"num_{key}"] = new_val
-        
+
         # Handle individual reset BEFORE widgets are instantiated
         if c3.button("Reset", key=f"reset_{key}", help=f"Reset {label}"):
             st.session_state[key] = default_val
@@ -275,7 +274,7 @@ with st.sidebar:
         if f"slide_{key}" not in st.session_state:
             st.session_state[f"slide_{key}"] = st.session_state[key]
 
-        val = c1.number_input(
+        c1.number_input(
             label,
             min_value=float(min_val) if isinstance(step, float) else int(min_val),
             max_value=float(max_val) if isinstance(step, float) else int(max_val),
@@ -285,7 +284,7 @@ with st.sidebar:
             on_change=sync_num
         )
 
-        val = c2.slider(
+        c2.slider(
             label,
             min_value=float(min_val) if isinstance(step, float) else int(min_val),
             max_value=float(max_val) if isinstance(step, float) else int(max_val),
@@ -295,7 +294,7 @@ with st.sidebar:
             help=help_text,
             on_change=sync_slide
         )
-            
+
         return st.session_state[key]
 
     if st.button("Reset All Tuning Defaults"):
@@ -306,22 +305,21 @@ with st.sidebar:
             st.session_state[f"slide_{k}"] = default
         st.session_state["manual_plate_mode"] = "Auto"
         st.rerun()
-    
-    if st.session_state.get("manual_exclude_ids"):
-        if st.button("Clear Manual Exclusions", help="Remove all manually excluded colonies."):
-            st.session_state["manual_exclude_ids"] = []
-            st.rerun()
+
+    if st.session_state.get("manual_exclude_ids") and st.button("Clear Manual Exclusions", help="Remove all manually excluded colonies."):
+        st.session_state["manual_exclude_ids"] = []
+        st.rerun()
 
     margin = compact_control(
-        "Plate Rim Margin", "margin", 0.0, 0.2, margin_default, 0.01, 
+        "Plate Rim Margin", "margin", 0.0, 0.2, margin_default, 0.01,
         "The fraction of the plate radius to exclude from the edge to avoid rim reflections."
     )
     min_area = compact_control(
-        "Min Colony Area (px)", "min_area", 0, 1000, min_area_default, 1, 
+        "Min Colony Area (px)", "min_area", 0, 1000, min_area_default, 1,
         "Minimum number of pixels a group must occupy to be counted as a colony."
     )
     min_circ = compact_control(
-        "Min Circularity", "min_circ", 0.0, 1.0, min_circ_default, 0.05, 
+        "Min Circularity", "min_circ", 0.0, 1.0, min_circ_default, 0.05,
         "Filter objects by roundness (1.0 is a perfect circle)."
     )
     interior_radius = compact_control(
@@ -343,13 +341,13 @@ with st.sidebar:
     # 4. Plate Area
     st.header("4. Plate Area")
     plate_mode = st.radio("Detection Mode", ["Auto", "Manual Circle", "Manual Shape"], index=0, key="manual_plate_mode", horizontal=True)
-    
+
     manual_cy, manual_cx, manual_r = None, None, None
     manual_shape_path = None
-    
+
     if plate_mode == "Manual Circle":
         st.info("Tune center and radius with the controls below.")
-        
+
         # Determine smart defaults if an image is loaded
         def_cy, def_cx, def_r = 1000, 1000, 800
         if input_files and len(input_files) == 1:
@@ -360,27 +358,23 @@ with st.sidebar:
                 w, h = img_peek.size
                 def_cx, def_cy = w // 2, h // 2
                 def_r = int(min(w, h) * 0.4)
-            except:
+            except Exception:
                 pass
 
         manual_cy = compact_control("Center Y", "manual_cy", 0, 4000, def_cy, 1, "Y coordinate of the plate center.")
         manual_cx = compact_control("Center X", "manual_cx", 0, 4000, def_cx, 1, "X coordinate of the plate center.")
         manual_r = compact_control("Radius", "manual_r", 0, 2000, def_r, 1, "Radius of the plate in pixels.")
-    
-    if plate_mode == "Manual Shape":
-        st.info("Use the canvas on the right to define the plate boundary. **Left-click** to add points and **Right-click** to close the shape.")
-        if Path("gui_plate_batch_mask.png").exists():
-            if st.button("Clear Plate Shape"):
-                os.remove("gui_plate_batch_mask.png")
-                st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
-                st.rerun()
-    
+
+    if plate_mode == "Manual Shape" and Path("gui_plate_batch_mask.png").exists() and st.button("Clear Plate Shape"):
+        os.remove("gui_plate_batch_mask.png")
+        st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
+        st.rerun()
+
     # If user switches away from Manual Shape mode, wipe the mask file
-    if "prev_plate_mode" in st.session_state and plate_mode != "Manual Shape" and st.session_state["prev_plate_mode"] == "Manual Shape":
-        if os.path.exists("gui_plate_batch_mask.png"):
-            os.remove("gui_plate_batch_mask.png")
-            st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
-            st.rerun()
+    if "prev_plate_mode" in st.session_state and plate_mode != "Manual Shape" and st.session_state["prev_plate_mode"] == "Manual Shape" and os.path.exists("gui_plate_batch_mask.png"):
+        os.remove("gui_plate_batch_mask.png")
+        st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
+        st.rerun()
     st.session_state["prev_plate_mode"] = plate_mode
 
     st.divider()
@@ -388,31 +382,28 @@ with st.sidebar:
     # 5. Masking
     st.header("5. Masking")
     enable_mask = st.checkbox("Enable Paint-to-Exclude", value=False)
-    
+
     # If user disables masking, wipe the mask file
-    if "prev_enable_mask" in st.session_state and not enable_mask and st.session_state["prev_enable_mask"]:
-        if os.path.exists("gui_mask_batch_exclusion.png"):
-            os.remove("gui_mask_batch_exclusion.png")
-            st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
-            st.rerun()
+    if "prev_enable_mask" in st.session_state and not enable_mask and st.session_state["prev_enable_mask"] and os.path.exists("gui_mask_batch_exclusion.png"):
+        os.remove("gui_mask_batch_exclusion.png")
+        st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
+        st.rerun()
     st.session_state["prev_enable_mask"] = enable_mask
 
-    if enable_mask:
-        if Path("gui_mask_batch_exclusion.png").exists():
-            if st.button("Clear Exclusion Mask"):
-                os.remove("gui_mask_batch_exclusion.png")
-                st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
-                st.rerun()
+    if enable_mask and Path("gui_mask_batch_exclusion.png").exists() and st.button("Clear Exclusion Mask"):
+        os.remove("gui_mask_batch_exclusion.png")
+        st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
+        st.rerun()
     enable_debug = st.checkbox("Save debug step images", value=False,
                                help="Write intermediate images for every pipeline step to gui_debug/. Slower.")
     brush_size = st.slider("Brush Size", 1, 50, 20)
-    
+
     # Initialize session state for manual interventions
     if "manual_exclude_ids" not in st.session_state:
         st.session_state["manual_exclude_ids"] = []
-    
+
     st.divider()
-    
+
     run_btn = st.button("Run Analysis", type="primary", width="stretch")
 
 # --- Main Area ---
@@ -460,16 +451,16 @@ if input_source:
         bg_image = ImageOps.exif_transpose(bg_image)
         if bg_image.mode != "RGB":
             bg_image = bg_image.convert("RGB")
-        
+
         # Determine canvas size
         max_ui_width = 800
         max_ui_height = 600
         scale = min(max_ui_width / bg_image.width, max_ui_height / bg_image.height, 1.0)
         canvas_width = int(bg_image.width * scale)
         canvas_height = int(bg_image.height * scale)
-        
+
         # --- Visual Context for Canvas ---
-        # If we are in Manual Circle mode, we want to see the blue circle 
+        # If we are in Manual Circle mode, we want to see the blue circle
         # while we are painting the exclusion mask.
         canvas_bg_img = bg_image.copy()
         if plate_mode == "Manual Circle" and manual_cy is not None:
@@ -480,11 +471,11 @@ if input_source:
             draw.ellipse([manual_cx - r, manual_cy - r, manual_cx + r, manual_cy + r], outline="blue", width=max(1, int(5/scale)))
             r_eff = r * (1.0 - margin)
             draw.ellipse([manual_cx - r_eff, manual_cy - r_eff, manual_cx + r_eff, manual_cy + r_eff], outline="cyan", width=max(1, int(3/scale)))
-        
+
         # --- Integrated Drawing Area ---
         manual_shape_path = Path("gui_plate_batch_mask.png") if Path("gui_plate_batch_mask.png").exists() else None
         mask_path = Path("gui_mask_batch_exclusion.png") if Path("gui_mask_batch_exclusion.png").exists() else None
-        
+
         # Tool Selection
         tool = None
         if plate_mode == "Manual Shape" and enable_mask:
@@ -500,7 +491,7 @@ if input_source:
             blue_img = Image.new("RGB", bg_image.size, (0, 0, 255))
             blended = Image.blend(canvas_bg_img, blue_img, 0.15)
             canvas_bg_img = Image.composite(blended, canvas_bg_img, mask_im)
-        
+
         if mask_path:
             mask_im = Image.open(mask_path).convert("L")
             magenta_img = Image.new("RGB", bg_image.size, (255, 0, 255))
@@ -511,7 +502,7 @@ if input_source:
 
         if tool:
             st.subheader(f"Manual Drawing: {tool}")
-            
+
             if tool == "Define Plate Area":
                 st.info("**Left-click** to add vertices around the plate. **Right-click** to close and submit.")
                 drawing_mode = "polygon"
@@ -537,14 +528,14 @@ if input_source:
                 display_toolbar=True,
                 key=canvas_key,
             )
-            
+
             # Process results from whichever tool is active
             if working_canvas.image_data is not None:
                 alpha = working_canvas.image_data[:, :, 3]
                 if np.any(alpha > 0):
                     mask_canvas = Image.fromarray((alpha > 0).astype(np.uint8) * 255)
                     mask_im = mask_canvas.resize(bg_image.size, Image.Resampling.NEAREST)
-                    
+
                     if tool == "Define Plate Area":
                         manual_shape_path = Path("gui_plate_batch_mask.png")
                         mask_im.save(manual_shape_path)
@@ -570,7 +561,7 @@ if input_source:
                     draw.line([manual_cx, manual_cy-20, manual_cx, manual_cy+20], fill="blue", width=3)
                     display_img = draw_img
                 st.image(display_img, width="stretch", caption=f"Reference: {ref_image_path.name}")
-            
+
             if len(input_paths) > 1:
                 st.write(f"Batch processing {len(input_paths)} images starting with {ref_image_path.name}")
     else:
@@ -605,25 +596,21 @@ if run_btn and input_source:
             log_container.text(st.session_state["gui_log"])
 
         st.session_state["gui_log"] = "" # Clear previous log
-        
-        # Determine input for Pipeline
-        if input_source == "files":
-            input_imgs = input_paths
-        else:
-            input_imgs = input_paths
+
+        input_imgs = input_paths
 
         # We'll use the Python API for single images to allow interactive review.
         # For batch, we still use the CLI for now as it's more robust for large sets.
         if len(input_imgs) == 1:
             img_path = input_imgs[0]
             log_message(f"Processing single image: {img_path.name}")
-            
+
             # 1. Build Pipeline manually so we can inject params
             # We mimic the logic from CLI main.py
             from blenny.config import extract_steps, load_yaml, substitute_paths
             raw_config = load_yaml(pipeline_path)
             raw_steps = extract_steps(raw_config)
-            
+
             # Apply GUI overrides
             overrides = {
                 "load_image": {"max_dimension": int(max_dimension) if resize_enabled else None},
@@ -647,39 +634,39 @@ if run_btn and input_source:
                 })
             if enable_mask and mask_path:
                 overrides["apply_exclusion_mask"] = {"mask_path": str(mask_path)}
-            
+
             for step in raw_steps:
                 if step["name"] in overrides:
                     step.setdefault("params", {}).update(overrides[step["name"]])
-            
+
             resolved = substitute_paths(raw_steps, input_path=img_path, output_dir=output_dir)
             pipe = Pipeline.from_config(resolved)
-            
+
             # 2. Run
             img_debug_dir = debug_dir / img_path.stem if debug_dir else None
-            
+
             def gui_progress(current, total, name):
                 log_message(f"  [{current}/{total}] {name}...")
 
             data = pipe.run(img_path, debug_dir=img_debug_dir, progress_callback=gui_progress)
-            
+
             log_message("Analysis complete.")
-            
+
             # 3. Store in session state
             st.session_state["analysis_data"] = data
             st.session_state["analysis_stem"] = img_path.stem
             st.session_state["analysis_output_dir"] = output_dir
             st.session_state["analysis_pipeline"] = pipe
-            
+
             status_box.update(label="Analysis Complete!", state="complete", expanded=False)
         else:
             # BATCH MODE (existing CLI path)
             cli_input = str(input_folder) if input_source == "folder" else str(temp_dir)
             log_message(f"Starting batch process on {len(input_imgs)} images...")
-            
+
             cmd = [
-                "python3", cli_script, "run", 
-                pipeline_path, 
+                "python3", cli_script, "run",
+                pipeline_path,
                 "--input", cli_input,
                 "--output", str(output_dir),
                 "--json",
@@ -688,7 +675,7 @@ if run_btn and input_source:
                 "--override", f"threshold_segment.min_circularity={min_circ}",
                 "--override", f"classify_by_interior.interior_radius_frac={interior_radius}",
                 *([] if enable_multiplicity else ["--no-multiplicity"]),
-                *((["--override", f"load_image.max_dimension={int(max_dimension)}"] if resize_enabled else [])),
+                *(["--override", f"load_image.max_dimension={int(max_dimension)}"] if resize_enabled else []),
             ]
             if plate_mode == "Manual Circle":
                 cmd.extend([
@@ -705,10 +692,10 @@ if run_btn and input_source:
                 cmd.extend([
                     "--override", f"apply_exclusion_mask.mask_path={mask_path}"
                 ])
-            
+
             # Use Popen to read stdout line by line
             process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
-            
+
             full_stdout = []
             if process.stdout:
                 for line in process.stdout:
@@ -720,7 +707,7 @@ if run_btn and input_source:
                             continue
                         log_message(clean_line)
                         full_stdout.append(line)
-            
+
             _, stderr = process.communicate()
             if process.returncode == 0:
                 st.session_state["batch_results"] = "".join(full_stdout)
@@ -737,14 +724,14 @@ if "analysis_data" in st.session_state:
     stem = st.session_state["analysis_stem"]
     output_dir = st.session_state["analysis_output_dir"]
     pipe = st.session_state["analysis_pipeline"]
-    
+
     with col2:
         st.subheader("Interactive Review")
-        
+
         # 1. Get current measurements
         import pandas as pd
         df = pd.DataFrame(data.measurements)
-        
+
         # Ensure ID order and counts are correct based on current status
         # Note: We do NOT reassign IDs here during the review loop, as the user
         # wants IDs to remain stable once the analysis has run.
@@ -753,9 +740,9 @@ if "analysis_data" in st.session_state:
 
         # 2. Setup rendering tools (reusing pipeline exporters)
         # We find them in the pipeline or create defaults with dummy paths
-        annotator = next((s for s in pipe.steps if isinstance(s, AnnotatedImageExporter)), 
+        annotator = next((s for s in pipe.steps if isinstance(s, AnnotatedImageExporter)),
                          AnnotatedImageExporter(output_path="dummy.png", outline_color=(255, 64, 64)))
-        summarizer = next((s for s in pipe.steps if isinstance(s, SummaryExporter)), 
+        summarizer = next((s for s in pipe.steps if isinstance(s, SummaryExporter)),
                           SummaryExporter(output_path="dummy.txt"))
         csv_exporter = next((s for s in pipe.steps if isinstance(s, CSVExporter)),
                             CSVExporter(output_path="dummy.csv"))
@@ -773,7 +760,7 @@ if "analysis_data" in st.session_state:
             mime="text/csv",
             use_container_width=True
         )
-        
+
         # Log download
         c_dl2.download_button(
             "Download Log",
@@ -799,15 +786,17 @@ if "analysis_data" in st.session_state:
         # 4. Handle data editor changes
         # We want to toggle 'is_artifact'
         st.write("Check boxes below to mark objects as artifacts. Counts and images will update instantly.")
-        
+
         # We define which columns to show and make 'is_artifact' editable
         display_cols = ["label", "is_artifact", "is_manual_review", "centroid_x", "centroid_y", "area_px", "Type"]
         if "is_manual_review" not in df.columns:
             df["is_manual_review"] = False
         if "Type" not in df.columns:
             def get_type(row):
-                if row["is_artifact"]: return "Artifact"
-                if int(row["colony_count_estimate"]) >= 2: return f"Merged(x{int(row['colony_count_estimate'])})"
+                if row["is_artifact"]:
+                    return "Artifact"
+                if int(row["colony_count_estimate"]) >= 2:
+                    return f"Merged(x{int(row['colony_count_estimate'])})"
                 return "Colony"
             df["Type"] = df.apply(get_type, axis=1)
 
@@ -824,7 +813,7 @@ if "analysis_data" in st.session_state:
             width="stretch",
             key="results_editor"
         )
-        
+
         # Apply changes from editor back to the ImageData
         if st.session_state.get("results_editor"):
             edits = st.session_state["results_editor"]["edited_rows"]

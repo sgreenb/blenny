@@ -44,10 +44,7 @@ class IlluminationCorrection(Preprocessor):
         radius = self.params.radius  # type: ignore[attr-defined]
         if radius is None:
             plate_r = data.metadata.get("plate_radius")
-            if plate_r is not None:
-                radius = max(5, round(float(plate_r) / 15.0))
-            else:
-                radius = 25
+            radius = max(5, round(float(plate_r) / 15.0)) if plate_r is not None else 25
 
         selem = morphology.disk(radius)
 

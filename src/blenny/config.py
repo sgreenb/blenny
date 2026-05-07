@@ -117,7 +117,7 @@ def dump_resolved_config(
 ) -> None:
     """Write a YAML file capturing the exact steps used.
 
-    Lightweight reproducibility (design.md ยง4.5): the resolved config sits
+    Lightweight reproducibility: the resolved config sits
     next to the results so any analysis can be re-run with one command.
     """
     payload: dict[str, Any] = {"steps": steps}

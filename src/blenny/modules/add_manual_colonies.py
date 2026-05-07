@@ -1,6 +1,6 @@
 """Manually add colony detections to a mask.
 
-Used for researcher-in-the-loop intervention where colonies missed by the 
+Used for researcher-in-the-loop intervention where colonies missed by the
 auto-segmenter can be force-added by coordinate.
 """
 
@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+from pydantic import Field
 from skimage.draw import disk
 from skimage.measure import label
 
@@ -20,7 +21,7 @@ class ManualColonyAdder(Preprocessor):
     """Add circular colonies at specific coordinates to the objects mask."""
 
     class Params(BlennyParams):
-        coordinates: list[tuple[int, int]] = []
+        coordinates: list[tuple[int, int]] = Field(default_factory=list)
         """List of (x, y) pixel coordinates where colonies should be added."""
 
         radius: int = 15
@@ -44,9 +45,9 @@ class ManualColonyAdder(Preprocessor):
 
         # Scale coordinates if the image was resized
         scale = data.metadata.get("resize_scale", 1.0)
-        
+
         # We need to be careful with coordinate frames.
-        # If the image was cropped, coordinates from the GUI (original scale) 
+        # If the image was cropped, coordinates from the GUI (original scale)
         # need to be shifted.
         bbox = data.metadata.get("plate_bbox") # (y0, x0, y1, x1)
         y_off, x_off = 0, 0
@@ -59,20 +60,17 @@ class ManualColonyAdder(Preprocessor):
             sx, sy = x * scale, y * scale
             # 2. Shift if cropped
             sx, sy = sx - x_off, sy - y_off
-            
+
             rr, cc = disk((int(sy), int(sx)), self.params.radius, shape=(h, w))
             mask[rr, cc] = 1 # Mark as foreground
             added_count += 1
 
-        # If it was a label image, we should re-label it to ensure 
+        # If it was a label image, we should re-label it to ensure
         # the new blobs get their own IDs.
-        if mask.max() > 1 or mask.dtype.kind in ('i', 'u'):
-            mask = label(mask > 0)
-        else:
-            mask = mask > 0
+        mask = label(mask > 0) if mask.max() > 1 or mask.dtype.kind in ("i", "u") else mask > 0
 
         data.masks[mask_key] = mask
-        
+
         if added_count:
             data.add_flag(
                 "manual_inclusions",

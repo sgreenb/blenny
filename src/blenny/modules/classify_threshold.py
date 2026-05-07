@@ -32,16 +32,16 @@ from blenny.pipeline import BlennyParams, Classifier, ImageData, register
 class ThresholdRule(BlennyParams):
     feature: str
     """The measurement column to check (e.g., 'mean_v', 'area_px')."""
-    
+
     min: float | None = None
     """Minimum value (inclusive). If None, no lower bound is applied."""
-    
+
     max: float | None = None
     """Maximum value (inclusive). If None, no upper bound is applied."""
-    
+
     label: str
     """The classification label to assign (e.g., 'high_expressor')."""
-    
+
     color: list[int] | None = None
     """Optional [R, G, B] color for annotated outlines (0-255)."""
 
@@ -71,18 +71,18 @@ class ThresholdClassifier(Classifier):
                 val = row.get(rule.feature)
                 if val is None:
                     continue
-                
+
                 # Check bounds
                 if rule.min is not None and val < rule.min:
                     continue
                 if rule.max is not None and val > rule.max:
                     continue
-                
+
                 # Match found
                 match_label = rule.label
                 match_color = rule.color
                 break
-            
+
             row["classification"] = match_label
             if match_color:
                 row["class_color"] = match_color
@@ -93,6 +93,6 @@ class ThresholdClassifier(Classifier):
             if not row.get("is_artifact", False):
                 lbl = row.get("classification", self.params.default_label)
                 counts[lbl] = counts.get(lbl, 0) + int(row.get("colony_count_estimate", 1))
-        
+
         data.metadata["classification_counts"] = counts
         return rows

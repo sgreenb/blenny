@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 
@@ -32,7 +31,7 @@ class SummaryExporter(Exporter):
         colonies = [r for r in data.measurements if not r.get("is_artifact", False)]
         areas = [float(r["area_px"]) for r in colonies if "area_px" in r]
         has_warnings = any(f.severity in ("warning", "error") for f in data.quality_flags)
-        
+
         lines = [
             "=== Blenny Processing Log ===",
             f"Source Image:     {data.source}",
@@ -65,7 +64,7 @@ class SummaryExporter(Exporter):
             lines.extend(["", "--- Quality Flags & Warnings ---"])
             for flag in data.quality_flags:
                 lines.append(f"[{flag.severity.upper()}] {flag.code}: {flag.message}")
-        
+
         # --- Per-Colony Table (Step 3 Requirement) ---
         if data.measurements:
             lines.extend(["", "--- Per-Colony Measurements ---"])
@@ -73,7 +72,7 @@ class SummaryExporter(Exporter):
             header = f"{'ID':<4} {'X':>7} {'Y':>7} {'Area':>8} {'R':>5} {'G':>5} {'B':>5} {'H':>5} {'S':>5} {'V':>5} {'Type':<10}"
             lines.append(header)
             lines.append("-" * len(header))
-            
+
             # Show colonies first, then artifacts. Measurements are already
             # re-labeled and re-ordered in classify_interior / filter_by_id.
             for r in data.measurements:
@@ -81,19 +80,19 @@ class SummaryExporter(Exporter):
                 x = f"{float(r.get('centroid_x', 0)):.1f}"
                 y = f"{float(r.get('centroid_y', 0)):.1f}"
                 area = str(int(r.get("area_px", 0)))
-                
+
                 # Colors (optional)
                 rgb_hsv = []
                 for k in ["mean_r", "mean_g", "mean_b", "mean_h", "mean_s", "mean_v"]:
                     val = r.get(k)
                     rgb_hsv.append(f"{float(val):.2f}" if val is not None else "-")
-                
+
                 ctype = "Colony"
                 if r.get("is_artifact"):
                     ctype = "Artifact"
                 elif int(r.get("colony_count_estimate", 1)) >= 2:
                     ctype = f"Merged(x{r['colony_count_estimate']})"
-                
+
                 lines.append(
                     f"{cid:<4} {x:>7} {y:>7} {area:>8} "
                     f"{rgb_hsv[0]:>5} {rgb_hsv[1]:>5} {rgb_hsv[2]:>5} "
