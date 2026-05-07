@@ -182,6 +182,8 @@ in `log.txt`, in `summary.csv` (as `flag_codes`), and at the terminal.
 - [x] Switched Windows folder picker to tkinter (fixed GUI crash)
 - [x] Fixed GUI tuning reset bug (widget ordering)
 - [ ] **Next:** Sector counting (quadrant analysis)
+- [ ] **Next:** Multi-ROI support (extract info for distinct regions within one image)
+- [ ] **Next:** Support for multiple plates in a single image
 - [ ] **Next:** ML-based segmentation (Cellpose integration)
 
 ## License

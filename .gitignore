@@ -40,6 +40,7 @@ coverage.xml
 debug_output/
 results/
 results_test/
+temp_results/
 gui_debug/
 gui_results/
 gui_uploads/

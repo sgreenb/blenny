@@ -151,9 +151,9 @@ with st.sidebar:
     st.header("2. Analysis Pipeline")
     repro_file = st.file_uploader("Load Reproducible Config", type=["yaml", "yml"], help="Load settings from a previous run.")
 
-    # Defaults
-    margin_default, min_area_default, min_circ_default = 0.08, 10, 0.7
+    margin_default, min_ppm_default, min_circ_default = 0.08, 15, 0.7
     interior_radius_default = 0.85
+    fallback_ecc_default = 0.55
     max_dimension_default = 2000
     resize_default = False
 
@@ -164,9 +164,10 @@ with st.sidebar:
             st.success("Config loaded. Settings applied below.")
             steps = {s['name']: s.get('params', {}) for s in repro_data.get('steps', [])}
             margin_default = float(steps.get('detect_plate', {}).get('margin_frac', 0.08))
-            min_area_default = int(steps.get('threshold_segment', {}).get('min_area', 10))
+            min_ppm_default = int(steps.get('threshold_segment', {}).get('min_area_ppm', 15))
             min_circ_default = float(steps.get('threshold_segment', {}).get('min_circularity', 0.7))
             interior_radius_default = float(steps.get('classify_by_interior', {}).get('interior_radius_frac', 0.85))
+            fallback_ecc_default = float(steps.get('classify_by_interior', {}).get('strict_fallback_max_eccentricity', 0.55))
             loaded_max_dim = steps.get('load_image', {}).get('max_dimension')
             if loaded_max_dim is not None:
                 max_dimension_default = int(loaded_max_dim)
@@ -302,7 +303,7 @@ with st.sidebar:
 
     if st.button("Reset All Tuning Defaults"):
         # Reset main keys and their synced widget counterparts
-        for k, default in [("margin", 0.08), ("min_area", 10), ("min_circ", 0.7), ("interior_radius", 0.85)]:
+        for k, default in [("margin", 0.08), ("min_area_ppm", 15), ("min_circ", 0.7), ("interior_radius", 0.85), ("fallback_ecc", 0.55)]:
             st.session_state[k] = default
             st.session_state[f"num_{k}"] = default
             st.session_state[f"slide_{k}"] = default
@@ -317,9 +318,9 @@ with st.sidebar:
         "Plate Rim Margin", "margin", 0.0, 0.2, margin_default, 0.01,
         "The fraction of the plate radius to exclude from the edge to avoid rim reflections."
     )
-    min_area = compact_control(
-        "Min Colony Area (px)", "min_area", 0, 1000, min_area_default, 1,
-        "Minimum number of pixels a group must occupy to be counted as a colony."
+    min_area_ppm = compact_control(
+        "Min Colony Size (ppm)", "min_area_ppm", 0, 1000, min_ppm_default, 1,
+        "Minimum area a colony must occupy, expressed in parts-per-million of the plate area."
     )
     min_circ = compact_control(
         "Min Circularity", "min_circ", 0.0, 1.0, min_circ_default, 0.05,
@@ -328,6 +329,10 @@ with st.sidebar:
     interior_radius = compact_control(
         "Interior Radius Frac", "interior_radius", 0.1, 1.0, interior_radius_default, 0.05,
         "Fraction of the plate radius treated as the 'safe' interior zone for artifact rejection."
+    )
+    fallback_ecc = compact_control(
+        "Fallback Max Eccentricity", "fallback_ecc", 0.1, 1.0, fallback_ecc_default, 0.05,
+        "Strict eccentricity limit used when the plate is too sparse to build a reference profile."
     )
 
     enable_multiplicity = st.checkbox(
@@ -504,6 +509,9 @@ if input_source:
             draw.ellipse([manual_cx - r, manual_cy - r, manual_cx + r, manual_cy + r], outline="blue", width=max(1, int(5/scale)))
             r_eff = r * (1.0 - margin)
             draw.ellipse([manual_cx - r_eff, manual_cy - r_eff, manual_cx + r_eff, manual_cy + r_eff], outline="cyan", width=max(1, int(3/scale)))
+            # Add yellow circle for interior classification zone
+            r_int = r_eff * interior_radius
+            draw.ellipse([manual_cx - r_int, manual_cy - r_int, manual_cx + r_int, manual_cy + r_int], outline="yellow", width=max(1, int(2/scale)))
 
         # --- Integrated Drawing Area ---
         manual_shape_path = Path("gui_plate_batch_mask.png") if Path("gui_plate_batch_mask.png").exists() else None
@@ -588,6 +596,9 @@ if input_source:
                     draw.ellipse([manual_cx - r, manual_cy - r, manual_cx + r, manual_cy + r], outline="blue", width=5)
                     r_eff = r * (1.0 - margin)
                     draw.ellipse([manual_cx - r_eff, manual_cy - r_eff, manual_cx + r_eff, manual_cy + r_eff], outline="cyan", width=3)
+                    # Add yellow circle for interior classification zone
+                    r_int = r_eff * interior_radius
+                    draw.ellipse([manual_cx - r_int, manual_cy - r_int, manual_cx + r_int, manual_cy + r_int], outline="yellow", width=2)
                     draw.line([manual_cx-20, manual_cy, manual_cx+20, manual_cy], fill="blue", width=3)
                     draw.line([manual_cx, manual_cy-20, manual_cx, manual_cy+20], fill="blue", width=3)
                     display_img = draw_img
@@ -640,8 +651,11 @@ with col2:
                 overrides = {
                     "load_image": {"max_dimension": int(max_dimension) if resize_enabled else None},
                     "detect_plate": {"margin_frac": margin},
-                    "threshold_segment": {"min_area": min_area, "min_circularity": min_circ},
-                    "classify_by_interior": {"interior_radius_frac": interior_radius},
+                    "threshold_segment": {"min_area": None, "min_area_ppm": min_area_ppm, "min_circularity": min_circ},
+                    "classify_by_interior": {
+                        "interior_radius_frac": interior_radius,
+                        "strict_fallback_max_eccentricity": fallback_ecc
+                    },
                     "estimate_multiplicity": {"enabled": enable_multiplicity},
                 }
                 if plate_mode == "Manual Circle":
@@ -672,7 +686,8 @@ with col2:
                     log_message(f"  [{current}/{total}] {name}...")
 
                 data = pipe.run(img_path, debug_dir=img_debug_dir, progress_callback=gui_progress)
-                log_message("Analysis complete.")
+                total_duration = sum(p.duration_s for p in data.provenance)
+                log_message(f"Analysis complete in {total_duration:.2f}s.")
 
                 st.session_state["analysis_data"] = data
                 st.session_state["analysis_stem"] = img_path.stem
@@ -691,9 +706,11 @@ with col2:
                     "--output", str(output_dir),
                     "--json",
                     "--override", f"detect_plate.margin_frac={margin}",
-                    "--override", f"threshold_segment.min_area={min_area}",
+                    "--override", "threshold_segment.min_area=None",
+                    "--override", f"threshold_segment.min_area_ppm={min_area_ppm}",
                     "--override", f"threshold_segment.min_circularity={min_circ}",
                     "--override", f"classify_by_interior.interior_radius_frac={interior_radius}",
+                    "--override", f"classify_by_interior.strict_fallback_max_eccentricity={fallback_ecc}",
                     *([] if enable_multiplicity else ["--no-multiplicity"]),
                     *(["--override", f"load_image.max_dimension={int(max_dimension)}"] if resize_enabled else []),
                 ]
@@ -805,7 +822,7 @@ if "analysis_data" in st.session_state:
         st.write("Check boxes below to mark objects as artifacts. Counts and images will update instantly.")
 
         # We define which columns to show and make 'is_artifact' editable
-        display_cols = ["label", "is_artifact", "is_manual_review", "centroid_x", "centroid_y", "area_px", "Type"]
+        display_cols = ["label", "is_artifact", "is_manual_review", "centroid_x", "centroid_y", "area_px", "area_ppm", "Type"]
         if "is_manual_review" not in df.columns:
             df["is_manual_review"] = False
         if "Type" not in df.columns:

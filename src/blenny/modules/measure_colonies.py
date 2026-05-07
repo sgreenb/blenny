@@ -14,6 +14,8 @@ from blenny.pipeline import BlennyParams, FeatureExtractor, ImageData, register
 class ColonyMeasurer(FeatureExtractor):
     class Params(BlennyParams):
         mask_key: str = "objects"
+        roi_mask_key: str = "plate"
+        """Key in ``data.masks`` to use as the denominator for PPM calculation."""
 
         edge_touch_flag_threshold: float = 0.10
         """Raise an ImageData-level flag if more than this fraction of objects touch the image edge."""
@@ -70,6 +72,15 @@ class ColonyMeasurer(FeatureExtractor):
 
         # Pre-calculate region properties for intensity and color
         props = measure.regionprops(labels, intensity_image=intensity)
+
+        # Calculate ROI area for PPM conversion
+        roi_area = 1.0
+        roi_key = self.params.roi_mask_key  # type: ignore[attr-defined]
+        if roi_key in data.masks:
+            roi_area = float(data.masks[roi_key].astype(bool).sum())
+        elif data.image is not None:
+            roi_area = float(data.image.shape[0] * data.image.shape[1])
+
         if hsv is not None:
             # We also want mean H, S, V. regionprops only takes one intensity image,
             # so we'll grab mean intensity for the color channels separately.
@@ -107,6 +118,7 @@ class ColonyMeasurer(FeatureExtractor):
                 # mask array.
                 "segment_label": int(prop.label),
                 "area_px": int(prop.area),
+                "area_ppm": round((prop.area / roi_area) * 1_000_000, 1),
                 "centroid_y": float(prop.centroid[0]),
                 "centroid_x": float(prop.centroid[1]),
                 "equivalent_diameter_px": float(prop.equivalent_diameter_area),

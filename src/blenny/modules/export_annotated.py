@@ -51,6 +51,15 @@ class AnnotatedImageExporter(Exporter):
         plate_mask_key: str = "plate"
         """Key in ``data.masks`` for the plate interior mask used to draw
         the boundary ring."""
+        
+        draw_interior_boundary: bool = True
+        """If True, draw the boundary between the 'safe' interior zone and
+        the edge zone used by the interior classifier. Useful for tuning
+        ``interior_radius_frac``."""
+        
+        interior_boundary_color: tuple[int, int, int] = (255, 255, 0)
+        """Color of the interior boundary ring (default: yellow)."""
+
         plate_boundary_thickness: int = 0
         """Half-thickness of the boundary ring in pixels (the ring is drawn
         by dilating the mask boundary by a disk of this radius).
@@ -165,6 +174,9 @@ class AnnotatedImageExporter(Exporter):
         if self.params.draw_plate_boundary:  # type: ignore[attr-defined]
             self._draw_plate_boundary(rgb, data, labels.shape)
 
+        if self.params.draw_interior_boundary:  # type: ignore[attr-defined]
+            self._draw_interior_boundary(rgb, data)
+
         im = Image.fromarray(rgb)
 
         if self.params.draw_numbers:  # type: ignore[attr-defined]
@@ -218,6 +230,32 @@ class AnnotatedImageExporter(Exporter):
         color = np.array(self.params.plate_boundary_color, dtype=np.uint8)  # type: ignore[attr-defined]
         rgb[boundary] = color
 
+    def _draw_interior_boundary(self, rgb: np.ndarray, data: ImageData) -> None:
+        """Draw a circle indicating the interior vs edge zone."""
+        geom = data.metadata.get("interior_classifier_geometry")
+        if geom is None:
+            return
+
+        cy, cx = geom["cy"], geom["cx"]
+        r_int = geom["interior_radius_px"]
+        if cy is None or cx is None or r_int is None:
+            return
+
+        # We use PIL for the circle because it's easier to draw a smooth circle
+        # than messing with mask boundaries for a perfect radius.
+        temp_im = Image.fromarray(rgb)
+        draw = ImageDraw.Draw(temp_im)
+        
+        # Draw a thin yellow circle
+        draw.ellipse(
+            [cx - r_int, cy - r_int, cx + r_int, cy + r_int],
+            outline=self.params.interior_boundary_color,  # type: ignore[attr-defined]
+            width=1
+        )
+        
+        # Copy back to numpy
+        rgb[:] = np.asarray(temp_im)
+
     def _draw_numbers(self, im: Image.Image, measurements: list[dict[str, Any]]) -> None:
         draw = ImageDraw.Draw(im)
         w, h = im.size
@@ -245,7 +283,8 @@ class AnnotatedImageExporter(Exporter):
             y = float(row["centroid_y"])
             label = str(row.get("label", "?"))
             est = int(row.get("colony_count_estimate", 1))
-            if est >= 2:
+            is_art = bool(row.get("is_artifact", False))
+            if est >= 2 and not is_art:
                 label = f"{label}x{est}"
 
             # Determine text size to calculate bounding box

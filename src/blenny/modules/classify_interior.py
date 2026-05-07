@@ -100,11 +100,10 @@ class InteriorColonyClassifier(Classifier):
         """
 
         strict_fallback_max_eccentricity: float = 0.55
-        """In strict-fallback mode, every detection above this eccentricity
-        is marked as an artifact. Bilobed colonies typically have
-        eccentricity 0.6-0.85, so they are also rejected here — they will
-        be recovered later by the multiplicity estimator (TODO).
-        """
+        """In strict-fallback mode (when too few interior colonies exist to
+        build a profile), every detection above this eccentricity is marked
+        as an artifact. Real colonies are round (ecc < 0.4); 0.55 is a standard
+        threshold that accepts typical singletons while rejecting lint."""
 
     # ------------------------------------------------------------------
     # Public interface
@@ -183,6 +182,14 @@ class InteriorColonyClassifier(Classifier):
             return self.reassign_ids(rows, data)
 
         # --- 2. Compute radial position for every detection ---
+        data.metadata["interior_classifier_geometry"] = {
+            "cy": cy,
+            "cx": cx,
+            "radius": radius,
+            "interior_radius_frac": self.params.interior_radius_frac,
+            "interior_radius_px": radius * self.params.interior_radius_frac
+        }
+
         for row in rows:
             dy = (row.get("centroid_y") or 0.0) - cy
             dx = (row.get("centroid_x") or 0.0) - cx
@@ -240,14 +247,8 @@ class InteriorColonyClassifier(Classifier):
         data.metadata["edge_zone_n"] = len(edge)
 
         # --- 5. Score edge-zone detections ---
-        # Detections already tagged as merged colonies (count_estimate >= 2)
-        # bypass classification: an upstream geometric step has vouched for
-        # them, and they would otherwise look like area outliers and be
-        # rejected here.
         n_rejected = 0
         for row in edge:
-            if int(row.get("colony_count_estimate", 1)) >= 2:
-                continue
             reasons = self._score(row, ref)
             if reasons:
                 row["is_artifact"] = True
@@ -342,17 +343,10 @@ class InteriorColonyClassifier(Classifier):
         return False, ""
 
     def _apply_strict_fallback(self, rows: list[dict[str, Any]]) -> int:
-        """Mark anything insufficiently round as an artifact. Returns count.
-
-        Detections already tagged with ``colony_count_estimate >= 2`` are
-        skipped: the multiplicity estimator has already vouched for them as
-        merged colonies (which legitimately have eccentricity > 0.55).
-        """
+        """Mark anything insufficiently round as an artifact. Returns count."""
         max_ecc: float = self.params.strict_fallback_max_eccentricity  # type: ignore[attr-defined]
         n = 0
         for row in rows:
-            if int(row.get("colony_count_estimate", 1)) >= 2:
-                continue
             ecc = row.get("eccentricity")
             if isinstance(ecc, (int, float)) and float(ecc) > max_ecc:
                 row["is_artifact"] = True
@@ -402,6 +396,11 @@ class InteriorColonyClassifier(Classifier):
         """Return a list of human-readable rejection reasons, or [] if accepted."""
         reasons: list[str] = []
         for feat, bounds in ref.items():
+            # Special case for area: merged colonies (count >= 2) are allowed
+            # to be larger than the interior area profile.
+            if feat == "area_px" and int(row.get("colony_count_estimate", 1)) >= 2:
+                continue
+
             val = row.get(feat)
             if not isinstance(val, (int, float)):
                 continue

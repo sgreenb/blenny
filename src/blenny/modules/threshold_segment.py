@@ -31,8 +31,16 @@ class ThresholdSegmenter(Segmenter):
         block_size: int = 51
         """Window size for ``method='local'``. Must be odd."""
 
-        min_area: int = 10
-        """Drop labelled regions smaller than this many pixels."""
+        min_area: int | None = None
+        """Drop labelled regions smaller than this many pixels.
+        If ``None``, ``min_area_ppm`` is used instead.
+        """
+
+        min_area_ppm: int = 15
+        """Drop regions smaller than this many parts-per-million of the ROI area.
+        Only used if ``min_area`` is ``None``. A standard 90mm plate is ~6300mm2;
+        100ppm is ~0.6mm2 (a small but clear colony).
+        """
 
         max_area_frac: float = 0.25
         """Drop regions covering more than this fraction of the ROI (likely artefacts)."""
@@ -82,20 +90,29 @@ class ThresholdSegmenter(Segmenter):
 
         # Restrict to ROI if requested.
         roi_key = self.params.roi_mask_key  # type: ignore[attr-defined]
+        roi_area = float(binary.size)
         if roi_key and roi_key in data.masks:
             roi = data.masks[roi_key].astype(bool)
             if roi.shape == binary.shape:
                 binary = binary & roi
+                roi_area = float(roi.sum())
+
+        # Determine min_area threshold.
+        min_a: int = self.params.min_area  # type: ignore[attr-defined]
+        if min_a is None:
+            # ppm = (px / total_px) * 1e6  => px = (ppm * total_px) / 1e6
+            min_a = int((self.params.min_area_ppm * roi_area) / 1_000_000)  # type: ignore[attr-defined]
+            min_a = max(1, min_a) # Never 0.
 
         # Clean small specks.
         # skimage 0.26+ deprecated min_size in favor of max_size (same meaning:
         # the maximum size of an object that is still considered "small" and
         # thus removed).
         try:
-            binary = morphology.remove_small_objects(binary, max_size=self.params.min_area)  # type: ignore[attr-defined, call-arg]
+            binary = morphology.remove_small_objects(binary, max_size=min_a)
         except TypeError:
             # Fallback for skimage < 0.26
-            binary = morphology.remove_small_objects(binary, min_size=self.params.min_area)  # type: ignore[attr-defined]
+            binary = morphology.remove_small_objects(binary, min_size=min_a)
         binary = morphology.opening(binary, morphology.disk(1))
 
         # Label, optionally splitting touching objects via watershed.
@@ -125,19 +142,11 @@ class ThresholdSegmenter(Segmenter):
         # pen marks). Each filter is independently disable-able by setting its
         # threshold to 0.
         if labels.max() > 0:
-            # "max_area_frac" is a fraction of the available analysis area, not
-            # of the foreground pixels (a single big region would otherwise
-            # always exceed the threshold against itself).
-            if roi_key and roi_key in data.masks:
-                roi_area = float(data.masks[roi_key].astype(bool).sum())
-            else:
-                roi_area = float(binary.size)
             max_area = self.params.max_area_frac * roi_area  # type: ignore[attr-defined]
             min_circ: float = self.params.min_circularity  # type: ignore[attr-defined]
             min_sol: float = self.params.min_solidity  # type: ignore[attr-defined]
 
             n_rejected_circ = 0
-            min_a: int = self.params.min_area  # type: ignore[attr-defined]
             for prop in measure.regionprops(labels):
                 drop = False
                 if prop.area > max_area or prop.area < min_a:
