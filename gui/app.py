@@ -151,7 +151,7 @@ with st.sidebar:
     st.header("2. Analysis Pipeline")
     repro_file = st.file_uploader("Load Reproducible Config", type=["yaml", "yml"], help="Load settings from a previous run.")
 
-    margin_default, min_ppm_default, min_circ_default = 0.08, 15, 0.7
+    margin_default, min_ppm_default, min_circ_default = 0.04, 15, 0.7
     interior_radius_default = 0.85
     fallback_ecc_default = 0.55
     max_dimension_default = 2000
@@ -163,7 +163,7 @@ with st.sidebar:
             repro_data = yaml.safe_load(repro_file)
             st.success("Config loaded. Settings applied below.")
             steps = {s['name']: s.get('params', {}) for s in repro_data.get('steps', [])}
-            margin_default = float(steps.get('detect_plate', {}).get('margin_frac', 0.08))
+            margin_default = float(steps.get('detect_plate', {}).get('margin_frac', 0.04))
             min_ppm_default = int(steps.get('threshold_segment', {}).get('min_area_ppm', 15))
             min_circ_default = float(steps.get('threshold_segment', {}).get('min_circularity', 0.7))
             interior_radius_default = float(steps.get('classify_by_interior', {}).get('interior_radius_frac', 0.85))
@@ -303,7 +303,7 @@ with st.sidebar:
 
     if st.button("Reset All Tuning Defaults"):
         # Reset main keys and their synced widget counterparts
-        for k, default in [("margin", 0.08), ("min_area_ppm", 15), ("min_circ", 0.7), ("interior_radius", 0.85), ("fallback_ecc", 0.55)]:
+        for k, default in [("margin", 0.04), ("min_area_ppm", 15), ("min_circ", 0.7), ("interior_radius", 0.85), ("fallback_ecc", 0.55)]:
             st.session_state[k] = default
             st.session_state[f"num_{k}"] = default
             st.session_state[f"slide_{k}"] = default
@@ -506,10 +506,12 @@ if input_source:
             from PIL import ImageDraw
             draw = ImageDraw.Draw(canvas_bg_img)
             r = manual_r
+            # Raw Plate (Blue)
             draw.ellipse([manual_cx - r, manual_cy - r, manual_cx + r, manual_cy + r], outline="blue", width=max(1, int(5/scale)))
+            # Analysis Area (Green - Matches final output)
             r_eff = r * (1.0 - margin)
-            draw.ellipse([manual_cx - r_eff, manual_cy - r_eff, manual_cx + r_eff, manual_cy + r_eff], outline="cyan", width=max(1, int(3/scale)))
-            # Add yellow circle for interior classification zone
+            draw.ellipse([manual_cx - r_eff, manual_cy - r_eff, manual_cx + r_eff, manual_cy + r_eff], outline="green", width=max(1, int(3/scale)))
+            # Interior Reference Zone (Yellow)
             r_int = r_eff * interior_radius
             draw.ellipse([manual_cx - r_int, manual_cy - r_int, manual_cx + r_int, manual_cy + r_int], outline="yellow", width=max(1, int(2/scale)))
 
@@ -593,10 +595,12 @@ if input_source:
                     draw_img = display_img.copy()
                     draw = ImageDraw.Draw(draw_img)
                     r = manual_r
+                    # Raw Plate (Blue)
                     draw.ellipse([manual_cx - r, manual_cy - r, manual_cx + r, manual_cy + r], outline="blue", width=5)
+                    # Analysis Area (Green)
                     r_eff = r * (1.0 - margin)
-                    draw.ellipse([manual_cx - r_eff, manual_cy - r_eff, manual_cx + r_eff, manual_cy + r_eff], outline="cyan", width=3)
-                    # Add yellow circle for interior classification zone
+                    draw.ellipse([manual_cx - r_eff, manual_cy - r_eff, manual_cx + r_eff, manual_cy + r_eff], outline="green", width=3)
+                    # Interior Zone (Yellow)
                     r_int = r_eff * interior_radius
                     draw.ellipse([manual_cx - r_int, manual_cy - r_int, manual_cx + r_int, manual_cy + r_int], outline="yellow", width=2)
                     draw.line([manual_cx-20, manual_cy, manual_cx+20, manual_cy], fill="blue", width=3)
@@ -661,7 +665,6 @@ with col2:
                 if plate_mode == "Manual Circle":
                     overrides["detect_plate"].update({
                         "crop": False,
-                        "radius_expand_frac": 0.0,
                         "force_cy": manual_cy,
                         "force_cx": manual_cx,
                         "force_r": manual_r
