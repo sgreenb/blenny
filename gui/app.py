@@ -87,12 +87,15 @@ st.markdown(
     /* The component iframe itself */
     iframe[title="streamlit_drawable_canvas.st_canvas"] {
         max-width: 100%;
-        overflow: auto !important;
+        overflow: hidden !important;
+        border: 1px solid #eee;
+        border-radius: 4px;
     }
     /* The Streamlit-generated wrapper around components */
     div[data-testid="stCustomComponentV1"],
     div[data-testid="stIFrame"] {
         overflow-x: auto !important;
+        padding: 5px; /* Added buffer to help with mouse event boundaries */
     }
     </style>
     """,
@@ -338,65 +341,98 @@ with st.sidebar:
 
     st.divider()
 
-    # 4. Plate Area
-    st.header("4. Plate Area")
-    plate_mode = st.radio("Detection Mode", ["Auto", "Manual Circle", "Manual Shape"], index=0, key="manual_plate_mode", horizontal=True)
+    # 4. Plate Area & Masking
+    st.header("4. Plate Area & Masking")
+
+    # Tool labels for the radio button
+    # We define this BEFORE the mode radio to determine if we should force a mode.
+    # Note: We use a key for the tool so we can query it safely.
+    selected_tool_label = st.radio(
+        "Select Drawing Tool",
+        options=["🔍 View", "Polygon Plate Area", "🖌️ Mask"],
+        index=0,
+        horizontal=True,
+        key="active_drawing_tool",
+        help="View: Preview image and overlays. Plate Area: Define the circular/polygonal analysis area. Mask: Paint areas to ignore."
+    )
+
+    # Determine if we should force "Manual Shape" because the Plate tool is active.
+    # We do this logic BEFORE the mode radio widget is created to avoid the crash.
+    is_plate_tool = (selected_tool_label == "Polygon Plate Area")
+    current_mode = st.session_state.get("manual_plate_mode", "Auto")
+
+    if is_plate_tool and current_mode != "Manual Shape":
+        st.session_state["manual_plate_mode"] = "Manual Shape"
+        # No rerun needed yet, we haven't drawn the radio button below.
+
+    # If the user switches mode to "Auto", we should probably reset the tool to "View"
+    # to avoid confusion, and we definitely want to clear the custom mask.
+    # We use a callback on the radio to handle these cleanups.
+    def on_mode_change():
+        new_mode = st.session_state["manual_plate_mode"]
+        if new_mode == "Auto":
+            # Clear manual shape mask file if it exists
+            if os.path.exists("gui_plate_batch_mask.png"):
+                os.remove("gui_plate_batch_mask.png")
+            # Switch tool back to View if it was on Plate
+            if st.session_state.get("active_drawing_tool") == "Polygon Plate Area":
+                st.session_state["active_drawing_tool"] = "🔍 View"
+        st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
+
+    # Mode Selector for the analysis engine
+    plate_mode = st.radio(
+        "Plate Detection Mode",
+        ["Auto", "Manual Circle", "Manual Shape"],
+        key="manual_plate_mode",
+        on_change=on_mode_change,
+        horizontal=False
+    )
 
     manual_cy, manual_cx, manual_r = None, None, None
-    manual_shape_path = None
-
     if plate_mode == "Manual Circle":
         st.info("Tune center and radius with the controls below.")
-
-        # Determine smart defaults if an image is loaded
         def_cy, def_cx, def_r = 1000, 1000, 800
         if input_files and len(input_files) == 1:
             try:
-                # We need to peek at the image size
-                from PIL import Image
                 img_peek = Image.open(input_files[0])
                 w, h = img_peek.size
                 def_cx, def_cy = w // 2, h // 2
                 def_r = int(min(w, h) * 0.4)
-            except Exception:
-                pass
-
+            except Exception: pass
         manual_cy = compact_control("Center Y", "manual_cy", 0, 4000, def_cy, 1, "Y coordinate of the plate center.")
         manual_cx = compact_control("Center X", "manual_cx", 0, 4000, def_cx, 1, "X coordinate of the plate center.")
         manual_r = compact_control("Radius", "manual_r", 0, 2000, def_r, 1, "Radius of the plate in pixels.")
 
-    if plate_mode == "Manual Shape" and Path("gui_plate_batch_mask.png").exists() and st.button("Clear Plate Shape"):
-        os.remove("gui_plate_batch_mask.png")
+    # Map label back to internal tool name
+    active_tool = {
+        "🔍 View": "View",
+        "Polygon Plate Area": "Define Plate Area",
+        "🖌️ Mask": "Paint Exclusion Mask"
+    }[selected_tool_label]
+
+    # Show/Hide relevant controls based on tool
+    enable_mask = (active_tool == "Paint Exclusion Mask")
+
+    brush_size = st.slider("Brush Size", 1, 100, 20, disabled=(active_tool != "Paint Exclusion Mask"))
+
+    # Cleanup buttons
+    c_cl1, c_cl2 = st.columns(2)
+    if c_cl1.button("Clear Plate", help="Reset the manual shape plate area"):
+        if os.path.exists("gui_plate_batch_mask.png"): os.remove("gui_plate_batch_mask.png")
+        st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
+        st.rerun()
+    if c_cl2.button("Clear Mask", help="Reset the exclusion mask"):
+        if os.path.exists("gui_mask_batch_exclusion.png"): os.remove("gui_mask_batch_exclusion.png")
         st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
         st.rerun()
 
-    # If user switches away from Manual Shape mode, wipe the mask file
+    # Track mode changes for state cleanup (existing logic)
     if "prev_plate_mode" in st.session_state and plate_mode != "Manual Shape" and st.session_state["prev_plate_mode"] == "Manual Shape" and os.path.exists("gui_plate_batch_mask.png"):
         os.remove("gui_plate_batch_mask.png")
         st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
-        st.rerun()
     st.session_state["prev_plate_mode"] = plate_mode
 
-    st.divider()
-
-    # 5. Masking
-    st.header("5. Masking")
-    enable_mask = st.checkbox("Enable Paint-to-Exclude", value=False)
-
-    # If user disables masking, wipe the mask file
-    if "prev_enable_mask" in st.session_state and not enable_mask and st.session_state["prev_enable_mask"] and os.path.exists("gui_mask_batch_exclusion.png"):
-        os.remove("gui_mask_batch_exclusion.png")
-        st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
-        st.rerun()
-    st.session_state["prev_enable_mask"] = enable_mask
-
-    if enable_mask and Path("gui_mask_batch_exclusion.png").exists() and st.button("Clear Exclusion Mask"):
-        os.remove("gui_mask_batch_exclusion.png")
-        st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
-        st.rerun()
-    enable_debug = st.checkbox("Save debug step images", value=False,
-                               help="Write intermediate images for every pipeline step to gui_debug/. Slower.")
-    brush_size = st.slider("Brush Size", 1, 50, 20)
+    enable_debug = st.checkbox("Save debug step images", value=False, help="Write intermediate images to gui_debug/. Slower.")
 
     # Initialize session state for manual interventions
     if "manual_exclude_ids" not in st.session_state:
@@ -460,13 +496,10 @@ if input_source:
         canvas_height = int(bg_image.height * scale)
 
         # --- Visual Context for Canvas ---
-        # If we are in Manual Circle mode, we want to see the blue circle
-        # while we are painting the exclusion mask.
         canvas_bg_img = bg_image.copy()
         if plate_mode == "Manual Circle" and manual_cy is not None:
             from PIL import ImageDraw
             draw = ImageDraw.Draw(canvas_bg_img)
-            # Draw at original scale, then we resize for canvas
             r = manual_r
             draw.ellipse([manual_cx - r, manual_cy - r, manual_cx + r, manual_cy + r], outline="blue", width=max(1, int(5/scale)))
             r_eff = r * (1.0 - margin)
@@ -476,14 +509,8 @@ if input_source:
         manual_shape_path = Path("gui_plate_batch_mask.png") if Path("gui_plate_batch_mask.png").exists() else None
         mask_path = Path("gui_mask_batch_exclusion.png") if Path("gui_mask_batch_exclusion.png").exists() else None
 
-        # Tool Selection
-        tool = None
-        if plate_mode == "Manual Shape" and enable_mask:
-            tool = st.radio("Active Drawing Tool", ["Define Plate Area", "Paint Exclusion Mask"], horizontal=True)
-        elif enable_mask:
-            tool = "Paint Exclusion Mask"
-        elif plate_mode == "Manual Shape":
-            tool = "Define Plate Area"
+        # Tool Logic
+        tool = active_tool # We now always use the canvas to keep scaling consistent
 
         # Overlay existing masks as translucent context guides
         if manual_shape_path:
@@ -500,53 +527,57 @@ if input_source:
 
         canvas_bg = canvas_bg_img.resize((canvas_width, canvas_height), Image.Resampling.LANCZOS)
 
-        if tool:
-            st.subheader(f"Manual Drawing: {tool}")
-
-            if tool == "Define Plate Area":
-                st.info("**Left-click** to add vertices around the plate. **Right-click** to close and submit.")
-                drawing_mode = "polygon"
-                fill_color = "rgba(0, 0, 255, 0.3)"
-                stroke_color = "#0000FF"
-                canvas_key = f"shape_canvas_v{st.session_state.get('canvas_version', 0)}"
-            else:
-                st.info("Paint over areas you want to EXCLUDE (contaminants, sharpie, etc.)")
-                drawing_mode = "freedraw"
-                fill_color = "rgba(255, 0, 255, 0.3)"
-                stroke_color = "#FF00FF"
-                canvas_key = f"exclusion_canvas_v{st.session_state.get('canvas_version', 0)}"
-
-            working_canvas = st_canvas(
-                fill_color=fill_color,
-                stroke_width=2 if drawing_mode == "polygon" else brush_size,
-                stroke_color=stroke_color,
-                background_image=canvas_bg,
-                update_streamlit=True,
-                height=canvas_height,
-                width=canvas_width,
-                drawing_mode=drawing_mode,
-                display_toolbar=True,
-                key=canvas_key,
-            )
-
-            # Process results from whichever tool is active
-            if working_canvas.image_data is not None:
-                alpha = working_canvas.image_data[:, :, 3]
-                if np.any(alpha > 0):
-                    mask_canvas = Image.fromarray((alpha > 0).astype(np.uint8) * 255)
-                    mask_im = mask_canvas.resize(bg_image.size, Image.Resampling.NEAREST)
-
-                    if tool == "Define Plate Area":
-                        manual_shape_path = Path("gui_plate_batch_mask.png")
-                        mask_im.save(manual_shape_path)
-                    else:
-                        mask_path = Path("gui_mask_batch_exclusion.png")
-                        mask_im.save(mask_path)
-
         with col1:
-            # We only show the "Input Preview" if no drawing canvas is visible
-            # to avoid cluttering the screen.
-            if not (plate_mode == "Manual Shape" or enable_mask):
+            if tool:
+                st.subheader(f"Manual Drawing: {tool}" if tool != "View" else "Image Preview")
+
+                if tool == "Define Plate Area":
+                    st.info("**Left-click** to add vertices around the plate. **Right-click** to close and submit.")
+                    drawing_mode = "polygon"
+                    fill_color = "rgba(0, 0, 255, 0.3)"
+                    stroke_color = "#0000FF"
+                elif tool == "Paint Exclusion Mask":
+                    st.info("Paint over areas you want to EXCLUDE (contaminants, sharpie, etc.)")
+                    drawing_mode = "freedraw"
+                    fill_color = "rgba(255, 0, 255, 0.3)"
+                    stroke_color = "#FF00FF"
+                else:
+                    # View Mode
+                    drawing_mode = "transform"
+                    fill_color = "rgba(0,0,0,0)"
+                    stroke_color = "rgba(0,0,0,0)"
+
+                canvas_key = f"{tool.lower().replace(' ', '_')}_canvas_v{st.session_state.get('canvas_version', 0)}"
+
+                working_canvas = st_canvas(
+                    fill_color=fill_color,
+                    stroke_width=2 if drawing_mode == "polygon" else (brush_size if tool != "View" else 0),
+                    stroke_color=stroke_color,
+                    background_image=canvas_bg,
+                    update_streamlit=True,
+                    height=canvas_height,
+                    width=canvas_width,
+                    drawing_mode=drawing_mode,
+                    display_toolbar=False,
+                    key=canvas_key,
+                )
+
+                # Process results from whichever tool is active
+                if working_canvas.image_data is not None:
+                    alpha = working_canvas.image_data[:, :, 3]
+                    if np.any(alpha > 0):
+                        mask_canvas = Image.fromarray((alpha > 0).astype(np.uint8) * 255)
+                        mask_im = mask_canvas.resize(bg_image.size, Image.Resampling.NEAREST)
+
+                        if tool == "Define Plate Area":
+                            manual_shape_path = Path("gui_plate_batch_mask.png")
+                            mask_im.save(manual_shape_path)
+                        else:
+                            mask_path = Path("gui_mask_batch_exclusion.png")
+                            mask_im.save(mask_path)
+
+            # Show input preview if in View mode and canvas isn't being used
+            if active_tool == "View" and (not 'working_canvas' in locals() or not working_canvas):
                 st.subheader("Input Preview")
                 display_img = bg_image
                 if plate_mode == "Manual Circle" and manual_cy is not None:
@@ -564,158 +595,144 @@ if input_source:
 
             if len(input_paths) > 1:
                 st.write(f"Batch processing {len(input_paths)} images starting with {ref_image_path.name}")
+
     else:
         st.warning("No images found in the selected input.")
 else:
     st.info("Please upload plate images or provide a folder path in the sidebar to begin.")
 
-if run_btn and input_source:
-    output_dir = Path("gui_results")
-    debug_dir = Path("gui_debug") if enable_debug else None
+with col2:
+    if run_btn and input_source:
+        output_dir = Path("gui_results")
+        debug_dir = Path("gui_debug") if enable_debug else None
 
-    # Wipe the temp working directories so stale results from previous runs
-    # never bleed into the current one.
-    if output_dir.exists():
-        shutil.rmtree(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    if debug_dir and debug_dir.exists():
-        shutil.rmtree(debug_dir)
+        # Wipe the temp working directories
+        if output_dir.exists():
+            shutil.rmtree(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        if debug_dir and debug_dir.exists():
+            shutil.rmtree(debug_dir)
 
-    # Clear previous result state when starting a new run
-    for _key in ("analysis_data", "analysis_stem", "analysis_pipeline",
-                 "analysis_output_dir", "results_editor", "batch_results", "batch_output_dir"):
-        st.session_state.pop(_key, None)
+        # Clear previous result state
+        for _key in ("analysis_data", "analysis_stem", "analysis_pipeline",
+                     "analysis_output_dir", "results_editor", "batch_results", "batch_output_dir"):
+            st.session_state.pop(_key, None)
 
-    with st.status("Analyzing plates...", expanded=True) as status_box:
-        log_container = st.empty()
-        def log_message(msg):
-            # We keep a log in session state so it persists during the run
-            if "gui_log" not in st.session_state:
-                st.session_state["gui_log"] = ""
-            st.session_state["gui_log"] += msg + "\n"
-            log_container.text(st.session_state["gui_log"])
+        with st.status("Analyzing plates...", expanded=True) as status_box:
+            log_container = st.empty()
+            def log_message(msg):
+                if "gui_log" not in st.session_state:
+                    st.session_state["gui_log"] = ""
+                st.session_state["gui_log"] += msg + "\n"
+                log_container.text(st.session_state["gui_log"])
 
-        st.session_state["gui_log"] = "" # Clear previous log
+            st.session_state["gui_log"] = ""
+            input_imgs = input_paths
 
-        input_imgs = input_paths
+            if len(input_imgs) == 1:
+                img_path = input_imgs[0]
+                log_message(f"Processing single image: {img_path.name}")
 
-        # We'll use the Python API for single images to allow interactive review.
-        # For batch, we still use the CLI for now as it's more robust for large sets.
-        if len(input_imgs) == 1:
-            img_path = input_imgs[0]
-            log_message(f"Processing single image: {img_path.name}")
+                from blenny.config import extract_steps, load_yaml, substitute_paths
+                raw_config = load_yaml(pipeline_path)
+                raw_steps = extract_steps(raw_config)
 
-            # 1. Build Pipeline manually so we can inject params
-            # We mimic the logic from CLI main.py
-            from blenny.config import extract_steps, load_yaml, substitute_paths
-            raw_config = load_yaml(pipeline_path)
-            raw_steps = extract_steps(raw_config)
+                overrides = {
+                    "load_image": {"max_dimension": int(max_dimension) if resize_enabled else None},
+                    "detect_plate": {"margin_frac": margin},
+                    "threshold_segment": {"min_area": min_area, "min_circularity": min_circ},
+                    "classify_by_interior": {"interior_radius_frac": interior_radius},
+                    "estimate_multiplicity": {"enabled": enable_multiplicity},
+                }
+                if plate_mode == "Manual Circle":
+                    overrides["detect_plate"].update({
+                        "crop": False,
+                        "radius_expand_frac": 0.0,
+                        "force_cy": manual_cy,
+                        "force_cx": manual_cx,
+                        "force_r": manual_r
+                    })
+                if plate_mode == "Manual Shape" and manual_shape_path:
+                    overrides["detect_plate"].update({
+                        "crop": False,
+                        "force_mask_path": str(manual_shape_path)
+                    })
+                if mask_path and mask_path.exists():
+                    overrides["apply_exclusion_mask"] = {"mask_path": str(mask_path)}
 
-            # Apply GUI overrides
-            overrides = {
-                "load_image": {"max_dimension": int(max_dimension) if resize_enabled else None},
-                "detect_plate": {"margin_frac": margin},
-                "threshold_segment": {"min_area": min_area, "min_circularity": min_circ},
-                "classify_by_interior": {"interior_radius_frac": interior_radius},
-                "estimate_multiplicity": {"enabled": enable_multiplicity},
-            }
-            if plate_mode == "Manual Circle":
-                overrides["detect_plate"].update({
-                    "crop": False,
-                    "radius_expand_frac": 0.0,
-                    "force_cy": manual_cy,
-                    "force_cx": manual_cx,
-                    "force_r": manual_r
-                })
-            if plate_mode == "Manual Shape" and manual_shape_path:
-                overrides["detect_plate"].update({
-                    "crop": False,
-                    "force_mask_path": str(manual_shape_path)
-                })
-            if enable_mask and mask_path:
-                overrides["apply_exclusion_mask"] = {"mask_path": str(mask_path)}
+                for step in raw_steps:
+                    if step["name"] in overrides:
+                        step.setdefault("params", {}).update(overrides[step["name"]])
 
-            for step in raw_steps:
-                if step["name"] in overrides:
-                    step.setdefault("params", {}).update(overrides[step["name"]])
+                resolved = substitute_paths(raw_steps, input_path=img_path, output_dir=output_dir)
+                pipe = Pipeline.from_config(resolved)
 
-            resolved = substitute_paths(raw_steps, input_path=img_path, output_dir=output_dir)
-            pipe = Pipeline.from_config(resolved)
+                img_debug_dir = debug_dir / img_path.stem if debug_dir else None
+                def gui_progress(current, total, name):
+                    log_message(f"  [{current}/{total}] {name}...")
 
-            # 2. Run
-            img_debug_dir = debug_dir / img_path.stem if debug_dir else None
+                data = pipe.run(img_path, debug_dir=img_debug_dir, progress_callback=gui_progress)
+                log_message("Analysis complete.")
 
-            def gui_progress(current, total, name):
-                log_message(f"  [{current}/{total}] {name}...")
-
-            data = pipe.run(img_path, debug_dir=img_debug_dir, progress_callback=gui_progress)
-
-            log_message("Analysis complete.")
-
-            # 3. Store in session state
-            st.session_state["analysis_data"] = data
-            st.session_state["analysis_stem"] = img_path.stem
-            st.session_state["analysis_output_dir"] = output_dir
-            st.session_state["analysis_pipeline"] = pipe
-
-            status_box.update(label="Analysis Complete!", state="complete", expanded=False)
-        else:
-            # BATCH MODE (existing CLI path)
-            cli_input = str(input_folder) if input_source == "folder" else str(temp_dir)
-            log_message(f"Starting batch process on {len(input_imgs)} images...")
-
-            cmd = [
-                "python3", cli_script, "run",
-                pipeline_path,
-                "--input", cli_input,
-                "--output", str(output_dir),
-                "--json",
-                "--override", f"detect_plate.margin_frac={margin}",
-                "--override", f"threshold_segment.min_area={min_area}",
-                "--override", f"threshold_segment.min_circularity={min_circ}",
-                "--override", f"classify_by_interior.interior_radius_frac={interior_radius}",
-                *([] if enable_multiplicity else ["--no-multiplicity"]),
-                *(["--override", f"load_image.max_dimension={int(max_dimension)}"] if resize_enabled else []),
-            ]
-            if plate_mode == "Manual Circle":
-                cmd.extend([
-                    "--override", f"detect_plate.force_cy={manual_cy}",
-                    "--override", f"detect_plate.force_cx={manual_cx}",
-                    "--override", f"detect_plate.force_r={manual_r}"
-                ])
-            if plate_mode == "Manual Shape" and manual_shape_path:
-                cmd.extend([
-                    "--override", "detect_plate.crop=False",
-                    "--override", f"detect_plate.force_mask_path={manual_shape_path}"
-                ])
-            if enable_mask and mask_path:
-                cmd.extend([
-                    "--override", f"apply_exclusion_mask.mask_path={mask_path}"
-                ])
-
-            # Use Popen to read stdout line by line
-            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
-
-            full_stdout = []
-            if process.stdout:
-                for line in process.stdout:
-                    clean_line = line.strip()
-                    if clean_line:
-                        # If it's the JSON result at the end, don't log it to the text box
-                        if clean_line.startswith("{") or clean_line.startswith("}") or clean_line.startswith("  \""):
-                            full_stdout.append(line)
-                            continue
-                        log_message(clean_line)
-                        full_stdout.append(line)
-
-            _, stderr = process.communicate()
-            if process.returncode == 0:
-                st.session_state["batch_results"] = "".join(full_stdout)
-                st.session_state["batch_output_dir"] = str(output_dir.resolve())
-                status_box.update(label="Batch Analysis Complete!", state="complete", expanded=False)
+                st.session_state["analysis_data"] = data
+                st.session_state["analysis_stem"] = img_path.stem
+                st.session_state["analysis_output_dir"] = output_dir
+                st.session_state["analysis_pipeline"] = pipe
+                status_box.update(label="Analysis Complete!", state="complete", expanded=False)
             else:
-                st.error(stderr)
-                log_message(f"ERROR: {stderr}")
+                # BATCH MODE
+                cli_input = str(input_folder) if input_source == "folder" else str(temp_dir)
+                log_message(f"Starting batch process on {len(input_imgs)} images...")
+
+                cmd = [
+                    "python3", cli_script, "run",
+                    pipeline_path,
+                    "--input", cli_input,
+                    "--output", str(output_dir),
+                    "--json",
+                    "--override", f"detect_plate.margin_frac={margin}",
+                    "--override", f"threshold_segment.min_area={min_area}",
+                    "--override", f"threshold_segment.min_circularity={min_circ}",
+                    "--override", f"classify_by_interior.interior_radius_frac={interior_radius}",
+                    *([] if enable_multiplicity else ["--no-multiplicity"]),
+                    *(["--override", f"load_image.max_dimension={int(max_dimension)}"] if resize_enabled else []),
+                ]
+                if plate_mode == "Manual Circle":
+                    cmd.extend([
+                        "--override", f"detect_plate.force_cy={manual_cy}",
+                        "--override", f"detect_plate.force_cx={manual_cx}",
+                        "--override", f"detect_plate.force_r={manual_r}"
+                    ])
+                if plate_mode == "Manual Shape" and manual_shape_path:
+                    cmd.extend([
+                        "--override", "detect_plate.crop=False",
+                        "--override", f"detect_plate.force_mask_path={manual_shape_path}"
+                    ])
+                if mask_path and mask_path.exists():
+                    cmd.extend([
+                        "--override", f"apply_exclusion_mask.mask_path={mask_path}"
+                    ])
+
+                process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+                full_stdout = []
+                if process.stdout:
+                    for line in process.stdout:
+                        clean_line = line.strip()
+                        if clean_line:
+                            if clean_line.startswith("{") or clean_line.startswith("}") or clean_line.startswith("  \""):
+                                full_stdout.append(line)
+                                continue
+                            log_message(clean_line)
+                            full_stdout.append(line)
+
+                _, stderr = process.communicate()
+                if process.returncode == 0:
+                    st.session_state["batch_results"] = "".join(full_stdout)
+                    st.session_state["batch_output_dir"] = str(output_dir.resolve())
+                    status_box.update(label="Batch Analysis Complete!", state="complete", expanded=False)
+                else:
+                    st.error(stderr)
+                    log_message(f"ERROR: {stderr}")
 
 # --- Render Results (Live or Batch) ---
 
