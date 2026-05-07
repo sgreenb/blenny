@@ -151,6 +151,7 @@ with st.sidebar:
     st.header("2. Analysis Pipeline")
     repro_file = st.file_uploader("Load Reproducible Config", type=["yaml", "yml"], help="Load settings from a previous run.")
 
+    # Defaults
     margin_default, min_ppm_default, min_circ_default = 0.04, 15, 0.7
     interior_radius_default = 0.85
     fallback_ecc_default = 0.55
@@ -249,8 +250,8 @@ with st.sidebar:
         if key not in st.session_state:
             st.session_state[key] = default_val
 
-        # Label Row
-        st.markdown(f"**{label}**")
+        # Label Row - Attach help here so it's always visible next to the title
+        st.markdown(f"**{label}**", help=help_text)
 
         # Control Row: [Input] [Slider] [Reset]
         c1, c2, c3 = st.columns([1.2, 3, 0.8])
@@ -320,19 +321,20 @@ with st.sidebar:
     )
     min_area_ppm = compact_control(
         "Min Colony Size (ppm)", "min_area_ppm", 0, 1000, min_ppm_default, 1,
-        "Minimum area a colony must occupy, expressed in parts-per-million of the plate area."
+        "Minimum area a colony must occupy, expressed in parts-per-million of the plate area. "
+        "100 ppm is ~0.6mm2 on a 90mm plate."
     )
     min_circ = compact_control(
         "Min Circularity", "min_circ", 0.0, 1.0, min_circ_default, 0.05,
-        "Filter objects by roundness (1.0 is a perfect circle)."
+        "Filter objects by roundness (1.0 is a perfect circle). Low values catch rim artifacts."
     )
     interior_radius = compact_control(
         "Interior Radius Frac", "interior_radius", 0.1, 1.0, interior_radius_default, 0.05,
-        "Fraction of the plate radius treated as the 'safe' interior zone for artifact rejection."
+        "Fraction of the analysis area treated as the 'safe' interior zone for building the artifact reference profile."
     )
     fallback_ecc = compact_control(
         "Fallback Max Eccentricity", "fallback_ecc", 0.1, 1.0, fallback_ecc_default, 0.05,
-        "Strict eccentricity limit used when the plate is too sparse to build a reference profile."
+        "Strict eccentricity (elongation) limit used when the plate is too sparse to build a reference profile."
     )
 
     enable_multiplicity = st.checkbox(
@@ -437,7 +439,7 @@ with st.sidebar:
         st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
     st.session_state["prev_plate_mode"] = plate_mode
 
-    enable_debug = st.checkbox("Save debug step images", value=False, help="Write intermediate images to gui_debug/. Slower.")
+    enable_debug = st.checkbox("Save debug step images", value=False, help="Write intermediate images to gui_debug. Slower.")
 
     # Initialize session state for manual interventions
     if "manual_exclude_ids" not in st.session_state:
@@ -481,7 +483,8 @@ col1, col2 = st.columns(2)
 
 if not input_source:
     for _key in ("analysis_data", "analysis_stem", "analysis_pipeline",
-                 "analysis_output_dir", "results_editor", "batch_results"):
+                 "analysis_output_dir", "results_editor", "batch_results", 
+                 "all_results", "result_stems", "current_view_idx"):
         st.session_state.pop(_key, None)
 
 if input_source:
@@ -630,7 +633,8 @@ with col2:
 
         # Clear previous result state
         for _key in ("analysis_data", "analysis_stem", "analysis_pipeline",
-                     "analysis_output_dir", "results_editor", "batch_results", "batch_output_dir"):
+                     "analysis_output_dir", "results_editor", "batch_results", 
+                     "batch_output_dir", "all_results", "result_stems", "current_view_idx"):
             st.session_state.pop(_key, None)
 
         with st.status("Analyzing plates...", expanded=True) as status_box:
@@ -643,140 +647,125 @@ with col2:
 
             st.session_state["gui_log"] = ""
             input_imgs = input_paths
+            
+            st.session_state["all_results"] = {}
+            st.session_state["result_stems"] = []
+            st.session_state["current_view_idx"] = 0
+            
+            # Setup base pipeline config
+            from blenny.config import extract_steps, load_yaml, substitute_paths
+            raw_config = load_yaml(pipeline_path)
+            raw_steps = extract_steps(raw_config)
+            
+            overrides = {
+                "load_image": {"max_dimension": int(max_dimension) if resize_enabled else None},
+                "detect_plate": {"margin_frac": margin},
+                "threshold_segment": {"min_area": None, "min_area_ppm": min_area_ppm, "min_circularity": min_circ},
+                "classify_by_interior": {
+                    "interior_radius_frac": interior_radius,
+                    "strict_fallback_max_eccentricity": fallback_ecc
+                },
+                "estimate_multiplicity": {"enabled": enable_multiplicity},
+            }
+            if plate_mode == "Manual Circle":
+                overrides["detect_plate"].update({
+                    "crop": False,
+                    "force_cy": manual_cy,
+                    "force_cx": manual_cx,
+                    "force_r": manual_r
+                })
+            if plate_mode == "Manual Shape" and manual_shape_path:
+                overrides["detect_plate"].update({
+                    "crop": False,
+                    "force_mask_path": str(manual_shape_path)
+                })
+            if mask_path and mask_path.exists():
+                overrides["apply_exclusion_mask"] = {"mask_path": str(mask_path)}
 
-            if len(input_imgs) == 1:
-                img_path = input_imgs[0]
-                log_message(f"Processing single image: {img_path.name}")
+            for step in raw_steps:
+                if step["name"] in overrides:
+                    step.setdefault("params", {}).update(overrides[step["name"]])
 
-                from blenny.config import extract_steps, load_yaml, substitute_paths
-                raw_config = load_yaml(pipeline_path)
-                raw_steps = extract_steps(raw_config)
-
-                overrides = {
-                    "load_image": {"max_dimension": int(max_dimension) if resize_enabled else None},
-                    "detect_plate": {"margin_frac": margin},
-                    "threshold_segment": {"min_area": None, "min_area_ppm": min_area_ppm, "min_circularity": min_circ},
-                    "classify_by_interior": {
-                        "interior_radius_frac": interior_radius,
-                        "strict_fallback_max_eccentricity": fallback_ecc
-                    },
-                    "estimate_multiplicity": {"enabled": enable_multiplicity},
-                }
-                if plate_mode == "Manual Circle":
-                    overrides["detect_plate"].update({
-                        "crop": False,
-                        "force_cy": manual_cy,
-                        "force_cx": manual_cx,
-                        "force_r": manual_r
-                    })
-                if plate_mode == "Manual Shape" and manual_shape_path:
-                    overrides["detect_plate"].update({
-                        "crop": False,
-                        "force_mask_path": str(manual_shape_path)
-                    })
-                if mask_path and mask_path.exists():
-                    overrides["apply_exclusion_mask"] = {"mask_path": str(mask_path)}
-
-                for step in raw_steps:
-                    if step["name"] in overrides:
-                        step.setdefault("params", {}).update(overrides[step["name"]])
-
+            # Process every image in the batch
+            for i, img_path in enumerate(input_imgs):
+                log_message(f"Processing ({i+1}/{len(input_imgs)}): {img_path.name}")
+                
                 resolved = substitute_paths(raw_steps, input_path=img_path, output_dir=output_dir)
                 pipe = Pipeline.from_config(resolved)
-
+                
                 img_debug_dir = debug_dir / img_path.stem if debug_dir else None
                 def gui_progress(current, total, name):
                     log_message(f"  [{current}/{total}] {name}...")
 
                 data = pipe.run(img_path, debug_dir=img_debug_dir, progress_callback=gui_progress)
-                total_duration = sum(p.duration_s for p in data.provenance)
-                log_message(f"Analysis complete in {total_duration:.2f}s.")
+                
+                st.session_state["all_results"][img_path.stem] = data
+                st.session_state["result_stems"].append(img_path.stem)
+            
+            # Global completion message
+            total_time = sum(sum(p.duration_s for p in d.provenance) for d in st.session_state["all_results"].values())
+            log_message(f"Batch complete: {len(input_imgs)} images in {total_time:.2f}s.")
+            
+            # Stash pipeline for later rendering/saving
+            st.session_state["analysis_pipeline"] = pipe
+            st.session_state["analysis_output_dir"] = output_dir
+            
+            status_box.update(label="Analysis Complete!", state="complete", expanded=False)
 
-                st.session_state["analysis_data"] = data
-                st.session_state["analysis_stem"] = img_path.stem
-                st.session_state["analysis_output_dir"] = output_dir
-                st.session_state["analysis_pipeline"] = pipe
-                status_box.update(label="Analysis Complete!", state="complete", expanded=False)
-            else:
-                # BATCH MODE
-                cli_input = str(input_folder) if input_source == "folder" else str(temp_dir)
-                log_message(f"Starting batch process on {len(input_imgs)} images...")
+# --- Render Results (Interactive Review) ---
 
-                cmd = [
-                    "python3", cli_script, "run",
-                    pipeline_path,
-                    "--input", cli_input,
-                    "--output", str(output_dir),
-                    "--json",
-                    "--override", f"detect_plate.margin_frac={margin}",
-                    "--override", "threshold_segment.min_area=None",
-                    "--override", f"threshold_segment.min_area_ppm={min_area_ppm}",
-                    "--override", f"threshold_segment.min_circularity={min_circ}",
-                    "--override", f"classify_by_interior.interior_radius_frac={interior_radius}",
-                    "--override", f"classify_by_interior.strict_fallback_max_eccentricity={fallback_ecc}",
-                    *([] if enable_multiplicity else ["--no-multiplicity"]),
-                    *(["--override", f"load_image.max_dimension={int(max_dimension)}"] if resize_enabled else []),
-                ]
-                if plate_mode == "Manual Circle":
-                    cmd.extend([
-                        "--override", f"detect_plate.force_cy={manual_cy}",
-                        "--override", f"detect_plate.force_cx={manual_cx}",
-                        "--override", f"detect_plate.force_r={manual_r}"
-                    ])
-                if plate_mode == "Manual Shape" and manual_shape_path:
-                    cmd.extend([
-                        "--override", "detect_plate.crop=False",
-                        "--override", f"detect_plate.force_mask_path={manual_shape_path}"
-                    ])
-                if mask_path and mask_path.exists():
-                    cmd.extend([
-                        "--override", f"apply_exclusion_mask.mask_path={mask_path}"
-                    ])
-
-                process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
-                full_stdout = []
-                if process.stdout:
-                    for line in process.stdout:
-                        clean_line = line.strip()
-                        if clean_line:
-                            if clean_line.startswith("{") or clean_line.startswith("}") or clean_line.startswith("  \""):
-                                full_stdout.append(line)
-                                continue
-                            log_message(clean_line)
-                            full_stdout.append(line)
-
-                _, stderr = process.communicate()
-                if process.returncode == 0:
-                    st.session_state["batch_results"] = "".join(full_stdout)
-                    st.session_state["batch_output_dir"] = str(output_dir.resolve())
-                    status_box.update(label="Batch Analysis Complete!", state="complete", expanded=False)
-                else:
-                    st.error(stderr)
-                    log_message(f"ERROR: {stderr}")
-
-# --- Render Results (Live or Batch) ---
-
-if "analysis_data" in st.session_state:
-    data = st.session_state["analysis_data"]
-    stem = st.session_state["analysis_stem"]
-    output_dir = st.session_state["analysis_output_dir"]
+if st.session_state.get("all_results"):
+    all_data = st.session_state["all_results"]
+    stems = st.session_state["result_stems"]
     pipe = st.session_state["analysis_pipeline"]
-
+    output_dir = st.session_state["analysis_output_dir"]
+    
     with col2:
         st.subheader("Interactive Review")
+        
+        # --- Navigation Header ---
+        c_nav1, c_nav2, c_nav3 = st.columns([1.2, 3, 1.2])
+        
+        curr_idx = st.session_state.get("current_view_idx", 0)
+        
+        def update_idx(new_val):
+            st.session_state["current_view_idx"] = new_val
+            # Sync the selectbox key immediately to prevent it being sticky
+            st.session_state["stem_selector"] = stems[new_val]
 
-        # 1. Get current measurements
+        if c_nav1.button("← Previous", disabled=(curr_idx == 0), use_container_width=True):
+            update_idx(curr_idx - 1)
+            st.rerun()
+            
+        # Dropdown for direct selection
+        selected_stem = c_nav2.selectbox(
+            "Select Plate",
+            options=stems,
+            index=curr_idx,
+            label_visibility="collapsed",
+            key="stem_selector"
+        )
+        # Update index if dropdown changed manually
+        if selected_stem != stems[curr_idx]:
+            st.session_state["current_view_idx"] = stems.index(selected_stem)
+            st.rerun()
+            
+        if c_nav3.button("Next →", disabled=(curr_idx == len(stems) - 1), use_container_width=True):
+            update_idx(curr_idx + 1)
+            st.rerun()
+            
+        # Get data for CURRENT selection
+        stem = stems[st.session_state["current_view_idx"]]
+        data = all_data[stem]
+
+        # --- Standard Interactive Review (Table, Images, Exporters) ---
         import pandas as pd
-        df = pd.DataFrame(data.measurements)
-
-        # Ensure ID order and counts are correct based on current status
-        # Note: We do NOT reassign IDs here during the review loop, as the user
-        # wants IDs to remain stable once the analysis has run.
+        
+        # Ensure ID order and counts are correct
         InteriorColonyClassifier.update_count(data.measurements, data)
         df = pd.DataFrame(data.measurements)
 
-        # 2. Setup rendering tools (reusing pipeline exporters)
-        # We find them in the pipeline or create defaults with dummy paths
+        # Rendering tools
         annotator = next((s for s in pipe.steps if isinstance(s, AnnotatedImageExporter)),
                          AnnotatedImageExporter(output_path="dummy.png", outline_color=(255, 64, 64)))
         summarizer = next((s for s in pipe.steps if isinstance(s, SummaryExporter)),
@@ -784,59 +773,31 @@ if "analysis_data" in st.session_state:
         csv_exporter = next((s for s in pipe.steps if isinstance(s, CSVExporter)),
                             CSVExporter(output_path="dummy.csv"))
 
-        # 3. Live render the image and summary
+        # Live render
         img = annotator.render(data)
-        st.image(img, caption=f"Reviewed Colonies: {data.metadata['colony_count']}", width="stretch")
+        st.image(img, caption=f"{stem} — Reviewed Colonies: {data.metadata['colony_count']}", width="stretch")
 
         # --- Download Section ---
         c_dl1, c_dl2, c_dl3 = st.columns(3)
-        c_dl1.download_button(
-            "Download CSV",
-            csv_exporter.generate_csv(data),
-            file_name=f"{stem}_colonies.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
-
-        # Log download
-        c_dl2.download_button(
-            "Download Log",
-            summarizer.generate_text(data),
-            file_name=f"{stem}_log.txt",
-            mime="text/plain",
-            use_container_width=True
-        )
-
-        # Annotated image download
+        c_dl1.download_button("Download CSV", csv_exporter.generate_csv(data), file_name=f"{stem}_colonies.csv", mime="text/csv", use_container_width=True)
+        c_dl2.download_button("Download Log", summarizer.generate_text(data), file_name=f"{stem}_log.txt", mime="text/plain", use_container_width=True)
         import io
         buf = io.BytesIO()
         img.save(buf, format="PNG")
-        c_dl3.download_button(
-            "Download Image",
-            buf.getvalue(),
-            file_name=f"{stem}_annotated.png",
-            mime="image/png",
-            use_container_width=True
-        )
-        # --- End Download Section ---
+        c_dl3.download_button("Download Image", buf.getvalue(), file_name=f"{stem}_annotated.png", mime="image/png", use_container_width=True)
 
-        # 4. Handle data editor changes
-        # We want to toggle 'is_artifact'
-        st.write("Check boxes below to mark objects as artifacts. Counts and images will update instantly.")
+        st.write("Check boxes to mark artifacts. Counts update instantly.")
 
-        # We define which columns to show and make 'is_artifact' editable
         display_cols = ["label", "is_artifact", "is_manual_review", "centroid_x", "centroid_y", "area_px", "area_ppm", "Type"]
-        if "is_manual_review" not in df.columns:
-            df["is_manual_review"] = False
+        if "is_manual_review" not in df.columns: df["is_manual_review"] = False
         if "Type" not in df.columns:
             def get_type(row):
-                if row["is_artifact"]:
-                    return "Artifact"
-                if int(row["colony_count_estimate"]) >= 2:
-                    return f"Merged(x{int(row['colony_count_estimate'])})"
+                if row["is_artifact"]: return "Artifact"
+                if int(row["colony_count_estimate"]) >= 2: return f"Merged(x{int(row['colony_count_estimate'])})"
                 return "Colony"
             df["Type"] = df.apply(get_type, axis=1)
 
+        # Editor unique key includes stem to reset scroll/state between images
         edited_df = st.data_editor(
             df[display_cols],
             column_config={
@@ -845,75 +806,44 @@ if "analysis_data" in st.session_state:
                 "is_manual_review": st.column_config.CheckboxColumn("Manual?", disabled=True),
                 "Type": st.column_config.TextColumn("Class", disabled=True),
             },
-            disabled=["label", "is_manual_review", "centroid_x", "centroid_y", "area_px", "Type"],
+            disabled=["label", "is_manual_review", "centroid_x", "centroid_y", "area_px", "area_ppm", "Type"],
             hide_index=True,
             width="stretch",
-            key="results_editor"
+            key=f"editor_{stem}"
         )
 
-        # Apply changes from editor back to the ImageData
-        if st.session_state.get("results_editor"):
-            edits = st.session_state["results_editor"]["edited_rows"]
+        if st.session_state.get(f"editor_{stem}"):
+            edits = st.session_state[f"editor_{stem}"]["edited_rows"]
             if edits:
                 changed = False
                 for idx, changes in edits.items():
                     if "is_artifact" in changes:
-                        # Map index back to the measurements list
                         data.measurements[idx]["is_artifact"] = changes["is_artifact"]
                         data.measurements[idx]["is_manual_review"] = True
                         changed = True
                 if changed:
-                    # Update counts but DO NOT reassign IDs during review
                     InteriorColonyClassifier.update_count(data.measurements, data)
                     st.rerun()
 
-        save_dir = Path(output_folder_input).resolve() if output_folder_input.strip() else output_dir / stem
-        if st.button("Save Results", type="primary", width="stretch"):
+        # Batch Save Button
+        save_dir = Path(output_folder_input).resolve() if output_folder_input.strip() else output_dir
+        if st.button(f"Save All results to {save_dir.name}", type="primary", width="stretch"):
             save_dir.mkdir(parents=True, exist_ok=True)
-            # Re-point every exporter to the chosen directory, preserving filenames.
-            for step in pipe.steps:
-                if not hasattr(step, "export"):
-                    continue
-                orig_path = getattr(step.params, "output_path", None)
-                if orig_path is not None:
-                    filename = Path(orig_path).name
-                    step.params.output_path = str(save_dir / filename)
-                step.export(data)
-                if orig_path is not None:
-                    step.params.output_path = orig_path
-            st.success(f"Results saved to {save_dir}")
+            for s, d in all_data.items():
+                cur_save_dir = save_dir / s
+                cur_save_dir.mkdir(parents=True, exist_ok=True)
+                for step in pipe.steps:
+                    if not hasattr(step, "export"): continue
+                    orig_path = getattr(step.params, "output_path", None)
+                    if orig_path:
+                        filename = Path(orig_path).name
+                        step.params.output_path = str(cur_save_dir / filename)
+                    step.export(d)
+                    if orig_path: step.params.output_path = orig_path
+            st.success(f"All {len(all_data)} plate results saved to {save_dir}")
 
-        # Summary Log
         with st.expander("View Live Summary"):
             st.text(summarizer.generate_text(data))
-
-elif "batch_results" in st.session_state:
-    st.subheader("Batch Results")
-    st.info("Interactive review is available for single-image runs. Batch results are saved to disk.")
-
-    # Show the JSON summary
-    with st.expander("📊 View Batch Summary", expanded=True):
-        st.code(st.session_state["batch_results"], language="json")
-
-    # Save / copy results
-    default_batch_out = st.session_state.get("batch_output_dir", "gui_results")
-    save_dest = Path(output_folder_input).resolve() if output_folder_input.strip() else None
-
-    if save_dest and str(save_dest) != default_batch_out:
-        if st.button("Copy Results to Output Folder", type="primary", width="stretch"):
-            src = Path(default_batch_out)
-            save_dest.mkdir(parents=True, exist_ok=True)
-            for item in src.iterdir():
-                dest_item = save_dest / item.name
-                if item.is_dir():
-                    shutil.copytree(item, dest_item, dirs_exist_ok=True)
-                else:
-                    shutil.copy2(item, dest_item)
-            st.success(f"Results copied to {save_dest}")
-    else:
-        st.success(f"Results already saved to **{default_batch_out}**")
-        st.caption("To save to a different location, set the Output Folder in the sidebar before running, "
-                   "or set it now and click the button that will appear above.")
 
 elif input_source:
     st.info("Please run the analysis to see results.")
