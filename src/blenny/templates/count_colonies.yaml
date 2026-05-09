@@ -19,15 +19,9 @@ steps:
 
   - name: detect_plate
     params:
-      # The detected radius is used as-is. Set to a value such as 0.05
-      # to expand the detected radius if off-axis phone photos make
-      # the plate appear elliptical.
       radius_expand_frac: 0.0
-      # Shrink the plate mask by 4% of the radius to exclude the
-      # bright reflective rim common in phone photos. Reduce to 0.02
-      # for flatbed scans or if colonies grow close to the rim.
       margin_frac: 0.04
-      crop: true
+      crop: false
 
   - name: apply_exclusion_mask
     params:

@@ -108,11 +108,20 @@ class YoloDetector(Segmenter):
                     # Refine using Otsu thresholding within the box
                     crop = image[y1:y2, x1:x2]
 
-                    # Convert to gray 8-bit for OpenCV
-                    if crop.ndim == 3:
-                        gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
+                    # Convert to gray 8-bit for OpenCV. 
+                    # OpenCV functions (cvtColor, threshold) often require uint8 or uint16.
+                    if crop.dtype != np.uint8:
+                        if crop.max() <= 1.1: # Likely 0-1 float
+                            crop_ui8 = (crop * 255).astype(np.uint8)
+                        else:
+                            crop_ui8 = crop.astype(np.uint8)
                     else:
-                        gray = (crop * 255).astype(np.uint8) if crop.dtype != np.uint8 else crop
+                        crop_ui8 = crop
+
+                    if crop_ui8.ndim == 3:
+                        gray = cv2.cvtColor(crop_ui8, cv2.COLOR_RGB2GRAY)
+                    else:
+                        gray = crop_ui8
 
                     # Otsu threshold
                     _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)

@@ -161,11 +161,11 @@ with st.sidebar:
     # 2. Pipeline Selection
     st.header("2. Analysis Pipeline")
 
-    # Pipeline choice: Classic vs YOLO
+    # Pipeline choice: YOLO vs Classic
     pipeline_mode = st.radio(
         "Analysis Engine",
-        ["Classic CV", "YOLO ML"],
-        index=1,
+        ["YOLO ML", "Classic CV"],
+        index=0,
         horizontal=True,
         help="Classic CV uses edge detection and thresholding. YOLO ML uses a trained neural network.",
     )
@@ -442,11 +442,11 @@ with st.sidebar:
     # Note: We use a key for the tool so we can query it safely.
     selected_tool_label = st.radio(
         "Select Drawing Tool",
-        options=["🔍 View", "Polygon Plate Area", "🖌️ Mask"],
+        options=["View", "Polygon Plate Area", "Exclusion Mask"],
         index=0,
         horizontal=True,
         key="active_drawing_tool",
-        help="View: Preview image and overlays. Plate Area: Define the circular/polygonal analysis area. Mask: Paint areas to ignore.",
+        help="View: Preview image and overlays. Plate Area: Define the circular/polygonal analysis area. Exclusion Mask: Paint areas to ignore.",
     )
 
     # Determine if we should force "Manual Shape" because the Plate tool is active.
@@ -469,7 +469,7 @@ with st.sidebar:
                 os.remove("gui_plate_batch_mask.png")
             # Switch tool back to View if it was on Plate
             if st.session_state.get("active_drawing_tool") == "Polygon Plate Area":
-                st.session_state["active_drawing_tool"] = "🔍 View"
+                st.session_state["active_drawing_tool"] = "View"
         st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
 
     # Mode Selector for the analysis engine
@@ -505,9 +505,9 @@ with st.sidebar:
 
     # Map label back to internal tool name
     active_tool = {
-        "🔍 View": "View",
+        "View": "View",
         "Polygon Plate Area": "Define Plate Area",
-        "🖌️ Mask": "Paint Exclusion Mask",
+        "Exclusion Mask": "Paint Exclusion Mask",
     }[selected_tool_label]
 
     # Show/Hide relevant controls based on tool
@@ -884,7 +884,7 @@ with col2:
 
             overrides = {
                 "load_image": {"max_dimension": int(max_dimension) if resize_enabled else None},
-                "detect_plate": {"margin_frac": margin},
+                "detect_plate": {"margin_frac": margin, "crop": False},
                 "threshold_segment": {
                     "min_area": None,
                     "min_area_ppm": min_area_ppm,

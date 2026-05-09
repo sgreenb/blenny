@@ -12,8 +12,11 @@ from blenny.modules import (
     AnnotatedImageExporter,
     ColonyMeasurer,
     CSVExporter,
+    ExclusionMasker,
+    IDFilter,
     IlluminationCorrection,
     ImageFileLoader,
+    ManualColonyAdder,
     PlateDetector,
     ThresholdSegmenter,
 )
@@ -262,6 +265,63 @@ def test_colony_measurer_flags_suspect_high_coverage() -> None:
     # Set an absurdly low threshold so any coverage triggers it.
     out = ColonyMeasurer(max_plausible_count=0, max_coverage_frac=0.0001).run(data)
     assert any(f.code == "suspect_high_count" for f in out.quality_flags)
+
+
+# --- UI Support Modules -------------------------------------------------------
+
+
+def test_manual_colony_adder_adds_blobs() -> None:
+    image = np.zeros((100, 100, 3), dtype=np.uint8)
+    data = ImageData(source="test", image=image)
+    # Add a colony at (50, 50) with radius 10
+    adder = ManualColonyAdder(coordinates=[(50, 50)], radius=10)
+    out = adder.run(data)
+    mask = out.masks["objects"]
+    assert mask.shape == (100, 100)
+    assert mask[50, 50] > 0
+    assert mask[0, 0] == 0
+    assert any(f.code == "manual_inclusions" for f in out.quality_flags)
+
+
+def test_id_filter_marks_artifacts() -> None:
+    data = ImageData(source="test")
+    # IDs 1 and 2 at different positions so reassign_ids sort is stable
+    data.measurements = [
+        {"label": 1, "is_artifact": False, "centroid_y": 10, "centroid_x": 10},
+        {"label": 2, "is_artifact": False, "centroid_y": 20, "centroid_x": 20},
+    ]
+    # Exclude ID 1
+    filter_mod = IDFilter(exclude_ids=[1])
+    out_rows = filter_mod.classify(data.measurements, data)
+    # IDFilter reassigns IDs: colonies first, then artifacts.
+    # Original #2 is now the only colony, so it gets label 1.
+    # Original #1 is now the artifact, so it gets label 2.
+    # We find the one that was original #1
+    orig_1 = next(r for r in out_rows if r["centroid_y"] == 10)
+    assert orig_1["is_artifact"] is True
+    assert orig_1["label"] == 2
+    assert any(f.code == "manual_exclusions" for f in data.quality_flags)
+
+
+def test_exclusion_masker_subtracts_from_target(tmp_path: Path) -> None:
+    # 1. Create a "painted" mask file (white square in center)
+    mask_im = np.zeros((100, 100), dtype=np.uint8)
+    mask_im[40:60, 40:60] = 255
+    mask_path = tmp_path / "exclusion.png"
+    Image.fromarray(mask_im).save(mask_path)
+
+    # 2. Setup data with a full plate mask
+    data = ImageData(source="test")
+    data.image = np.zeros((100, 100, 3), dtype=np.uint8)
+    data.masks["plate"] = np.ones((100, 100), dtype=bool)
+
+    # 3. Run exclusion
+    ExclusionMasker(mask_path=str(mask_path)).run(data)
+
+    # 4. Center should now be False, edges should be True
+    # Use == for numpy boolean scalars
+    assert data.masks["plate"][50, 50] == False
+    assert data.masks["plate"][10, 10] == True
 
 
 # --- CSVExporter --------------------------------------------------------------

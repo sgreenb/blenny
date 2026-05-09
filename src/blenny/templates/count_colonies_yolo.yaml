@@ -16,7 +16,7 @@ steps:
       # YOLO is robust enough to handle the plate rim, so we can use
       # a smaller margin than the classical pipeline.
       margin_frac: 0.02
-      crop: true
+      crop: false
 
   - name: apply_exclusion_mask
     params:
