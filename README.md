@@ -21,7 +21,26 @@ pip install -e .
 > equivalents throughout — e.g. `python -m blenny init`, `python -m blenny gui`.
 > Both forms work identically on all platforms.
 
-### 2. Run your first analysis
+```
+
+---
+
+## Standalone YOLO Counter (Fastest)
+
+If you only need a quick colony count without the full pipeline (no plate detection, no ROI masking, no detailed quantification), you can use the standalone YOLO script:
+
+```bash
+# Count colonies in a folder of images
+python yolo_count_only.py -in plates/ -out results/
+```
+
+- **`-in`**: Path to an image or a directory of images.
+- **`-out`**: Directory to save the `colony_counts.csv` and annotated images.
+- **`-model`**: (Optional) Path to a custom YOLO `.pt` model. Defaults to `models/colony_model.pt`.
+
+---
+
+## Analysis Pipelines
 ```bash
 # Generate starter pipelines (creates pipeline_classic.yaml and pipeline_yolo.yaml)
 blenny init
