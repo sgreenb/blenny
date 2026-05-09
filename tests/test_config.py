@@ -52,7 +52,9 @@ def test_substitute_paths_fills_placeholders(tmp_path: Path) -> None:
         input_path=tmp_path / "plate1.jpg",
         output_dir=tmp_path / "results",
     )
-    assert out[0]["params"]["output_path"] == str(tmp_path / "results" / "plate1" / "x.csv")
+    # Normalize path for cross-platform comparison
+    result_path = Path(out[0]["params"]["output_path"])
+    assert result_path == tmp_path / "results" / "plate1" / "x.csv"
     # Original is untouched (deep copy semantics).
     assert steps[0]["params"]["output_path"] == "{output_dir}/{stem}/x.csv"
 

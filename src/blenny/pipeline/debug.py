@@ -83,7 +83,9 @@ class DebugWriter:
         except Exception:
             pass  # Don't let debug-saving crash the pipeline
 
-    def _save_mask(self, mask: np.ndarray, path: Path, background: np.ndarray | None = None) -> None:
+    def _save_mask(
+        self, mask: np.ndarray, path: Path, background: np.ndarray | None = None
+    ) -> None:
         try:
             mask_arr = np.asarray(mask)
             if mask_arr.ndim != 2:

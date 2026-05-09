@@ -62,7 +62,11 @@ class ColonyMeasurer(FeatureExtractor):
             hsv = None
             color_img = None
             pre_illum = data.artifacts.get("pre_illumination")
-            if pre_illum is not None and pre_illum.shape[:2] == image.shape[:2] and pre_illum.ndim == 3:
+            if (
+                pre_illum is not None
+                and pre_illum.shape[:2] == image.shape[:2]
+                and pre_illum.ndim == 3
+            ):
                 color_img = pre_illum[:, :, :3]
                 hsv = color.rgb2hsv(color_img)
 
@@ -94,9 +98,18 @@ class ColonyMeasurer(FeatureExtractor):
             v_means = {p.label: p.intensity_mean for p in v_props}
 
             # Also get RGB means (use the 3-channel color_img)
-            r_means = {p.label: p.intensity_mean for p in measure.regionprops(labels, intensity_image=color_img[:, :, 0])}
-            g_means = {p.label: p.intensity_mean for p in measure.regionprops(labels, intensity_image=color_img[:, :, 1])}
-            b_means = {p.label: p.intensity_mean for p in measure.regionprops(labels, intensity_image=color_img[:, :, 2])}
+            r_means = {
+                p.label: p.intensity_mean
+                for p in measure.regionprops(labels, intensity_image=color_img[:, :, 0])
+            }
+            g_means = {
+                p.label: p.intensity_mean
+                for p in measure.regionprops(labels, intensity_image=color_img[:, :, 1])
+            }
+            b_means = {
+                p.label: p.intensity_mean
+                for p in measure.regionprops(labels, intensity_image=color_img[:, :, 2])
+            }
         else:
             h_means = s_means = v_means = {}
             r_means = g_means = b_means = {}
@@ -140,14 +153,16 @@ class ColonyMeasurer(FeatureExtractor):
             # Add color features if available
             if hsv is not None:
                 l_id = prop.label
-                row.update({
-                    "mean_r": round(float(r_means[l_id]), 4),
-                    "mean_g": round(float(g_means[l_id]), 4),
-                    "mean_b": round(float(b_means[l_id]), 4),
-                    "mean_h": round(float(h_means[l_id]), 4),
-                    "mean_s": round(float(s_means[l_id]), 4),
-                    "mean_v": round(float(v_means[l_id]), 4),
-                })
+                row.update(
+                    {
+                        "mean_r": round(float(r_means[l_id]), 4),
+                        "mean_g": round(float(g_means[l_id]), 4),
+                        "mean_b": round(float(b_means[l_id]), 4),
+                        "mean_h": round(float(h_means[l_id]), 4),
+                        "mean_s": round(float(s_means[l_id]), 4),
+                        "mean_v": round(float(v_means[l_id]), 4),
+                    }
+                )
 
             rows.append(row)
 

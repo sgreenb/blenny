@@ -49,7 +49,7 @@ class ManualColonyAdder(Preprocessor):
         # We need to be careful with coordinate frames.
         # If the image was cropped, coordinates from the GUI (original scale)
         # need to be shifted.
-        bbox = data.metadata.get("plate_bbox") # (y0, x0, y1, x1)
+        bbox = data.metadata.get("plate_bbox")  # (y0, x0, y1, x1)
         y_off, x_off = 0, 0
         if bbox is not None:
             y_off, x_off = bbox[0], bbox[1]
@@ -62,7 +62,7 @@ class ManualColonyAdder(Preprocessor):
             sx, sy = sx - x_off, sy - y_off
 
             rr, cc = disk((int(sy), int(sx)), self.params.radius, shape=(h, w))
-            mask[rr, cc] = 1 # Mark as foreground
+            mask[rr, cc] = 1  # Mark as foreground
             added_count += 1
 
         # If it was a label image, we should re-label it to ensure

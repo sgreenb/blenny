@@ -100,11 +100,13 @@ class PlateDetector(Preprocessor):
         # --- Case A: Manual Mask File ---
         if self.params.force_mask_path:
             from PIL import Image
+
             mask_im = Image.open(self.params.force_mask_path).convert("L")
             mask = np.asarray(mask_im) > 127
             if mask.shape != (h, w):
                 # Resize if needed (e.g. if mask was drawn on a thumb)
                 from skimage.transform import resize
+
                 mask = resize(mask, (h, w), order=0, anti_aliasing=False)
 
             data.masks[self.params.mask_key] = mask
@@ -120,7 +122,11 @@ class PlateDetector(Preprocessor):
             return image
 
         # --- Case B: Forced Circle Coords ---
-        if self.params.force_cy is not None and self.params.force_cx is not None and self.params.force_r is not None:
+        if (
+            self.params.force_cy is not None
+            and self.params.force_cx is not None
+            and self.params.force_r is not None
+        ):
             cy = round(self.params.force_cy * scale)
             cx = round(self.params.force_cx * scale)
             r_hough = round(self.params.force_r * scale)

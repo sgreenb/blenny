@@ -51,12 +51,12 @@ class AnnotatedImageExporter(Exporter):
         plate_mask_key: str = "plate"
         """Key in ``data.masks`` for the plate interior mask used to draw
         the boundary ring."""
-        
+
         draw_interior_boundary: bool = True
         """If True, draw the boundary between the 'safe' interior zone and
         the edge zone used by the interior classifier. Useful for tuning
         ``interior_radius_frac``."""
-        
+
         interior_boundary_color: tuple[int, int, int] = (255, 255, 0)
         """Color of the interior boundary ring (default: yellow)."""
 
@@ -139,8 +139,12 @@ class AnnotatedImageExporter(Exporter):
 
         # Multi-class support: handle colonies with custom class colors
         class_colored_rows = [
-            r for r in data.measurements
-            if not r.get("is_artifact") and not r.get("is_manual_review") and "class_color" in r and _seg_id(r) is not None
+            r
+            for r in data.measurements
+            if not r.get("is_artifact")
+            and not r.get("is_manual_review")
+            and "class_color" in r
+            and _seg_id(r) is not None
         ]
 
         normal_mask = (labels > 0) & ~artifact_mask & ~manual_review_mask & ~merged_mask
@@ -148,14 +152,16 @@ class AnnotatedImageExporter(Exporter):
         # Remove custom-colored ones from the normal/merged masks
         for r in class_colored_rows:
             sid = _seg_id(r)
-            normal_mask &= (labels != sid)
-            merged_mask &= (labels != sid)
+            normal_mask &= labels != sid
+            merged_mask &= labels != sid
 
         # Compute boundaries
         normal_bounds = segmentation.find_boundaries(np.where(normal_mask, labels, 0), mode="outer")
         # Combine auto-artifacts and manual-reviews for the same magenta border
         artifact_combined_mask = artifact_mask | manual_review_mask
-        artifact_bounds = segmentation.find_boundaries(np.where(artifact_combined_mask, labels, 0), mode="outer")
+        artifact_bounds = segmentation.find_boundaries(
+            np.where(artifact_combined_mask, labels, 0), mode="outer"
+        )
         merged_bounds = segmentation.find_boundaries(np.where(merged_mask, labels, 0), mode="outer")
 
         # Apply colors
@@ -165,7 +171,7 @@ class AnnotatedImageExporter(Exporter):
 
         # Draw each class-colored colony
         for r in class_colored_rows:
-            m = (labels == _seg_id(r))
+            m = labels == _seg_id(r)
             b = segmentation.find_boundaries(m, mode="outer")
             rgb[b] = np.array(r["class_color"], dtype=np.uint8)
 
@@ -245,14 +251,14 @@ class AnnotatedImageExporter(Exporter):
         # than messing with mask boundaries for a perfect radius.
         temp_im = Image.fromarray(rgb)
         draw = ImageDraw.Draw(temp_im)
-        
+
         # Draw a thin yellow circle
         draw.ellipse(
             [cx - r_int, cy - r_int, cx + r_int, cy + r_int],
             outline=self.params.interior_boundary_color,  # type: ignore[attr-defined]
-            width=1
+            width=1,
         )
-        
+
         # Copy back to numpy
         rgb[:] = np.asarray(temp_im)
 
@@ -298,10 +304,12 @@ class AnnotatedImageExporter(Exporter):
             overlap = False
             for other_bbox in occupied_bboxes:
                 # Standard AABB collision check
-                if not (curr_bbox[2] < other_bbox[0] or
-                        curr_bbox[0] > other_bbox[2] or
-                        curr_bbox[3] < other_bbox[1] or
-                        curr_bbox[1] > other_bbox[3]):
+                if not (
+                    curr_bbox[2] < other_bbox[0]
+                    or curr_bbox[0] > other_bbox[2]
+                    or curr_bbox[3] < other_bbox[1]
+                    or curr_bbox[1] > other_bbox[3]
+                ):
                     overlap = True
                     break
 
@@ -316,7 +324,16 @@ class AnnotatedImageExporter(Exporter):
             else:
                 # If it overlaps, try a few alternative positions (above, below, left, right)
                 # 8 compass directions to try shifting the label
-                angles = [np.pi/2, -np.pi/2, 0, np.pi, np.pi/4, -np.pi/4, 3*np.pi/4, -3*np.pi/4]
+                angles = [
+                    np.pi / 2,
+                    -np.pi / 2,
+                    0,
+                    np.pi,
+                    np.pi / 4,
+                    -np.pi / 4,
+                    3 * np.pi / 4,
+                    -3 * np.pi / 4,
+                ]
                 dist = fs * 1.2
 
                 for angle in angles:
@@ -324,14 +341,21 @@ class AnnotatedImageExporter(Exporter):
                     ay = y + np.sin(angle) * dist
 
                     a_left, a_top, a_right, a_bottom = draw.textbbox((ax, ay), label, font=font)
-                    a_curr_bbox = (a_left - buffer, a_top - buffer, a_right + buffer, a_bottom + buffer)
+                    a_curr_bbox = (
+                        a_left - buffer,
+                        a_top - buffer,
+                        a_right + buffer,
+                        a_bottom + buffer,
+                    )
 
                     a_overlap = False
                     for other_bbox in occupied_bboxes:
-                        if not (a_curr_bbox[2] < other_bbox[0] or
-                                a_curr_bbox[0] > other_bbox[2] or
-                                a_curr_bbox[3] < other_bbox[1] or
-                                a_curr_bbox[1] > other_bbox[3]):
+                        if not (
+                            a_curr_bbox[2] < other_bbox[0]
+                            or a_curr_bbox[0] > other_bbox[2]
+                            or a_curr_bbox[3] < other_bbox[1]
+                            or a_curr_bbox[1] > other_bbox[3]
+                        ):
                             a_overlap = True
                             break
 

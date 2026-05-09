@@ -35,30 +35,33 @@ output for errors.
 
 ## 2. Run on your own plate photo
 
-### a. Scaffold a starter pipeline
+### a. Scaffold starter pipelines
 
 ```bash
-blenny init --out pipeline.yaml
+blenny init
 ```
 
-This writes a `pipeline.yaml` that captures a sensible default
-classical-CV workflow: load → detect plate → correct illumination →
-threshold + watershed → measure → export CSV + annotated PNG. Open it
-in any text editor and you'll see every step with comments next to the
-parameters you're most likely to tune.
+This writes two starter configs: `pipeline_yolo.yaml` (modern ML engine, recommended)
+and `pipeline_classic.yaml` (classical CV engine). Both capture a sensible default
+workflow. Open them in any text editor and you'll see every step with comments next
+to the parameters you're most likely to tune.
 
 ### b. Run it on one image
 
 ```bash
-blenny run pipeline.yaml --input plate.jpg --output results/
+# Recommended: YOLO ML engine (fast and robust)
+blenny run pipeline_yolo.yaml --input plate.jpg --output results/
+
+# Alternative: Classic CV engine
+blenny run pipeline_classic.yaml --input plate.jpg --output results/
 ```
 
 You'll see one line per image processed:
 
 ```
-Running pipeline pipeline.yaml on 1 image(s) -> results/
-  [OK]   plate.jpg  colonies=147  (12.4s)
-Done: 1/1 succeeded in 12.4s
+Running pipeline pipeline_yolo.yaml on 1 image(s) -> results/
+  [OK]   plate.jpg  colonies=147  (2.4s)
+Done: 1/1 succeeded in 2.4s
 ```
 
 ### c. Look at what it produced
@@ -83,13 +86,13 @@ tuning section below explains how to fix it.
 
 ```bash
 # Save a full audit trail (params, timings, quality flags) per image
-blenny run pipeline.yaml -i plate.jpg -o results/ --provenance
+blenny run pipeline_yolo.yaml -i plate.jpg -o results/ --provenance
 
 # Force batch summary files even for a single image
-blenny run pipeline.yaml -i plate.jpg -o results/ --summary
+blenny run pipeline_yolo.yaml -i plate.jpg -o results/ --summary
 
 # Save intermediate images from every pipeline step for debugging
-blenny run pipeline.yaml -i plate.jpg -o results/ --debug-dir debug/
+blenny run pipeline_yolo.yaml -i plate.jpg -o results/ --debug-dir debug/
 ```
 
 ---
@@ -147,7 +150,7 @@ The full audit trail for a single image:
 Quote the glob pattern so the shell doesn't expand it before Blenny sees it:
 
 ```bash
-blenny run pipeline.yaml --input "plates/*.jpg" --output results/
+blenny run pipeline_yolo.yaml --input "plates/*.jpg" --output results/
 ```
 
 Each input gets its own `results/<stem>/` directory. A `summary.csv` and
@@ -161,7 +164,7 @@ running. Pass `--fail-fast` to stop on the first error instead.
 ## 5. Tuning the pipeline
 
 Real lab images vary a lot, and the defaults are tuned for "reasonable
-phone photo of a plate." The `pipeline.yaml` file is yours to edit.
+phone photo of a plate." The `pipeline_classic.yaml` file is yours to edit.
 
 ### See every parameter of every module
 
@@ -251,7 +254,7 @@ you can downscale large phone photos:
 You can override any parameter without editing the YAML:
 
 ```bash
-blenny run pipeline.yaml -i plate.jpg -o results/ \
+blenny run pipeline_classic.yaml -i plate.jpg -o results/ \
   -v detect_plate.margin_frac=0.12 \
   -v classify_by_interior.interior_radius_frac=0.90
 ```
@@ -304,7 +307,7 @@ Sidebar sliders correspond to the most commonly tuned parameters:
 from blenny import Pipeline
 
 # Load and run a YAML pipeline
-pipe = Pipeline.from_yaml("pipeline.yaml")
+pipe = Pipeline.from_yaml("pipeline_yolo.yaml")
 result = pipe.run("plate.jpg")
 
 print("colonies:", result.metadata["colony_count"])

@@ -42,16 +42,18 @@ class SummaryExporter(Exporter):
             f"Total Colonies:   {m.get('colony_count', 0)}",
             f"Artifacts Found:  {m.get('artifact_count', 0)}",
             "",
-            "--- Size Distribution of Counted Colonies (pixels) ---"
+            "--- Size Distribution of Counted Colonies (pixels) ---",
         ]
 
         if areas:
-            lines.extend([
-                f"Minimum Size:     {np.min(areas):.1f}",
-                f"Maximum Size:     {np.max(areas):.1f}",
-                f"Average Size:     {np.mean(areas):.1f}",
-                f"Std Deviation:    {np.std(areas):.1f}",
-            ])
+            lines.extend(
+                [
+                    f"Minimum Size:     {np.min(areas):.1f}",
+                    f"Maximum Size:     {np.max(areas):.1f}",
+                    f"Average Size:     {np.mean(areas):.1f}",
+                    f"Std Deviation:    {np.std(areas):.1f}",
+                ]
+            )
         else:
             lines.append("No colonies detected to measure.")
 

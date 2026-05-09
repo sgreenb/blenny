@@ -28,6 +28,7 @@ class CSVExporter(Exporter):
     def generate_csv(self, data: ImageData) -> str:
         """Return the CSV as a string."""
         import io
+
         fh = io.StringIO()
         rows = data.measurements
 
@@ -39,11 +40,22 @@ class CSVExporter(Exporter):
         # Define a nice column order for researchers.
         # Any remaining columns found in the data will follow these.
         preferred_order = [
-            "label", "centroid_x", "centroid_y", "area_px",
-            "circularity", "solidity", "eccentricity",
-            "mean_r", "mean_g", "mean_b",
-            "mean_h", "mean_s", "mean_v",
-            "is_artifact", "artifact_reason", "source"
+            "label",
+            "centroid_x",
+            "centroid_y",
+            "area_px",
+            "circularity",
+            "solidity",
+            "eccentricity",
+            "mean_r",
+            "mean_g",
+            "mean_b",
+            "mean_h",
+            "mean_s",
+            "mean_v",
+            "is_artifact",
+            "artifact_reason",
+            "source",
         ]
 
         fieldnames: list[str] = []

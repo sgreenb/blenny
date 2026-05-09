@@ -72,8 +72,10 @@ def print_report(
     print("  Blenny Pipeline Timing Profile")
     print("=" * 70)
     print(f"  Pipeline : {pipeline_path}")
-    print(f"  Images   : {len(image_paths)} image(s), {repeat} repeat(s) each  ({n_runs} total runs)")
-    print(f"  Wall time: {total_wall:.1f}s total  |  {total_wall/n_runs:.1f}s avg per run")
+    print(
+        f"  Images   : {len(image_paths)} image(s), {repeat} repeat(s) each  ({n_runs} total runs)"
+    )
+    print(f"  Wall time: {total_wall:.1f}s total  |  {total_wall / n_runs:.1f}s avg per run")
     print(f"  Pipeline : {grand_total:.2f}s avg step total (excludes runner overhead)")
     print("-" * 70)
     print(f"  {'Step':<30} {'Module':<28} {'Avg(s)':>7} {'%':>6}  Bar")
@@ -84,7 +86,7 @@ def print_report(
         frac = avg / grand_total if grand_total > 0 else 0
         cls = step_classes.get(step, "")
         bar = format_bar(frac, width=20)
-        print(f"  {step:<30} {cls:<28} {avg:>7.3f} {frac*100:>5.1f}%  {bar}")
+        print(f"  {step:<30} {cls:<28} {avg:>7.3f} {frac * 100:>5.1f}%  {bar}")
 
     print("-" * 70)
     print(f"  {'TOTAL':<59} {grand_total:>7.3f}")
@@ -96,9 +98,7 @@ def print_report(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Profile per-step timing of the Blenny pipeline."
-    )
+    parser = argparse.ArgumentParser(description="Profile per-step timing of the Blenny pipeline.")
     parser.add_argument(
         "images",
         nargs="+",
@@ -141,7 +141,9 @@ def main() -> None:
     wall_start = time.perf_counter()
     for img in args.images:
         for run_idx in range(args.repeat):
-            label = f"  {img.name}" + (f" (run {run_idx+1}/{args.repeat})" if args.repeat > 1 else "")
+            label = f"  {img.name}" + (
+                f" (run {run_idx + 1}/{args.repeat})" if args.repeat > 1 else ""
+            )
             print(label, end="", flush=True)
             t0 = time.perf_counter()
             try:
@@ -158,6 +160,7 @@ def main() -> None:
 
     # Clean up temp output dir silently
     import shutil
+
     tmp = REPO / "_profile_tmp"
     if tmp.exists():
         shutil.rmtree(tmp)

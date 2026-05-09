@@ -45,7 +45,7 @@ class ExclusionMasker(Preprocessor):
             # original image's dimensions to recover the global coordinate frame.
             orig = data.original_image
             if orig is None:
-                orig = image # Fallback
+                orig = image  # Fallback
 
             orig_h, orig_w = orig.shape[:2]
             if im.size != (orig_w, orig_h):
@@ -55,7 +55,7 @@ class ExclusionMasker(Preprocessor):
 
         # Now, if the image has been CROPPED (by detect_plate), we must crop
         # the mask using the same bounding box.
-        bbox = data.metadata.get("plate_bbox") # (y0, x0, y1, x1)
+        bbox = data.metadata.get("plate_bbox")  # (y0, x0, y1, x1)
         if bbox is not None:
             y0, x0, y1, x1 = bbox
             mask_full = mask_full[y0:y1, x0:x1]
@@ -65,6 +65,7 @@ class ExclusionMasker(Preprocessor):
         cur_h, cur_w = image.shape[:2]
         if mask_full.shape != (cur_h, cur_w):
             from skimage.transform import resize
+
             mask_arr = resize(mask_full, (cur_h, cur_w), order=0, anti_aliasing=False) > 0.5
         else:
             mask_arr = mask_full

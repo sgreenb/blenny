@@ -10,6 +10,7 @@ import numpy as np
 import streamlit as st
 from PIL import Image, ImageOps
 
+from blenny import templates
 from blenny.modules.classify_interior import InteriorColonyClassifier
 from blenny.modules.export_annotated import AnnotatedImageExporter
 from blenny.modules.export_csv import CSVExporter
@@ -18,12 +19,13 @@ from blenny.pipeline import Pipeline
 
 # --- Helpers ---
 
+
 def local_folder_picker(title="Select Folder"):
     """
     Open a native folder picker.
     """
     if sys.platform == "darwin":
-        cmd = f'osascript -e \'POSIX path of (choose folder with prompt "{title}")\''
+        cmd = f"osascript -e 'POSIX path of (choose folder with prompt \"{title}\")'"
         try:
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
             if result.returncode == 0:
@@ -35,7 +37,7 @@ def local_folder_picker(title="Select Folder"):
             # Use tkinter as a more reliable fallback on Windows
             root = tk.Tk()
             root.withdraw()
-            root.attributes('-topmost', True)
+            root.attributes("-topmost", True)
             path = filedialog.askdirectory(title=title)
             root.destroy()
             return path if path else None
@@ -43,12 +45,14 @@ def local_folder_picker(title="Select Folder"):
             print(f"Windows folder picker error: {e}")
     return None
 
+
 # Monkey-patch for streamlit-drawable-canvas compatibility with newer Streamlit versions
 import streamlit.elements.image as st_image  # noqa: E402
 
 if not hasattr(st_image, "image_to_url"):
     try:
         from streamlit.elements.lib.image_utils import image_to_url as _image_to_url
+
         st_image.image_to_url = _image_to_url
     except ImportError:
         # Try another location if needed for even newer versions
@@ -57,14 +61,20 @@ if not hasattr(st_image, "image_to_url"):
 # Fix for streamlit-drawable-canvas compatibility with Streamlit 1.34+
 # where image_to_url expects a LayoutConfig object instead of a width integer.
 _orig_image_to_url = st_image.image_to_url
+
+
 def _compat_image_to_url(image_data, width, *args, **kwargs):
     if isinstance(width, int):
         from dataclasses import dataclass
+
         @dataclass
         class FakeLayoutConfig:
             width: int
+
         return _orig_image_to_url(image_data, FakeLayoutConfig(width=width), *args, **kwargs)
     return _orig_image_to_url(image_data, width, *args, **kwargs)
+
+
 st_image.image_to_url = _compat_image_to_url
 
 from streamlit_drawable_canvas import st_canvas  # noqa: E402
@@ -111,14 +121,16 @@ with st.sidebar:
 
     # 1. Input Selection (Moved to top)
     st.header("1. Data Input")
-    input_files = st.file_uploader("Upload Plate Images", type=["jpg", "jpeg", "png", "tif"], accept_multiple_files=True)
+    input_files = st.file_uploader(
+        "Upload Plate Images", type=["jpg", "jpeg", "png", "tif"], accept_multiple_files=True
+    )
 
     # Input Folder Picker
     c_f1, c_f2 = st.columns([3, 1])
     input_folder = c_f1.text_input(
         "OR Folder Path",
         value=st.session_state.get("folder_path", ""),
-        help="Path to a directory on your machine."
+        help="Path to a directory on your machine.",
     )
     c_f2.markdown("<div style='height: 29px;'></div>", unsafe_allow_html=True)
     if c_f2.button("Browse", key="browse_input", help="Browse for input folder", width="stretch"):
@@ -144,7 +156,6 @@ with st.sidebar:
     input_folder = st.session_state.get("folder_path", "")
     output_folder_input = st.session_state.get("output_folder_path", "")
 
-
     st.divider()
 
     # 2. Pipeline Selection
@@ -156,10 +167,12 @@ with st.sidebar:
         ["Classic CV", "YOLO ML"],
         index=1,
         horizontal=True,
-        help="Classic CV uses edge detection and thresholding. YOLO ML uses a trained neural network."
+        help="Classic CV uses edge detection and thresholding. YOLO ML uses a trained neural network.",
     )
 
-    repro_file = st.file_uploader("Load Reproducible Config", type=["yaml", "yml"], help="Load settings from a previous run.")
+    repro_file = st.file_uploader(
+        "Load Reproducible Config", type=["yaml", "yml"], help="Load settings from a previous run."
+    )
 
     # Defaults
     margin_default, min_ppm_default, min_circ_default = 0.04, 15, 0.7
@@ -178,22 +191,31 @@ with st.sidebar:
     if repro_file:
         try:
             import yaml
+
             repro_data = yaml.safe_load(repro_file)
             st.success("Config loaded. Settings applied below.")
-            steps = {s['name']: s.get('params', {}) for s in repro_data.get('steps', [])}
-            margin_default = float(steps.get('detect_plate', {}).get('margin_frac', 0.04))
-            min_ppm_default = int(steps.get('threshold_segment', {}).get('min_area_ppm', 15))
-            min_circ_default = float(steps.get('threshold_segment', {}).get('min_circularity', 0.7))
-            interior_radius_default = float(steps.get('classify_by_interior', {}).get('interior_radius_frac', 0.85))
-            fallback_ecc_default = float(steps.get('classify_by_interior', {}).get('strict_fallback_max_eccentricity', 0.55))
-            loaded_max_dim = steps.get('load_image', {}).get('max_dimension')
+            steps = {s["name"]: s.get("params", {}) for s in repro_data.get("steps", [])}
+            margin_default = float(steps.get("detect_plate", {}).get("margin_frac", 0.04))
+            min_ppm_default = int(steps.get("threshold_segment", {}).get("min_area_ppm", 15))
+            min_circ_default = float(steps.get("threshold_segment", {}).get("min_circularity", 0.7))
+            interior_radius_default = float(
+                steps.get("classify_by_interior", {}).get("interior_radius_frac", 0.85)
+            )
+            fallback_ecc_default = float(
+                steps.get("classify_by_interior", {}).get("strict_fallback_max_eccentricity", 0.55)
+            )
+            loaded_max_dim = steps.get("load_image", {}).get("max_dimension")
             if loaded_max_dim is not None:
                 max_dimension_default = int(loaded_max_dim)
                 resize_default = True
         except Exception as e:
             st.error(f"Error loading config: {e}")
 
-    if not Path("pipeline_classic.yaml").exists() and not Path("pipeline_yolo.yaml").exists() and st.button("Generate Default Pipelines"):
+    if (
+        not Path("pipeline_classic.yaml").exists()
+        and not Path("pipeline_yolo.yaml").exists()
+        and st.button("Generate Default Pipelines")
+    ):
         subprocess.run([sys.executable, cli_script, "init"])
         st.success("Created pipeline_classic.yaml and pipeline_yolo.yaml")
 
@@ -225,7 +247,7 @@ with st.sidebar:
         "Resize images before analysis",
         key="resize_enabled",
         help="Downscale each image so its longest side is at most the value below. "
-             "Preserves aspect ratio. Useful for speeding up large phone photos."
+        "Preserves aspect ratio. Useful for speeding up large phone photos.",
     )
 
     # When the checkbox is first ticked, auto-populate max_dimension with the
@@ -238,9 +260,9 @@ with st.sidebar:
             _src = input_files[0]
         elif input_folder and Path(input_folder).is_dir():
             from blenny.modules.load_image import IMAGE_EXTENSIONS
+
             _candidates = sorted(
-                p for p in Path(input_folder).iterdir()
-                if p.suffix.lower() in IMAGE_EXTENSIONS
+                p for p in Path(input_folder).iterdir() if p.suffix.lower() in IMAGE_EXTENSIONS
             )
             if _candidates:
                 _src = _candidates[0]
@@ -260,7 +282,7 @@ with st.sidebar:
         key="max_dimension",
         disabled=not resize_enabled,
         help="Longest side of the image will be scaled down to this many pixels. "
-             "Non-square images are scaled proportionally — no stretching.",
+        "Non-square images are scaled proportionally — no stretching.",
         label_visibility="visible",
     )
 
@@ -282,6 +304,7 @@ with st.sidebar:
             new_val = st.session_state[f"num_{key}"]
             st.session_state[key] = new_val
             st.session_state[f"slide_{key}"] = new_val
+
         def sync_slide():
             new_val = st.session_state[f"slide_{key}"]
             st.session_state[key] = new_val
@@ -307,7 +330,7 @@ with st.sidebar:
             step=step,
             key=f"num_{key}",
             label_visibility="collapsed",
-            on_change=sync_num
+            on_change=sync_num,
         )
 
         c2.slider(
@@ -318,7 +341,7 @@ with st.sidebar:
             key=f"slide_{key}",
             label_visibility="collapsed",
             help=help_text,
-            on_change=sync_slide
+            on_change=sync_slide,
         )
 
         return st.session_state[key]
@@ -326,37 +349,70 @@ with st.sidebar:
     if pipeline_mode == "Classic CV":
         if st.button("Reset All Tuning Defaults"):
             # Reset main keys and their synced widget counterparts
-            for k, default in [("margin", 0.04), ("min_area_ppm", 15), ("min_circ", 0.7), ("interior_radius", 0.85), ("fallback_ecc", 0.55)]:
+            for k, default in [
+                ("margin", 0.04),
+                ("min_area_ppm", 15),
+                ("min_circ", 0.7),
+                ("interior_radius", 0.85),
+                ("fallback_ecc", 0.55),
+            ]:
                 st.session_state[k] = default
                 st.session_state[f"num_{k}"] = default
                 st.session_state[f"slide_{k}"] = default
             st.session_state["manual_plate_mode"] = "Auto"
             st.rerun()
 
-        if st.session_state.get("manual_exclude_ids") and st.button("Clear Manual Exclusions", help="Remove all manually excluded colonies."):
+        if st.session_state.get("manual_exclude_ids") and st.button(
+            "Clear Manual Exclusions", help="Remove all manually excluded colonies."
+        ):
             st.session_state["manual_exclude_ids"] = []
             st.rerun()
 
         margin = compact_control(
-            "Plate Rim Margin", "margin", 0.0, 0.2, margin_default, 0.01,
-            "The fraction of the plate radius to exclude from the edge to avoid rim reflections."
+            "Plate Rim Margin",
+            "margin",
+            0.0,
+            0.2,
+            margin_default,
+            0.01,
+            "The fraction of the plate radius to exclude from the edge to avoid rim reflections.",
         )
         min_area_ppm = compact_control(
-            "Min Colony Size (ppm)", "min_area_ppm", 0, 1000, min_ppm_default, 1,
+            "Min Colony Size (ppm)",
+            "min_area_ppm",
+            0,
+            1000,
+            min_ppm_default,
+            1,
             "Minimum area a colony must occupy, expressed in parts-per-million of the plate area. "
-            "100 ppm is ~0.6mm2 on a 90mm plate."
+            "100 ppm is ~0.6mm2 on a 90mm plate.",
         )
         min_circ = compact_control(
-            "Min Circularity", "min_circ", 0.0, 1.0, min_circ_default, 0.05,
-            "Filter objects by roundness (1.0 is a perfect circle). Low values catch rim artifacts."
+            "Min Circularity",
+            "min_circ",
+            0.0,
+            1.0,
+            min_circ_default,
+            0.05,
+            "Filter objects by roundness (1.0 is a perfect circle). Low values catch rim artifacts.",
         )
         interior_radius = compact_control(
-            "Interior Radius Frac", "interior_radius", 0.1, 1.0, interior_radius_default, 0.05,
-            "Fraction of the analysis area treated as the 'safe' interior zone for building the artifact reference profile."
+            "Interior Radius Frac",
+            "interior_radius",
+            0.1,
+            1.0,
+            interior_radius_default,
+            0.05,
+            "Fraction of the analysis area treated as the 'safe' interior zone for building the artifact reference profile.",
         )
         fallback_ecc = compact_control(
-            "Fallback Max Eccentricity", "fallback_ecc", 0.1, 1.0, fallback_ecc_default, 0.05,
-            "Strict eccentricity (elongation) limit used when the plate is too sparse to build a reference profile."
+            "Fallback Max Eccentricity",
+            "fallback_ecc",
+            0.1,
+            1.0,
+            fallback_ecc_default,
+            0.05,
+            "Strict eccentricity (elongation) limit used when the plate is too sparse to build a reference profile.",
         )
 
         enable_multiplicity = st.checkbox(
@@ -364,8 +420,8 @@ with st.sidebar:
             value=True,
             key="enable_multiplicity",
             help="When enabled, detections that look like fused colonies (large area, low "
-                 "circularity, high solidity) are scored as multiple colonies. Uncheck to "
-                 "count every detection as exactly one colony."
+            "circularity, high solidity) are scored as multiple colonies. Uncheck to "
+            "count every detection as exactly one colony.",
         )
     else:
         # Defaults for YOLO logic
@@ -390,12 +446,12 @@ with st.sidebar:
         index=0,
         horizontal=True,
         key="active_drawing_tool",
-        help="View: Preview image and overlays. Plate Area: Define the circular/polygonal analysis area. Mask: Paint areas to ignore."
+        help="View: Preview image and overlays. Plate Area: Define the circular/polygonal analysis area. Mask: Paint areas to ignore.",
     )
 
     # Determine if we should force "Manual Shape" because the Plate tool is active.
     # We do this logic BEFORE the mode radio widget is created to avoid the crash.
-    is_plate_tool = (selected_tool_label == "Polygon Plate Area")
+    is_plate_tool = selected_tool_label == "Polygon Plate Area"
     current_mode = st.session_state.get("manual_plate_mode", "Auto")
 
     if is_plate_tool and current_mode != "Manual Shape":
@@ -422,7 +478,7 @@ with st.sidebar:
         ["Auto", "Manual Circle", "Manual Shape"],
         key="manual_plate_mode",
         on_change=on_mode_change,
-        horizontal=False
+        horizontal=False,
     )
 
     manual_cy, manual_cx, manual_r = None, None, None
@@ -435,41 +491,61 @@ with st.sidebar:
                 w, h = img_peek.size
                 def_cx, def_cy = w // 2, h // 2
                 def_r = int(min(w, h) * 0.4)
-            except Exception: pass
-        manual_cy = compact_control("Center Y", "manual_cy", 0, 4000, def_cy, 1, "Y coordinate of the plate center.")
-        manual_cx = compact_control("Center X", "manual_cx", 0, 4000, def_cx, 1, "X coordinate of the plate center.")
-        manual_r = compact_control("Radius", "manual_r", 0, 2000, def_r, 1, "Radius of the plate in pixels.")
+            except Exception:
+                pass
+        manual_cy = compact_control(
+            "Center Y", "manual_cy", 0, 4000, def_cy, 1, "Y coordinate of the plate center."
+        )
+        manual_cx = compact_control(
+            "Center X", "manual_cx", 0, 4000, def_cx, 1, "X coordinate of the plate center."
+        )
+        manual_r = compact_control(
+            "Radius", "manual_r", 0, 2000, def_r, 1, "Radius of the plate in pixels."
+        )
 
     # Map label back to internal tool name
     active_tool = {
         "🔍 View": "View",
         "Polygon Plate Area": "Define Plate Area",
-        "🖌️ Mask": "Paint Exclusion Mask"
+        "🖌️ Mask": "Paint Exclusion Mask",
     }[selected_tool_label]
 
     # Show/Hide relevant controls based on tool
-    enable_mask = (active_tool == "Paint Exclusion Mask")
+    enable_mask = active_tool == "Paint Exclusion Mask"
 
-    brush_size = st.slider("Brush Size", 1, 100, 20, disabled=(active_tool != "Paint Exclusion Mask"))
+    brush_size = st.slider(
+        "Brush Size", 1, 100, 20, disabled=(active_tool != "Paint Exclusion Mask")
+    )
 
     # Cleanup buttons
     c_cl1, c_cl2 = st.columns(2)
     if c_cl1.button("Clear Plate", help="Reset the manual shape plate area"):
-        if os.path.exists("gui_plate_batch_mask.png"): os.remove("gui_plate_batch_mask.png")
+        if os.path.exists("gui_plate_batch_mask.png"):
+            os.remove("gui_plate_batch_mask.png")
         st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
         st.rerun()
     if c_cl2.button("Clear Mask", help="Reset the exclusion mask"):
-        if os.path.exists("gui_mask_batch_exclusion.png"): os.remove("gui_mask_batch_exclusion.png")
+        if os.path.exists("gui_mask_batch_exclusion.png"):
+            os.remove("gui_mask_batch_exclusion.png")
         st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
         st.rerun()
 
     # Track mode changes for state cleanup (existing logic)
-    if "prev_plate_mode" in st.session_state and plate_mode != "Manual Shape" and st.session_state["prev_plate_mode"] == "Manual Shape" and os.path.exists("gui_plate_batch_mask.png"):
+    if (
+        "prev_plate_mode" in st.session_state
+        and plate_mode != "Manual Shape"
+        and st.session_state["prev_plate_mode"] == "Manual Shape"
+        and os.path.exists("gui_plate_batch_mask.png")
+    ):
         os.remove("gui_plate_batch_mask.png")
         st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
     st.session_state["prev_plate_mode"] = plate_mode
 
-    enable_debug = st.checkbox("Save debug step images", value=False, help="Write intermediate images to gui_debug. Slower.")
+    enable_debug = st.checkbox(
+        "Save debug step images",
+        value=False,
+        help="Write intermediate images to gui_debug. Slower.",
+    )
 
     # Initialize session state for manual interventions
     if "manual_exclude_ids" not in st.session_state:
@@ -495,6 +571,7 @@ elif input_folder and Path(input_folder).exists() and Path(input_folder).is_dir(
     input_source = "folder"
     folder_path = Path(input_folder)
     from blenny.modules.load_image import IMAGE_EXTENSIONS
+
     input_paths = sorted([f for f in folder_path.iterdir() if f.suffix.lower() in IMAGE_EXTENSIONS])
 
 # --- Input Change Detection ---
@@ -512,9 +589,17 @@ if current_input_names != st.session_state["last_input_paths"]:
 col1, col2 = st.columns(2)
 
 if not input_source:
-    for _key in ("analysis_data", "analysis_stem", "analysis_pipeline",
-                 "analysis_output_dir", "results_editor", "batch_results", 
-                 "all_results", "result_stems", "current_view_idx"):
+    for _key in (
+        "analysis_data",
+        "analysis_stem",
+        "analysis_pipeline",
+        "analysis_output_dir",
+        "results_editor",
+        "batch_results",
+        "all_results",
+        "result_stems",
+        "current_view_idx",
+    ):
         st.session_state.pop(_key, None)
 
 if input_source:
@@ -537,23 +622,42 @@ if input_source:
         canvas_bg_img = bg_image.copy()
         if plate_mode == "Manual Circle" and manual_cy is not None:
             from PIL import ImageDraw
+
             draw = ImageDraw.Draw(canvas_bg_img)
             r = manual_r
             # Raw Plate (Blue)
-            draw.ellipse([manual_cx - r, manual_cy - r, manual_cx + r, manual_cy + r], outline="blue", width=max(1, int(5/scale)))
+            draw.ellipse(
+                [manual_cx - r, manual_cy - r, manual_cx + r, manual_cy + r],
+                outline="blue",
+                width=max(1, int(5 / scale)),
+            )
             # Analysis Area (Green - Matches final output)
             r_eff = r * (1.0 - margin)
-            draw.ellipse([manual_cx - r_eff, manual_cy - r_eff, manual_cx + r_eff, manual_cy + r_eff], outline="green", width=max(1, int(3/scale)))
+            draw.ellipse(
+                [manual_cx - r_eff, manual_cy - r_eff, manual_cx + r_eff, manual_cy + r_eff],
+                outline="green",
+                width=max(1, int(3 / scale)),
+            )
             # Interior Reference Zone (Yellow)
             r_int = r_eff * interior_radius
-            draw.ellipse([manual_cx - r_int, manual_cy - r_int, manual_cx + r_int, manual_cy + r_int], outline="yellow", width=max(1, int(2/scale)))
+            draw.ellipse(
+                [manual_cx - r_int, manual_cy - r_int, manual_cx + r_int, manual_cy + r_int],
+                outline="yellow",
+                width=max(1, int(2 / scale)),
+            )
 
         # --- Integrated Drawing Area ---
-        manual_shape_path = Path("gui_plate_batch_mask.png") if Path("gui_plate_batch_mask.png").exists() else None
-        mask_path = Path("gui_mask_batch_exclusion.png") if Path("gui_mask_batch_exclusion.png").exists() else None
+        manual_shape_path = (
+            Path("gui_plate_batch_mask.png") if Path("gui_plate_batch_mask.png").exists() else None
+        )
+        mask_path = (
+            Path("gui_mask_batch_exclusion.png")
+            if Path("gui_mask_batch_exclusion.png").exists()
+            else None
+        )
 
         # Tool Logic
-        tool = active_tool # We now always use the canvas to keep scaling consistent
+        tool = active_tool  # We now always use the canvas to keep scaling consistent
 
         # Overlay existing masks as translucent context guides
         if manual_shape_path:
@@ -575,7 +679,9 @@ if input_source:
                 st.subheader(f"Manual Drawing: {tool}" if tool != "View" else "Image Preview")
 
                 if tool == "Define Plate Area":
-                    st.info("**Left-click** to add vertices around the plate. **Right-click** to close and submit.")
+                    st.info(
+                        "**Left-click** to add vertices around the plate. **Right-click** to close and submit."
+                    )
                     drawing_mode = "polygon"
                     fill_color = "rgba(0, 0, 255, 0.3)"
                     stroke_color = "#0000FF"
@@ -594,7 +700,9 @@ if input_source:
 
                 working_canvas = st_canvas(
                     fill_color=fill_color,
-                    stroke_width=2 if drawing_mode == "polygon" else (brush_size if tool != "View" else 0),
+                    stroke_width=2
+                    if drawing_mode == "polygon"
+                    else (brush_size if tool != "View" else 0),
                     stroke_color=stroke_color,
                     background_image=canvas_bg,
                     update_streamlit=True,
@@ -620,29 +728,58 @@ if input_source:
                             mask_im.save(mask_path)
 
             # Show input preview if in View mode and canvas isn't being used
-            if active_tool == "View" and (not 'working_canvas' in locals() or not working_canvas):
+            if active_tool == "View" and ("working_canvas" not in locals() or not working_canvas):
                 st.subheader("Input Preview")
                 display_img = bg_image
                 if plate_mode == "Manual Circle" and manual_cy is not None:
                     from PIL import ImageDraw
+
                     draw_img = display_img.copy()
                     draw = ImageDraw.Draw(draw_img)
                     r = manual_r
                     # Raw Plate (Blue)
-                    draw.ellipse([manual_cx - r, manual_cy - r, manual_cx + r, manual_cy + r], outline="blue", width=5)
+                    draw.ellipse(
+                        [manual_cx - r, manual_cy - r, manual_cx + r, manual_cy + r],
+                        outline="blue",
+                        width=5,
+                    )
                     # Analysis Area (Green)
                     r_eff = r * (1.0 - margin)
-                    draw.ellipse([manual_cx - r_eff, manual_cy - r_eff, manual_cx + r_eff, manual_cy + r_eff], outline="green", width=3)
+                    draw.ellipse(
+                        [
+                            manual_cx - r_eff,
+                            manual_cy - r_eff,
+                            manual_cx + r_eff,
+                            manual_cy + r_eff,
+                        ],
+                        outline="green",
+                        width=3,
+                    )
                     # Interior Zone (Yellow)
                     r_int = r_eff * interior_radius
-                    draw.ellipse([manual_cx - r_int, manual_cy - r_int, manual_cx + r_int, manual_cy + r_int], outline="yellow", width=2)
-                    draw.line([manual_cx-20, manual_cy, manual_cx+20, manual_cy], fill="blue", width=3)
-                    draw.line([manual_cx, manual_cy-20, manual_cx, manual_cy+20], fill="blue", width=3)
+                    draw.ellipse(
+                        [
+                            manual_cx - r_int,
+                            manual_cy - r_int,
+                            manual_cx + r_int,
+                            manual_cy + r_int,
+                        ],
+                        outline="yellow",
+                        width=2,
+                    )
+                    draw.line(
+                        [manual_cx - 20, manual_cy, manual_cx + 20, manual_cy], fill="blue", width=3
+                    )
+                    draw.line(
+                        [manual_cx, manual_cy - 20, manual_cx, manual_cy + 20], fill="blue", width=3
+                    )
                     display_img = draw_img
                 st.image(display_img, width="stretch", caption=f"Reference: {ref_image_path.name}")
 
             if len(input_paths) > 1:
-                st.write(f"Batch processing {len(input_paths)} images starting with {ref_image_path.name}")
+                st.write(
+                    f"Batch processing {len(input_paths)} images starting with {ref_image_path.name}"
+                )
 
     else:
         st.warning("No images found in the selected input.")
@@ -662,13 +799,23 @@ with col2:
             shutil.rmtree(debug_dir)
 
         # Clear previous result state
-        for _key in ("analysis_data", "analysis_stem", "analysis_pipeline",
-                     "analysis_output_dir", "results_editor", "batch_results", 
-                     "batch_output_dir", "all_results", "result_stems", "current_view_idx"):
+        for _key in (
+            "analysis_data",
+            "analysis_stem",
+            "analysis_pipeline",
+            "analysis_output_dir",
+            "results_editor",
+            "batch_results",
+            "batch_output_dir",
+            "all_results",
+            "result_stems",
+            "current_view_idx",
+        ):
             st.session_state.pop(_key, None)
 
         with st.status("Analyzing plates...", expanded=True) as status_box:
             log_container = st.empty()
+
             def log_message(msg):
                 if "gui_log" not in st.session_state:
                     st.session_state["gui_log"] = ""
@@ -677,60 +824,92 @@ with col2:
 
             st.session_state["gui_log"] = ""
             input_imgs = input_paths
-            
+
             st.session_state["all_results"] = {}
             st.session_state["result_stems"] = []
             st.session_state["current_view_idx"] = 0
-            
+
             # Setup base pipeline config
             from blenny.config import extract_steps, load_yaml, substitute_paths
-            
-            if pipeline_mode == "YOLO ML":
-                pipeline_path_to_load = "pipeline_yolo.yaml" if Path("pipeline_yolo.yaml").exists() else pipeline_path
-                raw_config = load_yaml(pipeline_path_to_load)
+
+            try:
+                if pipeline_mode == "YOLO ML":
+                    # Priority: 1. User specified path (if it exists and looks like yolo)
+                    #           2. pipeline_yolo.yaml in CWD
+                    #           3. Built-in template
+                    if Path(pipeline_path).exists() and "yolo" in pipeline_path:
+                        raw_config = load_yaml(pipeline_path)
+                    elif Path("pipeline_yolo.yaml").exists():
+                        raw_config = load_yaml("pipeline_yolo.yaml")
+                    else:
+                        import yaml
+
+                        raw_config = yaml.safe_load(templates.load_text("count-colonies-yolo"))
+                else:
+                    # Classic mode priority: 1. pipeline_path
+                    #                        2. pipeline_classic.yaml
+                    #                        3. Built-in template
+                    if Path(pipeline_path).exists():
+                        raw_config = load_yaml(pipeline_path)
+                    elif Path("pipeline_classic.yaml").exists():
+                        raw_config = load_yaml("pipeline_classic.yaml")
+                    else:
+                        import yaml
+
+                        raw_config = yaml.safe_load(templates.load_text("count-colonies"))
+
                 raw_steps = extract_steps(raw_config)
-                
-                # Check if yolo_detector is actually in the loaded config
+            except Exception as e:
+                st.error(f"Failed to load pipeline: {e}")
+                status_box.update(label="Analysis Failed", state="error")
+                st.stop()
+
+            # If YOLO, we want to replace threshold_segment with yolo_detector
+            # and remove classify_by_interior
+            if pipeline_mode == "YOLO ML" and not any(
+                s["name"] == "yolo_detector" for s in raw_steps
+            ):
                 # if not (e.g. user loaded a classic config), we inject it
-                if not any(s["name"] == "yolo_detector" for s in raw_steps):
-                    new_steps = []
-                    for step in raw_steps:
-                        if step["name"] == "threshold_segment":
-                            new_steps.append({"name": "yolo_detector", "params": {"output_key": "objects"}})
-                        elif step["name"] == "classify_by_interior":
-                            continue
-                        else:
-                            new_steps.append(step)
-                    raw_steps = new_steps
-            else:
-                raw_config = load_yaml(pipeline_path)
-                raw_steps = extract_steps(raw_config)
+                new_steps = []
+                for step in raw_steps:
+                    if step["name"] == "threshold_segment":
+                        new_steps.append(
+                            {"name": "yolo_detector", "params": {"output_key": "objects"}}
+                        )
+                    elif step["name"] == "classify_by_interior":
+                        continue
+                    else:
+                        new_steps.append(step)
+                raw_steps = new_steps
 
             overrides = {
                 "load_image": {"max_dimension": int(max_dimension) if resize_enabled else None},
                 "detect_plate": {"margin_frac": margin},
-                "threshold_segment": {"min_area": None, "min_area_ppm": min_area_ppm, "min_circularity": min_circ},
-                "yolo_detector": {
-                    "output_key": "objects"
+                "threshold_segment": {
+                    "min_area": None,
+                    "min_area_ppm": min_area_ppm,
+                    "min_circularity": min_circ,
                 },
+                "yolo_detector": {"output_key": "objects"},
                 "classify_by_interior": {
                     "interior_radius_frac": interior_radius,
-                    "strict_fallback_max_eccentricity": fallback_ecc
+                    "strict_fallback_max_eccentricity": fallback_ecc,
                 },
                 "estimate_multiplicity": {"enabled": enable_multiplicity},
             }
             if plate_mode == "Manual Circle":
-                overrides["detect_plate"].update({
-                    "crop": False,
-                    "force_cy": manual_cy,
-                    "force_cx": manual_cx,
-                    "force_r": manual_r
-                })
+                overrides["detect_plate"].update(
+                    {
+                        "crop": False,
+                        "force_cy": manual_cy,
+                        "force_cx": manual_cx,
+                        "force_r": manual_r,
+                    }
+                )
             if plate_mode == "Manual Shape" and manual_shape_path:
-                overrides["detect_plate"].update({
-                    "crop": False,
-                    "force_mask_path": str(manual_shape_path)
-                })
+                overrides["detect_plate"].update(
+                    {"crop": False, "force_mask_path": str(manual_shape_path)}
+                )
             if mask_path and mask_path.exists():
                 overrides["apply_exclusion_mask"] = {"mask_path": str(mask_path)}
 
@@ -740,28 +919,32 @@ with col2:
 
             # Process every image in the batch
             for i, img_path in enumerate(input_imgs):
-                log_message(f"Processing ({i+1}/{len(input_imgs)}): {img_path.name}")
-                
+                log_message(f"Processing ({i + 1}/{len(input_imgs)}): {img_path.name}")
+
                 resolved = substitute_paths(raw_steps, input_path=img_path, output_dir=output_dir)
                 pipe = Pipeline.from_config(resolved)
-                
+
                 img_debug_dir = debug_dir / img_path.stem if debug_dir else None
+
                 def gui_progress(current, total, name):
                     log_message(f"  [{current}/{total}] {name}...")
 
                 data = pipe.run(img_path, debug_dir=img_debug_dir, progress_callback=gui_progress)
-                
+
                 st.session_state["all_results"][img_path.stem] = data
                 st.session_state["result_stems"].append(img_path.stem)
-            
+
             # Global completion message
-            total_time = sum(sum(p.duration_s for p in d.provenance) for d in st.session_state["all_results"].values())
+            total_time = sum(
+                sum(p.duration_s for p in d.provenance)
+                for d in st.session_state["all_results"].values()
+            )
             log_message(f"Batch complete: {len(input_imgs)} images in {total_time:.2f}s.")
-            
+
             # Stash pipeline for later rendering/saving
             st.session_state["analysis_pipeline"] = pipe
             st.session_state["analysis_output_dir"] = output_dir
-            
+
             status_box.update(label="Analysis Complete!", state="complete", expanded=False)
 
 # --- Render Results (Interactive Review) ---
@@ -771,15 +954,15 @@ if st.session_state.get("all_results"):
     stems = st.session_state["result_stems"]
     pipe = st.session_state["analysis_pipeline"]
     output_dir = st.session_state["analysis_output_dir"]
-    
+
     with col2:
         st.subheader("Interactive Review")
-        
+
         # --- Navigation Header ---
         c_nav1, c_nav2, c_nav3 = st.columns([1.2, 3, 1.2])
-        
+
         curr_idx = st.session_state.get("current_view_idx", 0)
-        
+
         def update_idx(new_val):
             st.session_state["current_view_idx"] = new_val
             # Sync the selectbox key immediately to prevent it being sticky
@@ -788,65 +971,108 @@ if st.session_state.get("all_results"):
         if c_nav1.button("← Previous", disabled=(curr_idx == 0), use_container_width=True):
             update_idx(curr_idx - 1)
             st.rerun()
-            
+
         # Dropdown for direct selection
         selected_stem = c_nav2.selectbox(
             "Select Plate",
             options=stems,
             index=curr_idx,
             label_visibility="collapsed",
-            key="stem_selector"
+            key="stem_selector",
         )
         # Update index if dropdown changed manually
         if selected_stem != stems[curr_idx]:
             st.session_state["current_view_idx"] = stems.index(selected_stem)
             st.rerun()
-            
+
         if c_nav3.button("Next →", disabled=(curr_idx == len(stems) - 1), use_container_width=True):
             update_idx(curr_idx + 1)
             st.rerun()
-            
+
         # Get data for CURRENT selection
         stem = stems[st.session_state["current_view_idx"]]
         data = all_data[stem]
 
         # --- Standard Interactive Review (Table, Images, Exporters) ---
         import pandas as pd
-        
+
         # Ensure ID order and counts are correct
         InteriorColonyClassifier.update_count(data.measurements, data)
         df = pd.DataFrame(data.measurements)
 
         # Rendering tools
-        annotator = next((s for s in pipe.steps if isinstance(s, AnnotatedImageExporter)),
-                         AnnotatedImageExporter(output_path="dummy.png", outline_color=(255, 64, 64)))
-        summarizer = next((s for s in pipe.steps if isinstance(s, SummaryExporter)),
-                          SummaryExporter(output_path="dummy.txt"))
-        csv_exporter = next((s for s in pipe.steps if isinstance(s, CSVExporter)),
-                            CSVExporter(output_path="dummy.csv"))
+        annotator = next(
+            (s for s in pipe.steps if isinstance(s, AnnotatedImageExporter)),
+            AnnotatedImageExporter(output_path="dummy.png", outline_color=(255, 64, 64)),
+        )
+        summarizer = next(
+            (s for s in pipe.steps if isinstance(s, SummaryExporter)),
+            SummaryExporter(output_path="dummy.txt"),
+        )
+        csv_exporter = next(
+            (s for s in pipe.steps if isinstance(s, CSVExporter)),
+            CSVExporter(output_path="dummy.csv"),
+        )
 
         # Live render
         img = annotator.render(data)
-        st.image(img, caption=f"{stem} — Reviewed Colonies: {data.metadata['colony_count']}", width="stretch")
+        st.image(
+            img,
+            caption=f"{stem} — Reviewed Colonies: {data.metadata['colony_count']}",
+            width="stretch",
+        )
 
         # --- Download Section ---
         c_dl1, c_dl2, c_dl3 = st.columns(3)
-        c_dl1.download_button("Download CSV", csv_exporter.generate_csv(data), file_name=f"{stem}_colonies.csv", mime="text/csv", use_container_width=True)
-        c_dl2.download_button("Download Log", summarizer.generate_text(data), file_name=f"{stem}_log.txt", mime="text/plain", use_container_width=True)
+        c_dl1.download_button(
+            "Download CSV",
+            csv_exporter.generate_csv(data),
+            file_name=f"{stem}_colonies.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+        c_dl2.download_button(
+            "Download Log",
+            summarizer.generate_text(data),
+            file_name=f"{stem}_log.txt",
+            mime="text/plain",
+            use_container_width=True,
+        )
         import io
+
         buf = io.BytesIO()
         img.save(buf, format="PNG")
-        c_dl3.download_button("Download Image", buf.getvalue(), file_name=f"{stem}_annotated.png", mime="image/png", use_container_width=True)
+        c_dl3.download_button(
+            "Download Image",
+            buf.getvalue(),
+            file_name=f"{stem}_annotated.png",
+            mime="image/png",
+            use_container_width=True,
+        )
 
         st.write("Check boxes to mark artifacts. Counts update instantly.")
 
-        display_cols = ["label", "is_artifact", "is_manual_review", "centroid_x", "centroid_y", "area_px", "area_ppm", "Type"]
-        if "is_manual_review" not in df.columns: df["is_manual_review"] = False
+        display_cols = [
+            "label",
+            "is_artifact",
+            "is_manual_review",
+            "centroid_x",
+            "centroid_y",
+            "area_px",
+            "area_ppm",
+            "Type",
+        ]
+        if "is_manual_review" not in df.columns:
+            df["is_manual_review"] = False
         if "Type" not in df.columns:
+
             def get_type(row):
-                if row["is_artifact"]: return "Artifact"
-                if int(row["colony_count_estimate"]) >= 2: return f"Merged(x{int(row['colony_count_estimate'])})"
+                if row["is_artifact"]:
+                    return "Artifact"
+                if int(row["colony_count_estimate"]) >= 2:
+                    return f"Merged(x{int(row['colony_count_estimate'])})"
                 return "Colony"
+
             df["Type"] = df.apply(get_type, axis=1)
 
         # Editor unique key includes stem to reset scroll/state between images
@@ -858,10 +1084,18 @@ if st.session_state.get("all_results"):
                 "is_manual_review": st.column_config.CheckboxColumn("Manual?", disabled=True),
                 "Type": st.column_config.TextColumn("Class", disabled=True),
             },
-            disabled=["label", "is_manual_review", "centroid_x", "centroid_y", "area_px", "area_ppm", "Type"],
+            disabled=[
+                "label",
+                "is_manual_review",
+                "centroid_x",
+                "centroid_y",
+                "area_px",
+                "area_ppm",
+                "Type",
+            ],
             hide_index=True,
             width="stretch",
-            key=f"editor_{stem}"
+            key=f"editor_{stem}",
         )
 
         if st.session_state.get(f"editor_{stem}"):
@@ -878,20 +1112,24 @@ if st.session_state.get("all_results"):
                     st.rerun()
 
         # Batch Save Button
-        save_dir = Path(output_folder_input).resolve() if output_folder_input.strip() else output_dir
+        save_dir = (
+            Path(output_folder_input).resolve() if output_folder_input.strip() else output_dir
+        )
         if st.button(f"Save All results to {save_dir.name}", type="primary", width="stretch"):
             save_dir.mkdir(parents=True, exist_ok=True)
             for s, d in all_data.items():
                 cur_save_dir = save_dir / s
                 cur_save_dir.mkdir(parents=True, exist_ok=True)
                 for step in pipe.steps:
-                    if not hasattr(step, "export"): continue
+                    if not hasattr(step, "export"):
+                        continue
                     orig_path = getattr(step.params, "output_path", None)
                     if orig_path:
                         filename = Path(orig_path).name
                         step.params.output_path = str(cur_save_dir / filename)
                     step.export(d)
-                    if orig_path: step.params.output_path = orig_path
+                    if orig_path:
+                        step.params.output_path = orig_path
             st.success(f"All {len(all_data)} plate results saved to {save_dir}")
 
         with st.expander("View Live Summary"):
@@ -902,4 +1140,9 @@ elif input_source:
 
 # --- Footer ---
 st.divider()
-st.caption("Blenny GUI v0.2 • YOLO ML Engine • Engine: " + subprocess.run([sys.executable, cli_script, "--version"], capture_output=True, text=True).stdout.strip())
+st.caption(
+    "Blenny GUI v0.2 • YOLO ML Engine • Engine: "
+    + subprocess.run(
+        [sys.executable, cli_script, "--version"], capture_output=True, text=True
+    ).stdout.strip()
+)

@@ -64,7 +64,14 @@ class InteriorColonyClassifier(Classifier):
         ``interior_classifier_insufficient_samples`` info flag is raised.
         """
 
-        features: list[str] = ["area_px", "mean_intensity", "eccentricity", "mean_r", "mean_g", "mean_b"]  # noqa: RUF012
+        features: list[str] = [  # noqa: RUF012
+            "area_px",
+            "mean_intensity",
+            "eccentricity",
+            "mean_r",
+            "mean_g",
+            "mean_b",
+        ]
         """Measurement columns to include in the reference model.
 
         ``area_px`` is the most discriminative: rim fragments are typically
@@ -187,7 +194,7 @@ class InteriorColonyClassifier(Classifier):
             "cx": cx,
             "radius": radius,
             "interior_radius_frac": self.params.interior_radius_frac,
-            "interior_radius_px": radius * self.params.interior_radius_frac
+            "interior_radius_px": radius * self.params.interior_radius_frac,
         }
 
         for row in rows:

@@ -51,14 +51,17 @@ def test_modules_command_json_output() -> None:
 
 def test_init_writes_to_default_file(tmp_path: Path) -> None:
     import os
+
     orig_cwd = os.getcwd()
     os.chdir(tmp_path)
     try:
         result = runner.invoke(app, ["init"])
         assert result.exit_code == 0
-        assert "Wrote count-colonies template to pipeline.yaml" in result.stdout
-        assert Path("pipeline.yaml").exists()
-        assert "steps:" in Path("pipeline.yaml").read_text()
+        assert "Wrote Classic CV template to pipeline_classic.yaml" in result.stdout
+        assert "Wrote YOLO ML template to pipeline_yolo.yaml" in result.stdout
+        assert Path("pipeline_classic.yaml").exists()
+        assert Path("pipeline_yolo.yaml").exists()
+        assert "steps:" in Path("pipeline_classic.yaml").read_text()
     finally:
         os.chdir(orig_cwd)
 

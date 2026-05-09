@@ -174,7 +174,9 @@ def run(
 
                 # Try to parse value as JSON, float, int, or bool
                 parsed_val: Any
-                if (value.startswith("[") and value.endswith("]")) or (value.startswith("{") and value.endswith("}")):
+                if (value.startswith("[") and value.endswith("]")) or (
+                    value.startswith("{") and value.endswith("}")
+                ):
                     try:
                         parsed_val = json.loads(value)
                     except json.JSONDecodeError:
@@ -209,7 +211,9 @@ def run(
     _ = Pipeline.from_config(_resolve_for_validation(raw_steps))
 
     if not as_json:
-        typer.echo(f"Running pipeline {pipeline_path.name} on {len(inputs)} image(s) -> {output_dir}/")
+        typer.echo(
+            f"Running pipeline {pipeline_path.name} on {len(inputs)} image(s) -> {output_dir}/"
+        )
 
     summary_rows: list[dict[str, Any]] = []
     failures = 0
@@ -269,19 +273,19 @@ def run(
         # per-image placeholders like {stem} are preserved, but global
         # parameters (including CLI overrides) are baked in.
         reproducible_steps = substitute_paths(
-            raw_steps,
-            output_dir="{output_dir}",
-            input_path="{input_path_placeholder}"
+            raw_steps, output_dir="{output_dir}", input_path="{input_path_placeholder}"
         )
         # Fix the dummy input path back to placeholders
         for step in reproducible_steps:
             if "params" in step:
                 for k, v in step["params"].items():
                     if isinstance(v, str) and "{input_path_placeholder}" in v:
-                        step["params"][k] = v.replace("{input_path_placeholder}.stem", "{stem}").replace("{input_path_placeholder}", "{input}")
+                        step["params"][k] = v.replace(
+                            "{input_path_placeholder}.stem", "{stem}"
+                        ).replace("{input_path_placeholder}", "{input}")
 
         dump_resolved_config(
-            raw_steps, # raw_steps already has CLI overrides but preserves placeholders
+            raw_steps,  # raw_steps already has CLI overrides but preserves placeholders
             output_dir / "reproducible_config.yaml",
             extra={
                 "_blenny_version": __version__,
@@ -294,7 +298,9 @@ def run(
     # and the user hasn't explicitly disabled them.
     if write_summary is True or (write_summary is None and len(inputs) > 1):
         _write_summary_csv(output_dir / "summary.csv", summary_rows)
-        _write_batch_log_txt(output_dir / "batch_log.txt", summary_rows, time.perf_counter() - t_batch)
+        _write_batch_log_txt(
+            output_dir / "batch_log.txt", summary_rows, time.perf_counter() - t_batch
+        )
 
     total = time.perf_counter() - t_batch
     succ = len(inputs) - failures
@@ -306,7 +312,7 @@ def run(
             "succeeded": succ,
             "failed": failures,
             "duration_s": round(total, 3),
-            "results": summary_rows
+            "results": summary_rows,
         }
         typer.echo(json.dumps(report, indent=2))
     else:
@@ -439,7 +445,7 @@ def init(
 
     # Specific template or output path requested
     template_name = template or "count-colonies"
-    out_path = out or Path("pipeline.yaml")
+    out_path = out or Path("pipeline_classic.yaml")
 
     try:
         text = templates.load_text(template_name)
@@ -462,14 +468,14 @@ def _expand_input(pattern: str) -> list[Path]:
     p = Path(pattern)
     if any(c in pattern for c in "*?["):
         return [
-            Path(m) for m in glob_module.glob(pattern, recursive=True)
+            Path(m)
+            for m in glob_module.glob(pattern, recursive=True)
             if Path(m).is_file() and Path(m).suffix.lower() in IMAGE_EXTENSIONS
         ]
     if p.is_dir():
-        return sorted([
-            f for f in p.iterdir()
-            if f.is_file() and f.suffix.lower() in IMAGE_EXTENSIONS
-        ])
+        return sorted(
+            [f for f in p.iterdir() if f.is_file() and f.suffix.lower() in IMAGE_EXTENSIONS]
+        )
     if p.is_file():
         return [p]
     return []
@@ -544,7 +550,7 @@ def _write_batch_log_txt(path: Path, rows: list[dict[str, Any]], duration: float
         f"Total duration:  {duration:.1f}s",
         "",
         f"{'Image':<30} {'Status':<10} {'Count':<10} {'Flags':<10}",
-        "-" * 65
+        "-" * 65,
     ]
     for r in rows:
         name = r.get("stem", "unknown")[:30]

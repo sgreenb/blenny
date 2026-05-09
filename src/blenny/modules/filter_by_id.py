@@ -40,6 +40,7 @@ class IDFilter(Classifier):
 
         if n_filtered:
             from blenny.modules.classify_interior import InteriorColonyClassifier
+
             InteriorColonyClassifier.update_count(rows, data)
             InteriorColonyClassifier.reassign_ids(rows, data)
 

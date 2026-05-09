@@ -102,7 +102,7 @@ class ThresholdSegmenter(Segmenter):
         if min_a is None:
             # ppm = (px / total_px) * 1e6  => px = (ppm * total_px) / 1e6
             min_a = int((self.params.min_area_ppm * roi_area) / 1_000_000)  # type: ignore[attr-defined]
-            min_a = max(1, min_a) # Never 0.
+            min_a = max(1, min_a)  # Never 0.
 
         # Clean small specks.
         # skimage 0.26+ deprecated min_size in favor of max_size (same meaning:
