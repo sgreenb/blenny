@@ -23,14 +23,14 @@ pip install -e .
 
 ### 2. Run your first analysis
 ```bash
-# Generate starter pipelines (creates pipeline.yaml and pipeline_yolo.yaml)
+# Generate starter pipelines (creates pipeline_classic.yaml and pipeline_yolo.yaml)
 blenny init
 
-# Run the YOLO ML pipeline (Recommended)
+# Run the YOLO ML pipeline (Recommended: Faster and more robust)
 blenny run pipeline_yolo.yaml --input plate.jpg --output results/
 
-# Run the Classic CV pipeline
-blenny run pipeline.yaml --input plate.jpg --output results/
+# Run the Classic CV pipeline (Uses traditional edge detection)
+blenny run pipeline_classic.yaml --input plate.jpg --output results/
 ```
 
 ### 3. View Results

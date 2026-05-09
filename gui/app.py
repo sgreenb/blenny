@@ -193,16 +193,20 @@ with st.sidebar:
         except Exception as e:
             st.error(f"Error loading config: {e}")
 
-    if not Path("pipeline.yaml").exists() and not Path("pipeline_yolo.yaml").exists() and st.button("Generate Default Pipelines"):
-        subprocess.run(["python3", cli_script, "init"])
-        st.success("Created pipeline.yaml and pipeline_yolo.yaml")
+    if not Path("pipeline_classic.yaml").exists() and not Path("pipeline_yolo.yaml").exists() and st.button("Generate Default Pipelines"):
+        subprocess.run([sys.executable, cli_script, "init"])
+        st.success("Created pipeline_classic.yaml and pipeline_yolo.yaml")
 
-    default_pipeline = "pipeline.yaml"
+    default_pipeline = "pipeline_yolo.yaml"
     if not Path(default_pipeline).exists():
-        # Try finding it relative to the app root if it doesn't exist in CWD
-        root_pipeline = Path(__file__).parent.parent / "pipeline.yaml"
-        if root_pipeline.exists():
-            default_pipeline = str(root_pipeline.resolve())
+        # Fallback to classic if yolo is missing
+        if Path("pipeline_classic.yaml").exists():
+            default_pipeline = "pipeline_classic.yaml"
+        else:
+            # Try finding it relative to the app root if it doesn't exist in CWD
+            root_pipeline = Path(__file__).parent.parent / "pipeline_yolo.yaml"
+            if root_pipeline.exists():
+                default_pipeline = str(root_pipeline.resolve())
 
     pipeline_path = st.text_input("Pipeline Path", value=default_pipeline)
 

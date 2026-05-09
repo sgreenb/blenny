@@ -427,10 +427,10 @@ def init(
             classic_text = templates.load_text("count-colonies")
             yolo_text = templates.load_text("count-colonies-yolo")
 
-            Path("pipeline.yaml").write_text(classic_text, encoding="utf-8")
+            Path("pipeline_classic.yaml").write_text(classic_text, encoding="utf-8")
             Path("pipeline_yolo.yaml").write_text(yolo_text, encoding="utf-8")
 
-            typer.echo("Wrote Classic CV template to pipeline.yaml")
+            typer.echo("Wrote Classic CV template to pipeline_classic.yaml")
             typer.echo("Wrote YOLO ML template to pipeline_yolo.yaml")
             return
         except KeyError as e:
