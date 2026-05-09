@@ -83,7 +83,7 @@ The GUI provides a point-and-click interface for both ML and classical analysis.
 - **Artifact Rejection**: Filters out plate rims, scratches, and pen marks using interior-anchored classification.
 - **Quality Flags**: Automatically warns you if a plate has a suspect count, many edge-touches, or poor detection confidence.
 - **Transparent Logic**: Every decision is auditable via debug images and quality flags.
-- **Interactive GUI**: Launch `blenny gui` for a point-and-click interface with live interactive review  toggle individual colony classifications without rerunning the pipeline.
+- **Interactive GUI**: Launch `blenny gui` for a point-and-click interface with live interactive review: toggle individual colony classifications without rerunning the pipeline.
 
 ---
 
@@ -94,7 +94,7 @@ Blenny is designed to be CLI first.
 | Command | Description |
 | :--- | :--- |
 | `blenny run` | Processes images through a YAML pipeline. |
-| `blenny init` | Scaffolds a starter `pipeline.yaml` with sensible defaults. |
+| `blenny init` | Scaffolds starter `pipeline_classic.yaml` and `pipeline_yolo.yaml` configs. |
 | `blenny modules` | Lists all available analysis modules and their parameters. |
 | `blenny gui` | Launches the visual interface. |
 
@@ -113,7 +113,7 @@ Blenny is designed to be CLI first.
 Tweak any pipeline parameter on the fly without editing the YAML:
 ```bash
 # Change the minimum colony area and exclusion margin
-blenny run pipeline.yaml -i plate.jpg -o results/ \
+blenny run pipeline_classic.yaml -i plate.jpg -o results/ \
   -v threshold_segment.min_area=50 \
   -v detect_plate.margin_frac=0.05
 ```
@@ -160,25 +160,23 @@ in `log.txt`, in `summary.csv` (as `flag_codes`), and at the terminal.
 
 ## Roadmap & Status
 
-**Status:** Pre-alpha. The API is stabilizing but subject to change.
+**Status:** Alpha. The core pipeline and ML engine are stable; advanced ROI features are in development.
 
+### ✅ Completed
 - [x] **YOLO ML Integration**: High-accuracy colony detection using trained neural networks.
-- [x] **Core modular pipeline architecture**
-- [x] **Classical-CV colony counting vertical slice**
-- [x] **YAML-based configurations & reproducibility**
-- [x] **Human-readable summary exports (`log.txt`)**
-- [x] **Automated debug/audit trail generation**
-- [x] **Scale-aware watershed seeding & filters**
-- [x] **Color & intensity quantification (RGB + HSV per colony)**
-- [x] **GUI with real-time tuning sliders**
-- [x] **Batch processing with summary reports**
-- [x] **Manual exclusion masking (paint-to-exclude)**
-- [x] **Interactive colony review (toggle artifact status without rerunning)**
-- [x] **Per-image provenance / reproducibility export (`--provenance`)**
-- [x] **Multi-feature artifact rejection (Area, Eccentricity, Intensity, and RGB Color)**
-- [ ] **Next:** Sector counting (quadrant analysis)
-- [ ] **Next:** Multi-ROI support (extract info for distinct regions within one image)
-- [ ] **Next:** Support for multiple plates in a single image
+- [x] **Classical CV Pipeline**: Robust threshold-based segmentation with watershed splitting.
+- [x] **Modular Architecture**: Extensible pipeline system with YAML-based reproducibility.
+- [x] **Interactive GUI**: Streamlit-based interface with live review and manual exclusion painting.
+- [x] **Rich Quantification**: RGB/HSV color, area (px and ppm), and morphology for every colony.
+- [x] **Quality Control**: Automated flags for rim contamination, high density, and poor detection.
+- [x] **Batch Processing**: One-command analysis for entire directories with summary reporting.
+- [x] **Smart Multiplicity**: Geometric heuristics to identify and count merged colonies.
+
+### 🎯 Next Steps
+- [ ] **Sector Counting**: Support for quadrant and grid-based analysis.
+- [ ] **Multi-ROI Support**: Extract data from multiple plates or distinct zones in a single image.
+- [ ] **Advanced Filtering**: Hierarchical classification for multi-organism plates.
+- [ ] **Cloud Integration**: Optional remote execution for heavy ML workloads.
 
 ## License
 
