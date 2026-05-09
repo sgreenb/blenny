@@ -46,9 +46,17 @@ gui_results/
 gui_uploads/
 examples/output/
 
-# Local example plate images and per-image evaluation results.
-# Treated as scratch / private test data; not redistributed in the repo.
-example_plates/
+# Development / ML Training
+ml_training/
+runs/
+yolov8n.pt
+pipeline_yolo.yaml
+prepare_yolo_data.py
+train_yolo.py
+train_colony_yolo.ipynb
 
-# Local planning notes.
+# Models
+models/colony_model.pt
+
+# Local planning notes
 TODO.md

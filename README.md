@@ -23,21 +23,21 @@ pip install -e .
 
 ### 2. Run your first analysis
 ```bash
-# Generate a starter pipeline (creates pipeline.yaml)
+# Generate starter pipelines (creates pipeline.yaml and pipeline_yolo.yaml)
 blenny init
 
-# Run on a single image
-blenny run pipeline.yaml --input plate.jpg --output results/
+# Run the YOLO ML pipeline (Recommended)
+blenny run pipeline_yolo.yaml --input plate.jpg --output results/
 
-# Run on a folder or glob pattern
-blenny run pipeline.yaml --input "plates/*.jpg" --output results/
+# Run the Classic CV pipeline
+blenny run pipeline.yaml --input plate.jpg --output results/
 ```
 
 ### 3. View Results
 For a single image, results land in `results/<image_name>/`:
 - **`annotated.png`**: The original image with every detected colony outlined and numbered.
-- **`colonies.csv`**: One row per colony with ID, coordinates, area, and RGB/HSV color data.
-- **`log.txt`**: A human-readable report with count statistics, quality flags, and a per-colony table.
+- **`colonies.csv`**: One row per colony with ID, coordinates, area, and rich quantification (RGB, HSV, etc.).
+- **`log.txt`**: A human-readable report with count statistics and quality flags.
 
 For a batch run, additional files are written to the output root:
 - **`summary.csv`**: One row per image with count, flag count, and duration.
@@ -62,22 +62,15 @@ or
 python -m blenny gui
 ```
 
-The GUI provides a point-and-click interface for single-image and batch analysis.  
-After a run completes, the **Interactive Review** panel lets you:
+The GUI provides a point-and-click interface for both ML and classical analysis.
 
-- See the annotated plate image immediately.
-- Check or uncheck the **"Artifact?"** checkbox on any colony to flip its classification.
-- Watch the colony count and annotated image update **instantly** — no rerunning the pipeline.
-- Click **"Save Reviewed Results"** to commit your changes to `colonies.csv` and `log.txt`.
-
-Tunable parameters in the sidebar mirror the CLI overrides:
-
-| Slider | Module Parameter |
-| :--- | :--- |
-| Plate Rim Margin | `detect_plate.margin_frac` (default 0.08) |
-| Min Colony Area (px) | `threshold_segment.min_area` (default 10) |
-| Min Circularity | `threshold_segment.min_circularity` (default 0.75) |
-| Interior Radius Frac | `classify_by_interior.interior_radius_frac` (default 0.85) |
+- **Engine Selection**: Toggle between **YOLO ML** (modern deep learning) and **Classic CV** (edge detection).
+- **Zero-Config YOLO**: The ML engine is tuned for accuracy out-of-the-box, with minimal sliders required.
+- **Interactive Review**:
+    - See the annotated plate image immediately.
+    - Check or uncheck the **"Artifact?"** checkbox on any colony to flip its classification.
+    - Watch the colony count update **instantly** — no rerunning the pipeline.
+- **Manual Exclusion**: Paint directly on the plate image to exclude contaminants, bubbles, or writing from the count.
 
 ---
 
@@ -169,26 +162,23 @@ in `log.txt`, in `summary.csv` (as `flag_codes`), and at the terminal.
 
 **Status:** Pre-alpha. The API is stabilizing but subject to change.
 
-- [x] Core modular pipeline architecture
-- [x] Classical-CV colony counting vertical slice
-- [x] YAML-based configurations & reproducibility
-- [x] Human-readable summary exports (`log.txt`)
-- [x] Automated debug/audit trail generation
-- [x] Scale-aware watershed seeding & filters
-- [x] Color & intensity quantification (RGB + HSV per colony)
-- [x] GUI with real-time tuning sliders
-- [x] Batch processing with summary reports
-- [x] Manual exclusion masking (paint-to-exclude)
-- [x] Interactive colony review (toggle artifact status without rerunning)
-- [x] Per-image provenance / reproducibility export (`--provenance`)
-- [x] Multi-feature artifact rejection (Area, Eccentricity, Intensity, and RGB Color)
-- [x] Enforce `min_area` post-watershed split in `ThresholdSegmenter`
-- [x] Switched Windows folder picker to tkinter (fixed GUI crash)
-- [x] Fixed GUI tuning reset bug (widget ordering)
+- [x] **YOLO ML Integration**: High-accuracy colony detection using trained neural networks.
+- [x] **Core modular pipeline architecture**
+- [x] **Classical-CV colony counting vertical slice**
+- [x] **YAML-based configurations & reproducibility**
+- [x] **Human-readable summary exports (`log.txt`)**
+- [x] **Automated debug/audit trail generation**
+- [x] **Scale-aware watershed seeding & filters**
+- [x] **Color & intensity quantification (RGB + HSV per colony)**
+- [x] **GUI with real-time tuning sliders**
+- [x] **Batch processing with summary reports**
+- [x] **Manual exclusion masking (paint-to-exclude)**
+- [x] **Interactive colony review (toggle artifact status without rerunning)**
+- [x] **Per-image provenance / reproducibility export (`--provenance`)**
+- [x] **Multi-feature artifact rejection (Area, Eccentricity, Intensity, and RGB Color)**
 - [ ] **Next:** Sector counting (quadrant analysis)
 - [ ] **Next:** Multi-ROI support (extract info for distinct regions within one image)
 - [ ] **Next:** Support for multiple plates in a single image
-- [ ] **Next:** ML-based segmentation (Cellpose integration)
 
 ## License
 

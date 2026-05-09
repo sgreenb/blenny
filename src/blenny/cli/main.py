@@ -395,20 +395,20 @@ def modules(
 # --- init --------------------------------------------------------------------
 
 
-@app.command(help="Write a starter pipeline YAML.")
+@app.command(help="Write starter pipeline YAML configs (Classic and YOLO).")
 def init(
     template: Annotated[
-        str,
+        str | None,
         typer.Argument(help="Template name (run `blenny init --list` to see options)."),
-    ] = "count-colonies",
+    ] = None,
     out: Annotated[
-        Path,
+        Path | None,
         typer.Option(
             "--out",
             "-o",
             help="Where to write the YAML.",
         ),
-    ] = Path("pipeline.yaml"),
+    ] = None,
     list_templates: Annotated[
         bool,
         typer.Option("--list", help="List the available templates and exit."),
@@ -420,15 +420,36 @@ def init(
         for name in templates.available():
             typer.echo(name)
         return
+
+    # Default behavior: Write both core templates to their standard filenames
+    if template is None and out is None:
+        try:
+            classic_text = templates.load_text("count-colonies")
+            yolo_text = templates.load_text("count-colonies-yolo")
+
+            Path("pipeline.yaml").write_text(classic_text, encoding="utf-8")
+            Path("pipeline_yolo.yaml").write_text(yolo_text, encoding="utf-8")
+
+            typer.echo("Wrote Classic CV template to pipeline.yaml")
+            typer.echo("Wrote YOLO ML template to pipeline_yolo.yaml")
+            return
+        except KeyError as e:
+            typer.echo(f"Error loading default templates: {e}", err=True)
+            raise typer.Exit(code=1) from None
+
+    # Specific template or output path requested
+    template_name = template or "count-colonies"
+    out_path = out or Path("pipeline.yaml")
+
     try:
-        text = templates.load_text(template)
+        text = templates.load_text(template_name)
     except KeyError as e:
         typer.echo(str(e), err=True)
         raise typer.Exit(code=1) from None
 
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(text, encoding="utf-8")
-    typer.echo(f"Wrote {template} template to {out}")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(text, encoding="utf-8")
+    typer.echo(f"Wrote {template_name} template to {out_path}")
 
 
 # --- helpers -----------------------------------------------------------------

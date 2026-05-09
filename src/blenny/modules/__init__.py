@@ -21,6 +21,7 @@ from blenny.modules.load_image import ImageFileLoader
 from blenny.modules.mask_exclusion import ExclusionMasker
 from blenny.modules.measure_colonies import ColonyMeasurer
 from blenny.modules.threshold_segment import ThresholdSegmenter
+from blenny.modules.yolo_detector import YoloDetector
 
 __all__ = [
     "AnnotatedImageExporter",
@@ -38,4 +39,5 @@ __all__ = [
     "SummaryExporter",
     "ThresholdClassifier",
     "ThresholdSegmenter",
+    "YoloDetector",
 ]

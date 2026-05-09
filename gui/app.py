@@ -149,6 +149,16 @@ with st.sidebar:
 
     # 2. Pipeline Selection
     st.header("2. Analysis Pipeline")
+
+    # Pipeline choice: Classic vs YOLO
+    pipeline_mode = st.radio(
+        "Analysis Engine",
+        ["Classic CV", "YOLO ML"],
+        index=1,
+        horizontal=True,
+        help="Classic CV uses edge detection and thresholding. YOLO ML uses a trained neural network."
+    )
+
     repro_file = st.file_uploader("Load Reproducible Config", type=["yaml", "yml"], help="Load settings from a previous run.")
 
     # Defaults
@@ -157,6 +167,13 @@ with st.sidebar:
     fallback_ecc_default = 0.55
     max_dimension_default = 2000
     resize_default = False
+
+    if pipeline_mode == "YOLO ML":
+        min_ppm_default = 5
+        min_circ_default = 0.0
+        max_dimension_default = 1280
+        resize_default = True
+        margin_default = 0.02
 
     if repro_file:
         try:
@@ -176,9 +193,9 @@ with st.sidebar:
         except Exception as e:
             st.error(f"Error loading config: {e}")
 
-    if not Path("pipeline.yaml").exists() and st.button("Generate Default Pipeline"):
+    if not Path("pipeline.yaml").exists() and not Path("pipeline_yolo.yaml").exists() and st.button("Generate Default Pipelines"):
         subprocess.run(["python3", cli_script, "init"])
-        st.success("Created pipeline.yaml")
+        st.success("Created pipeline.yaml and pipeline_yolo.yaml")
 
     default_pipeline = "pipeline.yaml"
     if not Path(default_pipeline).exists():
@@ -302,49 +319,58 @@ with st.sidebar:
 
         return st.session_state[key]
 
-    if st.button("Reset All Tuning Defaults"):
-        # Reset main keys and their synced widget counterparts
-        for k, default in [("margin", 0.04), ("min_area_ppm", 15), ("min_circ", 0.7), ("interior_radius", 0.85), ("fallback_ecc", 0.55)]:
-            st.session_state[k] = default
-            st.session_state[f"num_{k}"] = default
-            st.session_state[f"slide_{k}"] = default
-        st.session_state["manual_plate_mode"] = "Auto"
-        st.rerun()
+    if pipeline_mode == "Classic CV":
+        if st.button("Reset All Tuning Defaults"):
+            # Reset main keys and their synced widget counterparts
+            for k, default in [("margin", 0.04), ("min_area_ppm", 15), ("min_circ", 0.7), ("interior_radius", 0.85), ("fallback_ecc", 0.55)]:
+                st.session_state[k] = default
+                st.session_state[f"num_{k}"] = default
+                st.session_state[f"slide_{k}"] = default
+            st.session_state["manual_plate_mode"] = "Auto"
+            st.rerun()
 
-    if st.session_state.get("manual_exclude_ids") and st.button("Clear Manual Exclusions", help="Remove all manually excluded colonies."):
-        st.session_state["manual_exclude_ids"] = []
-        st.rerun()
+        if st.session_state.get("manual_exclude_ids") and st.button("Clear Manual Exclusions", help="Remove all manually excluded colonies."):
+            st.session_state["manual_exclude_ids"] = []
+            st.rerun()
 
-    margin = compact_control(
-        "Plate Rim Margin", "margin", 0.0, 0.2, margin_default, 0.01,
-        "The fraction of the plate radius to exclude from the edge to avoid rim reflections."
-    )
-    min_area_ppm = compact_control(
-        "Min Colony Size (ppm)", "min_area_ppm", 0, 1000, min_ppm_default, 1,
-        "Minimum area a colony must occupy, expressed in parts-per-million of the plate area. "
-        "100 ppm is ~0.6mm2 on a 90mm plate."
-    )
-    min_circ = compact_control(
-        "Min Circularity", "min_circ", 0.0, 1.0, min_circ_default, 0.05,
-        "Filter objects by roundness (1.0 is a perfect circle). Low values catch rim artifacts."
-    )
-    interior_radius = compact_control(
-        "Interior Radius Frac", "interior_radius", 0.1, 1.0, interior_radius_default, 0.05,
-        "Fraction of the analysis area treated as the 'safe' interior zone for building the artifact reference profile."
-    )
-    fallback_ecc = compact_control(
-        "Fallback Max Eccentricity", "fallback_ecc", 0.1, 1.0, fallback_ecc_default, 0.05,
-        "Strict eccentricity (elongation) limit used when the plate is too sparse to build a reference profile."
-    )
+        margin = compact_control(
+            "Plate Rim Margin", "margin", 0.0, 0.2, margin_default, 0.01,
+            "The fraction of the plate radius to exclude from the edge to avoid rim reflections."
+        )
+        min_area_ppm = compact_control(
+            "Min Colony Size (ppm)", "min_area_ppm", 0, 1000, min_ppm_default, 1,
+            "Minimum area a colony must occupy, expressed in parts-per-million of the plate area. "
+            "100 ppm is ~0.6mm2 on a 90mm plate."
+        )
+        min_circ = compact_control(
+            "Min Circularity", "min_circ", 0.0, 1.0, min_circ_default, 0.05,
+            "Filter objects by roundness (1.0 is a perfect circle). Low values catch rim artifacts."
+        )
+        interior_radius = compact_control(
+            "Interior Radius Frac", "interior_radius", 0.1, 1.0, interior_radius_default, 0.05,
+            "Fraction of the analysis area treated as the 'safe' interior zone for building the artifact reference profile."
+        )
+        fallback_ecc = compact_control(
+            "Fallback Max Eccentricity", "fallback_ecc", 0.1, 1.0, fallback_ecc_default, 0.05,
+            "Strict eccentricity (elongation) limit used when the plate is too sparse to build a reference profile."
+        )
 
-    enable_multiplicity = st.checkbox(
-        "Enable multiplicity estimation",
-        value=True,
-        key="enable_multiplicity",
-        help="When enabled, detections that look like fused colonies (large area, low "
-             "circularity, high solidity) are scored as multiple colonies. Uncheck to "
-             "count every detection as exactly one colony."
-    )
+        enable_multiplicity = st.checkbox(
+            "Enable multiplicity estimation",
+            value=True,
+            key="enable_multiplicity",
+            help="When enabled, detections that look like fused colonies (large area, low "
+                 "circularity, high solidity) are scored as multiple colonies. Uncheck to "
+                 "count every detection as exactly one colony."
+        )
+    else:
+        # Defaults for YOLO logic
+        margin = 0.02
+        min_area_ppm = 0
+        min_circ = 0.0
+        interior_radius = 1.0
+        fallback_ecc = 1.0
+        enable_multiplicity = False
 
     st.divider()
 
@@ -654,13 +680,35 @@ with col2:
             
             # Setup base pipeline config
             from blenny.config import extract_steps, load_yaml, substitute_paths
-            raw_config = load_yaml(pipeline_path)
-            raw_steps = extract_steps(raw_config)
             
+            if pipeline_mode == "YOLO ML":
+                pipeline_path_to_load = "pipeline_yolo.yaml" if Path("pipeline_yolo.yaml").exists() else pipeline_path
+                raw_config = load_yaml(pipeline_path_to_load)
+                raw_steps = extract_steps(raw_config)
+                
+                # Check if yolo_detector is actually in the loaded config
+                # if not (e.g. user loaded a classic config), we inject it
+                if not any(s["name"] == "yolo_detector" for s in raw_steps):
+                    new_steps = []
+                    for step in raw_steps:
+                        if step["name"] == "threshold_segment":
+                            new_steps.append({"name": "yolo_detector", "params": {"output_key": "objects"}})
+                        elif step["name"] == "classify_by_interior":
+                            continue
+                        else:
+                            new_steps.append(step)
+                    raw_steps = new_steps
+            else:
+                raw_config = load_yaml(pipeline_path)
+                raw_steps = extract_steps(raw_config)
+
             overrides = {
                 "load_image": {"max_dimension": int(max_dimension) if resize_enabled else None},
                 "detect_plate": {"margin_frac": margin},
                 "threshold_segment": {"min_area": None, "min_area_ppm": min_area_ppm, "min_circularity": min_circ},
+                "yolo_detector": {
+                    "output_key": "objects"
+                },
                 "classify_by_interior": {
                     "interior_radius_frac": interior_radius,
                     "strict_fallback_max_eccentricity": fallback_ecc
@@ -850,4 +898,4 @@ elif input_source:
 
 # --- Footer ---
 st.divider()
-st.caption("Blenny GUI Skeleton v0.1 • Local Engine: " + subprocess.run(["python3", cli_script, "--version"], capture_output=True, text=True).stdout.strip())
+st.caption("Blenny GUI v0.2 • YOLO ML Engine • Engine: " + subprocess.run([sys.executable, cli_script, "--version"], capture_output=True, text=True).stdout.strip())

@@ -1,0 +1,57 @@
+# Count and analyze colonies on a plate photo using trained YOLO ML model.
+#
+# This pipeline uses a trained YOLO object detection model for robust
+# colony identification, followed by traditional CV for refinement.
+# It is typically faster and more accurate for complex plates than
+# the classical thresholding pipeline.
+
+steps:
+  - name: load_image
+    params:
+      # YOLO models are typically trained on 1280px images.
+      max_dimension: 1280
+
+  - name: detect_plate
+    params:
+      # YOLO is robust enough to handle the plate rim, so we can use
+      # a smaller margin than the classical pipeline.
+      margin_frac: 0.02
+      crop: true
+
+  - name: apply_exclusion_mask
+    params:
+      mask_path: null
+
+  - name: yolo_detector
+    params:
+      model_path: "models/colony_model.pt"
+      conf_threshold: 0.15
+      iou_threshold: 0.8
+      imgsz: 1280
+      refine_mask: true
+      output_key: "objects"
+
+  - name: add_manual_colonies
+    params:
+      coordinates: []
+
+  - name: measure_colonies
+    params:
+      mask_key: "objects"
+      roi_mask_key: "plate"
+
+  - name: filter_by_id
+    params:
+      exclude_ids: []
+
+  - name: export_csv
+    params:
+      output_path: "{output_dir}/{stem}/colonies.csv"
+
+  - name: export_summary
+    params:
+      output_path: "{output_dir}/{stem}/log.txt"
+
+  - name: export_annotated
+    params:
+      output_path: "{output_dir}/{stem}/annotated.png"
