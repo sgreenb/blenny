@@ -38,6 +38,14 @@ class PlateDetector(Preprocessor):
         canny_sigma: float = 2.0
         """Gaussian sigma for the Canny edge detector."""
 
+        detection_dimension: int = 512
+        """Internal resolution for plate detection.
+
+        Finding the plate doesn't require full resolution. Downscaling the
+        working image to this dimension (long side) makes the Hough transform
+        orders of magnitude faster on large images.
+        """
+
         crop: bool = True
         """If True, crop ``data.image`` to the plate's bounding box."""
 
@@ -89,13 +97,28 @@ class PlateDetector(Preprocessor):
         """
 
     def process(self, image: Any, data: ImageData) -> Any:
-        gray = color.rgb2gray(image) if image.ndim == 3 else image.astype(float) / 255.0
+        # 1. Prepare grayscale image for processing
+        gray_full = color.rgb2gray(image) if image.ndim == 3 else image.astype(float) / 255.0
+        h_full, w_full = gray_full.shape
+
+        # 2. Downsample for detection speed (if enabled)
+        det_dim: int = self.params.detection_dimension  # type: ignore[attr-defined]
+        if det_dim > 0 and max(h_full, w_full) > det_dim:
+            # Calculate scale such that max dimension is det_dim
+            det_scale = det_dim / max(h_full, w_full)
+            new_h, new_w = int(h_full * det_scale), int(w_full * det_scale)
+            # Use order=1 (bilinear) for speed; anti-aliasing is usually overkill for Hough
+            gray = transform.resize(gray_full, (new_h, new_w), order=1, anti_aliasing=False)
+        else:
+            gray = gray_full
+            det_scale = 1.0
+
         h, w = gray.shape
 
         # Scale forced coordinates if the image was resized during loading.
         # This ensures GUI-derived coords (from full-res display) match the
         # current 'image' frame.
-        scale = data.metadata.get("resize_scale", 1.0)
+        load_scale = data.metadata.get("resize_scale", 1.0)
 
         # --- Case A: Manual Mask File ---
         if self.params.force_mask_path:
@@ -127,9 +150,9 @@ class PlateDetector(Preprocessor):
             and self.params.force_cx is not None
             and self.params.force_r is not None
         ):
-            cy = round(self.params.force_cy * scale)
-            cx = round(self.params.force_cx * scale)
-            r_hough = round(self.params.force_r * scale)
+            cy = round(self.params.force_cy * load_scale)
+            cx = round(self.params.force_cx * load_scale)
+            r_hough = round(self.params.force_r * load_scale)
             score = 1.0
         else:
             edges = feature.canny(gray, sigma=self.params.canny_sigma)  # type: ignore[attr-defined]
@@ -150,10 +173,15 @@ class PlateDetector(Preprocessor):
                     severity="warning",
                 )
                 # Still write a "everything" mask so FeatureExtractors don't break.
-                data.masks[self.params.mask_key] = np.ones((h, w), dtype=bool)  # type: ignore[attr-defined]
+                data.masks[self.params.mask_key] = np.ones((h_full, w_full), dtype=bool)  # type: ignore[attr-defined]
                 return image
 
-            cy, cx, r_hough = int(cys[0]), int(cxs[0]), int(rs[0])
+            # Scale coordinates back to the input 'image' resolution
+            cy, cx, r_hough = (
+                int(round(cys[0] / det_scale)),
+                int(round(cxs[0] / det_scale)),
+                int(round(rs[0] / det_scale)),
+            )
             score = float(accums[0])
 
             if score < self.params.min_confidence_score:
@@ -173,13 +201,13 @@ class PlateDetector(Preprocessor):
         r_eff = max(1, r - round(r * self.params.margin_frac))  # type: ignore[attr-defined]
 
         # Build mask in the original frame.
-        mask = np.zeros((h, w), dtype=bool)
-        rr, cc = disk((cy, cx), r_eff, shape=(h, w))
+        mask = np.zeros((h_full, w_full), dtype=bool)
+        rr, cc = disk((cy, cx), r_eff, shape=(h_full, w_full))
         mask[rr, cc] = True
 
         if self.params.crop:  # type: ignore[attr-defined]
-            y0, y1 = max(0, cy - r), min(h, cy + r + 1)
-            x0, x1 = max(0, cx - r), min(w, cx + r + 1)
+            y0, y1 = max(0, cy - r), min(h_full, cy + r + 1)
+            x0, x1 = max(0, cx - r), min(w_full, cx + r + 1)
             cropped = image[y0:y1, x0:x1]
             cropped_mask = mask[y0:y1, x0:x1]
             data.masks[self.params.mask_key] = cropped_mask  # type: ignore[attr-defined]
