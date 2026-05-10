@@ -234,12 +234,121 @@ with st.sidebar:
 
     st.divider()
 
-    # 3. Tuning Parameters
-    st.header("3. Tuning")
+    # 3. Plate Area & Masking
+    st.header("3. Plate Area & Masking")
+
+    # Tool labels for the radio button
+    # We define this BEFORE the mode radio to determine if we should force a mode.
+    # Note: We use a key for the tool so we can query it safely.
+    selected_tool_label = st.radio(
+        "Select Drawing Tool",
+        options=["View", "Polygon Plate Area", "Exclusion Mask"],
+        index=0,
+        horizontal=True,
+        key="active_drawing_tool",
+        help="View: Preview image and overlays. Plate Area: Define the circular/polygonal analysis area. Exclusion Mask: Paint areas to ignore.",
+    )
+
+    # Determine if we should force "Manual Shape" because the Plate tool is active.
+    # We do this logic BEFORE the mode radio widget is created to avoid the crash.
+    is_plate_tool = selected_tool_label == "Polygon Plate Area"
+    current_mode = st.session_state.get("manual_plate_mode", "Auto")
+
+    if is_plate_tool and current_mode != "Manual Shape":
+        st.session_state["manual_plate_mode"] = "Manual Shape"
+        # No rerun needed yet, we haven't drawn the radio button below.
+
+    # If the user switches mode to "Auto", we should probably reset the tool to "View"
+    # to avoid confusion, and we definitely want to clear the custom mask.
+    # We use a callback on the radio to handle these cleanups.
+    def on_mode_change():
+        new_mode = st.session_state["manual_plate_mode"]
+        if new_mode == "Auto":
+            # Clear manual shape mask file if it exists
+            if os.path.exists("gui_plate_batch_mask.png"):
+                os.remove("gui_plate_batch_mask.png")
+            # Switch tool back to View if it was on Plate
+            if st.session_state.get("active_drawing_tool") == "Polygon Plate Area":
+                st.session_state["active_drawing_tool"] = "View"
+        st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
+
+    # Mode Selector for the analysis engine
+    plate_mode = st.radio(
+        "Plate Detection Mode",
+        ["Auto", "Manual Circle", "Manual Shape"],
+        key="manual_plate_mode",
+        on_change=on_mode_change,
+        horizontal=False,
+    )
+
+    manual_cy, manual_cx, manual_r = None, None, None
+    if plate_mode == "Manual Circle":
+        st.info("Tune center and radius with the controls below.")
+        def_cy, def_cx, def_r = 1000, 1000, 800
+        if input_files and len(input_files) == 1:
+            try:
+                img_peek = Image.open(input_files[0])
+                w, h = img_peek.size
+                def_cx, def_cy = w // 2, h // 2
+                def_r = int(min(w, h) * 0.4)
+            except Exception:
+                pass
+        manual_cy = compact_control(
+            "Center Y", "manual_cy", 0, 4000, def_cy, 1, "Y coordinate of the plate center."
+        )
+        manual_cx = compact_control(
+            "Center X", "manual_cx", 0, 4000, def_cx, 1, "X coordinate of the plate center."
+        )
+        manual_r = compact_control(
+            "Radius", "manual_r", 0, 2000, def_r, 1, "Radius of the plate in pixels."
+        )
+
+    # Map label back to internal tool name
+    active_tool = {
+        "View": "View",
+        "Polygon Plate Area": "Define Plate Area",
+        "Exclusion Mask": "Paint Exclusion Mask",
+    }[selected_tool_label]
+
+    # Show/Hide relevant controls based on tool
+    enable_mask = active_tool == "Paint Exclusion Mask"
+
+    brush_size = st.slider(
+        "Brush Size", 1, 100, 20, disabled=(active_tool != "Paint Exclusion Mask")
+    )
+
+    # Cleanup buttons
+    c_cl1, c_cl2 = st.columns(2)
+    if c_cl1.button("Clear Plate", help="Reset the manual shape plate area"):
+        if os.path.exists("gui_plate_batch_mask.png"):
+            os.remove("gui_plate_batch_mask.png")
+        st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
+        st.rerun()
+    if c_cl2.button("Clear Mask", help="Reset the exclusion mask"):
+        if os.path.exists("gui_mask_batch_exclusion.png"):
+            os.remove("gui_mask_batch_exclusion.png")
+        st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
+        st.rerun()
+
+    # Track mode changes for state cleanup (existing logic)
+    if (
+        "prev_plate_mode" in st.session_state
+        and plate_mode != "Manual Shape"
+        and st.session_state["prev_plate_mode"] == "Manual Shape"
+        and os.path.exists("gui_plate_batch_mask.png")
+    ):
+        os.remove("gui_plate_batch_mask.png")
+        st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
+    st.session_state["prev_plate_mode"] = plate_mode
+
+    st.divider()
+
+    # 4. Tuning Parameters
+    st.header("4. Tuning")
 
     # Image resize
     if "resize_enabled" not in st.session_state:
-        st.session_state["resize_enabled"] = resize_default
+        st.session_state["resize_enabled"] = False
     if "max_dimension" not in st.session_state:
         st.session_state["max_dimension"] = max_dimension_default
 
@@ -431,115 +540,6 @@ with st.sidebar:
         interior_radius = 1.0
         fallback_ecc = 1.0
         enable_multiplicity = False
-
-    st.divider()
-
-    # 4. Plate Area & Masking
-    st.header("4. Plate Area & Masking")
-
-    # Tool labels for the radio button
-    # We define this BEFORE the mode radio to determine if we should force a mode.
-    # Note: We use a key for the tool so we can query it safely.
-    selected_tool_label = st.radio(
-        "Select Drawing Tool",
-        options=["View", "Polygon Plate Area", "Exclusion Mask"],
-        index=0,
-        horizontal=True,
-        key="active_drawing_tool",
-        help="View: Preview image and overlays. Plate Area: Define the circular/polygonal analysis area. Exclusion Mask: Paint areas to ignore.",
-    )
-
-    # Determine if we should force "Manual Shape" because the Plate tool is active.
-    # We do this logic BEFORE the mode radio widget is created to avoid the crash.
-    is_plate_tool = selected_tool_label == "Polygon Plate Area"
-    current_mode = st.session_state.get("manual_plate_mode", "Auto")
-
-    if is_plate_tool and current_mode != "Manual Shape":
-        st.session_state["manual_plate_mode"] = "Manual Shape"
-        # No rerun needed yet, we haven't drawn the radio button below.
-
-    # If the user switches mode to "Auto", we should probably reset the tool to "View"
-    # to avoid confusion, and we definitely want to clear the custom mask.
-    # We use a callback on the radio to handle these cleanups.
-    def on_mode_change():
-        new_mode = st.session_state["manual_plate_mode"]
-        if new_mode == "Auto":
-            # Clear manual shape mask file if it exists
-            if os.path.exists("gui_plate_batch_mask.png"):
-                os.remove("gui_plate_batch_mask.png")
-            # Switch tool back to View if it was on Plate
-            if st.session_state.get("active_drawing_tool") == "Polygon Plate Area":
-                st.session_state["active_drawing_tool"] = "View"
-        st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
-
-    # Mode Selector for the analysis engine
-    plate_mode = st.radio(
-        "Plate Detection Mode",
-        ["Auto", "Manual Circle", "Manual Shape"],
-        key="manual_plate_mode",
-        on_change=on_mode_change,
-        horizontal=False,
-    )
-
-    manual_cy, manual_cx, manual_r = None, None, None
-    if plate_mode == "Manual Circle":
-        st.info("Tune center and radius with the controls below.")
-        def_cy, def_cx, def_r = 1000, 1000, 800
-        if input_files and len(input_files) == 1:
-            try:
-                img_peek = Image.open(input_files[0])
-                w, h = img_peek.size
-                def_cx, def_cy = w // 2, h // 2
-                def_r = int(min(w, h) * 0.4)
-            except Exception:
-                pass
-        manual_cy = compact_control(
-            "Center Y", "manual_cy", 0, 4000, def_cy, 1, "Y coordinate of the plate center."
-        )
-        manual_cx = compact_control(
-            "Center X", "manual_cx", 0, 4000, def_cx, 1, "X coordinate of the plate center."
-        )
-        manual_r = compact_control(
-            "Radius", "manual_r", 0, 2000, def_r, 1, "Radius of the plate in pixels."
-        )
-
-    # Map label back to internal tool name
-    active_tool = {
-        "View": "View",
-        "Polygon Plate Area": "Define Plate Area",
-        "Exclusion Mask": "Paint Exclusion Mask",
-    }[selected_tool_label]
-
-    # Show/Hide relevant controls based on tool
-    enable_mask = active_tool == "Paint Exclusion Mask"
-
-    brush_size = st.slider(
-        "Brush Size", 1, 100, 20, disabled=(active_tool != "Paint Exclusion Mask")
-    )
-
-    # Cleanup buttons
-    c_cl1, c_cl2 = st.columns(2)
-    if c_cl1.button("Clear Plate", help="Reset the manual shape plate area"):
-        if os.path.exists("gui_plate_batch_mask.png"):
-            os.remove("gui_plate_batch_mask.png")
-        st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
-        st.rerun()
-    if c_cl2.button("Clear Mask", help="Reset the exclusion mask"):
-        if os.path.exists("gui_mask_batch_exclusion.png"):
-            os.remove("gui_mask_batch_exclusion.png")
-        st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
-        st.rerun()
-
-    # Track mode changes for state cleanup (existing logic)
-    if (
-        "prev_plate_mode" in st.session_state
-        and plate_mode != "Manual Shape"
-        and st.session_state["prev_plate_mode"] == "Manual Shape"
-        and os.path.exists("gui_plate_batch_mask.png")
-    ):
-        os.remove("gui_plate_batch_mask.png")
-        st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
-    st.session_state["prev_plate_mode"] = plate_mode
 
     enable_debug = st.checkbox(
         "Save debug step images",
@@ -965,8 +965,10 @@ if st.session_state.get("all_results"):
 
         def update_idx(new_val):
             st.session_state["current_view_idx"] = new_val
-            # Sync the selectbox key immediately to prevent it being sticky
-            st.session_state["stem_selector"] = stems[new_val]
+            # We don't manually set stem_selector here because it causes an error
+            # if the widget was already instantiated in the previous script run.
+            # Instead, we rely on the 'index' parameter of selectbox being
+            # driven by current_view_idx.
 
         if c_nav1.button("← Previous", disabled=(curr_idx == 0), use_container_width=True):
             update_idx(curr_idx - 1)
