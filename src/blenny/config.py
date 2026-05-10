@@ -86,6 +86,10 @@ def substitute_paths(
 
     def _sub(value: Any) -> Any:
         if isinstance(value, str):
+            # If it contains {plate_label}, we leave it for the sub_pipeline
+            # to handle during execution.
+            if "{plate_label}" in value:
+                return value
             try:
                 return value.format_map(variables)
             except KeyError as e:

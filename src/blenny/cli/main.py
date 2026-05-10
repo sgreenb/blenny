@@ -35,10 +35,12 @@ app = typer.Typer(
     "CORE WORKFLOW:\n"
     "  1. Initialize pipelines:   blenny init\n"
     "  2. Run the analysis:       blenny run pipeline_yolo.yaml --input plate.jpg --output results/\n"
-    "  3. Inspect modules:        blenny modules\n"
-    "  4. Launch the GUI:         blenny gui\n\n"
+    "  3. Multi-plate analysis:   blenny run multi.yaml -i scan.jpg -o out/ -v detect_multi_plate.grid=[2,3]\n"
+    "  4. Inspect modules:        blenny modules\n"
+    "  5. Launch the GUI:         blenny gui\n\n"
     "Single-image outputs: annotated.png, colonies.csv, log.txt\n"
-    "Batch outputs add:    summary.csv, batch_log.txt\n"
+    "Multi-plate outputs:  One folder per scan containing per-plate images and a combined CSV.\n"
+    "Batch outputs add:    summary.csv (with per-plate columns), batch_log.txt\n"
     "Optional:             --provenance (provenance.json)  --debug-dir (step images)",
     no_args_is_help=True,
     add_completion=False,
@@ -74,7 +76,8 @@ def _root(
 @app.command(
     help="Run a YAML pipeline on one image or a batch.\n\n"
     "Outputs per image: annotated.png, colonies.csv, log.txt\n"
-    "Batch outputs (auto or --summary): summary.csv, batch_log.txt\n"
+    "Multi-plate outputs: One folder per scan with per-plate images and a unified CSV.\n"
+    "Batch outputs (auto or --summary): summary.csv (includes per-plate counts), batch_log.txt\n"
     "Optional: --provenance for provenance.json, --debug-dir for step images"
 )
 def run(
@@ -166,6 +169,21 @@ def run(
             if step["name"] == "estimate_multiplicity":
                 step.setdefault("params", {})["enabled"] = False
 
+    # Pre-detect if we are in multi-plate mode to fix column ordering in summary.csv
+    expected_plate_columns: list[str] = []
+    for step in raw_steps:
+        if step["name"] == "detect_multi_plate":
+            p = step.get("params", {})
+            rows, cols = p.get("grid", [1, 1])
+            labels = p.get("labels")
+            for r in range(rows):
+                for c in range(cols):
+                    if labels and r < len(labels) and c < len(labels[r]):
+                        expected_plate_columns.append(f"plate_{labels[r][c]}_count")
+                    else:
+                        expected_plate_columns.append(f"plate_{r * cols + c + 1}_count")
+            break
+
     if override:
         for item in override:
             try:
@@ -232,7 +250,7 @@ def run(
         try:
             pipe = Pipeline.from_config(resolved)
             img_debug_dir = debug_dir / stem if debug_dir else None
-            data = pipe.run(img, debug_dir=img_debug_dir)
+            data = pipe.run(img, output_dir=output_dir, debug_dir=img_debug_dir)
         except Exception as e:
             elapsed = time.perf_counter() - t0
             typer.echo(f"  [FAIL] {img.name}: {type(e).__name__}: {e}", err=True)
@@ -259,6 +277,7 @@ def run(
                 "stem": stem,
                 "status": "ok",
                 "colony_count": data.metadata.get("colony_count"),
+                **{f"plate_{k}_count": v for k, v in data.metadata.get("per_plate_counts", {}).items()},
                 "n_quality_flags": len(data.quality_flags),
                 "flag_codes": "|".join(f.code for f in data.quality_flags),
                 "duration_s": round(elapsed, 3),
@@ -297,7 +316,7 @@ def run(
     # Only write batch summary files if requested OR if there are multiple images
     # and the user hasn't explicitly disabled them.
     if write_summary is True or (write_summary is None and len(inputs) > 1):
-        _write_summary_csv(output_dir / "summary.csv", summary_rows)
+        _write_summary_csv(output_dir / "summary.csv", summary_rows, plate_cols=expected_plate_columns)
         _write_batch_log_txt(
             output_dir / "batch_log.txt", summary_rows, time.perf_counter() - t_batch
         )
@@ -427,17 +446,20 @@ def init(
             typer.echo(name)
         return
 
-    # Default behavior: Write both core templates to their standard filenames
+    # Default behavior: Write core templates to their standard filenames
     if template is None and out is None:
         try:
             classic_text = templates.load_text("count-colonies")
             yolo_text = templates.load_text("count-colonies-yolo")
+            multi_text = templates.load_text("count-colonies-multi")
 
             Path("pipeline_classic.yaml").write_text(classic_text, encoding="utf-8")
             Path("pipeline_yolo.yaml").write_text(yolo_text, encoding="utf-8")
+            Path("pipeline_multi.yaml").write_text(multi_text, encoding="utf-8")
 
             typer.echo("Wrote Classic CV template to pipeline_classic.yaml")
             typer.echo("Wrote YOLO ML template to pipeline_yolo.yaml")
+            typer.echo("Wrote Multi-Plate template to pipeline_multi.yaml")
             return
         except KeyError as e:
             typer.echo(f"Error loading default templates: {e}", err=True)
@@ -549,30 +571,50 @@ def _write_batch_log_txt(path: Path, rows: list[dict[str, Any]], duration: float
         f"Total images:    {len(rows)}",
         f"Total duration:  {duration:.1f}s",
         "",
-        f"{'Image':<30} {'Status':<10} {'Count':<10} {'Flags':<10}",
-        "-" * 65,
+        f"{'Image':<30} {'Status':<10} {'Count':<10} {'Flags':<10} {'Per-Plate Counts'}",
+        "-" * 100,
     ]
     for r in rows:
         name = r.get("stem", "unknown")[:30]
         status = r.get("status", "failed")
         count = str(r.get("colony_count", "-"))
         flags = str(r.get("n_quality_flags", "-"))
-        lines.append(f"{name:<30} {status:<10} {count:<10} {flags:<10}")
+        
+        # Extract plate counts from the row dict (keys starting with plate_)
+        p_counts = []
+        for k, v in r.items():
+            if k.startswith("plate_") and k.endswith("_count"):
+                plabel = k[6:-6]
+                p_counts.append(f"{plabel}:{v}")
+        p_str = ", ".join(p_counts)
+        
+        lines.append(f"{name:<30} {status:<10} {count:<10} {flags:<10} {p_str}")
 
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def _write_summary_csv(path: Path, rows: list[dict[str, Any]]) -> None:
+def _write_summary_csv(path: Path, rows: list[dict[str, Any]], plate_cols: list[str] | None = None) -> None:
     import csv
 
     if not rows:
         path.write_text("# no images processed\n", encoding="utf-8")
         return
-    fieldnames: list[str] = []
+    
+    # Standard columns
+    fieldnames = ["input", "stem", "status", "colony_count"]
+    
+    # Add plate columns in fixed order if provided
+    if plate_cols:
+        for pc in plate_cols:
+            if pc not in fieldnames:
+                fieldnames.append(pc)
+    
+    # Add any other columns found in the rows (flags, etc.)
     for row in rows:
         for k in row:
             if k not in fieldnames:
                 fieldnames.append(k)
+                
     with path.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()

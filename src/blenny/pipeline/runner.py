@@ -75,11 +75,13 @@ class Pipeline:
         self,
         data: ImageData | str | Path | None = None,
         *,
+        output_dir: str | Path | None = None,
         debug_dir: str | Path | None = None,
         progress_callback: Callable[[int, int, str], None] | None = None,
     ) -> ImageData:
         """Run the pipeline. Accepts an `ImageData`, a source path/string, or nothing.
 
+        If ``output_dir`` is provided, it is stored in metadata for exporters.
         If ``debug_dir`` is provided, intermediate images and masks are saved
         after each step into that directory.
 
@@ -87,6 +89,9 @@ class Pipeline:
         ``(step_index, total_steps, step_name)``.
         """
         ctx = self._coerce_input(data)
+        if output_dir is not None:
+            ctx.metadata["output_dir"] = str(output_dir)
+        
         dwriter = None
         if debug_dir is not None:
             from blenny.pipeline.debug import DebugWriter

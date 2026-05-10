@@ -73,7 +73,22 @@ class AnnotatedImageExporter(Exporter):
         if im is None:
             return
 
-        path = Path(self.params.output_path)  # type: ignore[attr-defined]
+        # Prepare variables for path substitution
+        variables = {
+            "stem": data.metadata.get("stem", "image"),
+            "input": data.source or "unknown",
+            "output_dir": data.metadata.get("output_dir", "."),
+            "plate_label": data.metadata.get("plate_label", "default"),
+        }
+
+        # We don't use format_map(variables) here because the sub-pipeline
+        # might introduce new variables (like {plate_label}) that the global
+        # resolver doesn't know about. We'll handle substitution in the module.
+        sub_image_path = self.params.output_path  # type: ignore[attr-defined]
+        for k, v in variables.items():
+            sub_image_path = sub_image_path.replace(f"{{{k}}}", str(v))
+
+        path = Path(sub_image_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         im.save(path)
 

@@ -18,7 +18,17 @@ class SummaryExporter(Exporter):
         """Where to write the log file (e.g. "{output_dir}/{stem}/log.txt")."""
 
     def export(self, data: ImageData) -> None:
-        path = Path(self.params.output_path)
+        variables = {
+            "stem": data.metadata.get("stem", "image"),
+            "input": data.source or "unknown",
+            "output_dir": data.metadata.get("output_dir", "."),
+            "plate_label": data.metadata.get("plate_label", "default"),
+        }
+        sub_path = self.params.output_path
+        for k, v in variables.items():
+            sub_path = sub_path.replace(f"{{{k}}}", str(v))
+
+        path = Path(sub_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         text = self.generate_text(data)
         path.write_text(text, encoding="utf-8")
@@ -26,6 +36,9 @@ class SummaryExporter(Exporter):
     def generate_text(self, data: ImageData) -> str:
         """Generate the human-readable summary text."""
         m = data.metadata
+        plate_label = m.get("plate_label", "")
+        label_header = f"Plate Label:      {plate_label}\n" if plate_label else ""
+        
         # We only want to summarize non-artifact colonies in the main stats,
         # but the table at the bottom will show everything.
         colonies = [r for r in data.measurements if not r.get("is_artifact", False)]
@@ -35,6 +48,7 @@ class SummaryExporter(Exporter):
         lines = [
             "=== Blenny Processing Log ===",
             f"Source Image:     {data.source}",
+            label_header.strip(),
             f"Analysis Status:  {'SUCCESS' if not has_warnings else 'COMPLETED WITH WARNINGS'}",
             f"Timestamp:        {m.get('run_at', 'N/A')}",
             "",
@@ -44,6 +58,8 @@ class SummaryExporter(Exporter):
             "",
             "--- Size Distribution of Counted Colonies (pixels) ---",
         ]
+        # Remove empty strings from list if plate_label was missing
+        lines = [l for l in lines if l]
 
         if areas:
             lines.extend(
@@ -71,13 +87,14 @@ class SummaryExporter(Exporter):
         if data.measurements:
             lines.extend(["", "--- Per-Colony Measurements ---"])
             # Header
-            header = f"{'ID':<4} {'X':>7} {'Y':>7} {'Area':>8} {'R':>5} {'G':>5} {'B':>5} {'H':>5} {'S':>5} {'V':>5} {'Type':<10}"
+            header = f"{'Plate':<10} {'ID':<4} {'X':>7} {'Y':>7} {'Area':>8} {'R':>5} {'G':>5} {'B':>5} {'H':>5} {'S':>5} {'V':>5} {'Type':<10}"
             lines.append(header)
             lines.append("-" * len(header))
 
             # Show colonies first, then artifacts. Measurements are already
             # re-labeled and re-ordered in classify_interior / filter_by_id.
             for r in data.measurements:
+                plabel = str(r.get("plate_label", plate_label))[:10]
                 cid = str(r.get("label", "?"))
                 x = f"{float(r.get('centroid_x', 0)):.1f}"
                 y = f"{float(r.get('centroid_y', 0)):.1f}"
@@ -96,7 +113,7 @@ class SummaryExporter(Exporter):
                     ctype = f"Merged(x{r['colony_count_estimate']})"
 
                 lines.append(
-                    f"{cid:<4} {x:>7} {y:>7} {area:>8} "
+                    f"{plabel:<10} {cid:<4} {x:>7} {y:>7} {area:>8} "
                     f"{rgb_hsv[0]:>5} {rgb_hsv[1]:>5} {rgb_hsv[2]:>5} "
                     f"{rgb_hsv[3]:>5} {rgb_hsv[4]:>5} {rgb_hsv[5]:>5} "
                     f"{ctype:<10}"

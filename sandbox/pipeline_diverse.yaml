@@ -1,0 +1,24 @@
+steps:
+  - name: "load_image"
+  
+  - name: "detect_multi_plate"
+    params:
+      grid: [2, 3]
+      min_confidence_score: 0.1
+      radius_expand_frac: 0.02
+      margin_frac: 0.02
+      
+  - name: "sub_pipeline"
+    params:
+      steps:
+        - name: "yolo_detector"
+          params:
+            conf_threshold: 0.15
+        - name: "measure_colonies"
+        - name: "export_annotated"
+          params:
+            output_path: "{output_dir}/{stem}/{stem}_{plate_label}_annotated.png"
+        
+  - name: "export_csv"
+    params:
+      output_path: "{output_dir}/{stem}/{stem}_results.csv"

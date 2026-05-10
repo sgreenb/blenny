@@ -36,8 +36,11 @@ class YoloDetector(Segmenter):
         iou_threshold: float = 0.8
         """IOU threshold for Non-Maximum Suppression (NMS)."""
 
-        imgsz: int = 1280
-        """Image size for YOLO inference."""
+        imgsz: int = 3200
+        """Image size for YOLO inference. Higher values help detect small colonies on large scans."""
+
+        max_det: int = 3000
+        """Maximum number of detections per image."""
 
         refine_mask: bool = True
         """If True, use Otsu thresholding within each box to refine the colony shape."""
@@ -60,13 +63,22 @@ class YoloDetector(Segmenter):
         # Load model (cached by ultralytics)
         model = YOLO(self.params.model_path)  # type: ignore[attr-defined]
 
+        # Determine inference size: never upscale beyond the input image size
+        h, w = image.shape[:2]
+        max_dim = max(h, w)
+        inference_imgsz = self.params.imgsz # type: ignore[attr-defined]
+        
+        if inference_imgsz > max_dim:
+            # Round up to nearest multiple of 32 for YOLO architecture
+            inference_imgsz = ((max_dim + 31) // 32) * 32
+
         # Perform inference
         results = model.predict(
             image,
-            imgsz=self.params.imgsz,  # type: ignore[attr-defined]
+            imgsz=inference_imgsz,
             conf=self.params.conf_threshold,  # type: ignore[attr-defined]
             iou=self.params.iou_threshold,  # type: ignore[attr-defined]
-            max_det=1000,
+            max_det=self.params.max_det,  # type: ignore[attr-defined]
             verbose=False,
         )
 
@@ -135,6 +147,15 @@ class YoloDetector(Segmenter):
 
                     # Combine Otsu and circular mask
                     refined = cv2.bitwise_and(thresh, thresh, mask=circ_mask)
+
+                    # --- SAFETY CHECK FOR SMALL COLONIES ---
+                    # If Otsu resulted in a tiny mask (less than 5% of the box), 
+                    # it might have failed due to low contrast. In this case, 
+                    # we fall back to the central ellipse to avoid losing the colony.
+                    if np.sum(refined > 0) < (h_c * w_c * 0.05):
+                        cv2.ellipse(
+                            refined, (w_c // 2, h_c // 2), (w_c // 2, h_c // 2), 0, 0, 360, 255, -1
+                        )
 
                     # Apply to global label mask
                     labels[y1:y2, x1:x2][refined > 0] = label_id

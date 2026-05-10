@@ -185,7 +185,7 @@ with st.sidebar:
         min_ppm_default = 5
         min_circ_default = 0.0
         max_dimension_default = 1280
-        resize_default = True
+        resize_default = False
         margin_default = 0.02
 
     if repro_file:
@@ -234,8 +234,155 @@ with st.sidebar:
 
     st.divider()
 
-    # 3. Tuning Parameters
-    st.header("3. Tuning")
+    # 3. Plate Area & Masking
+    st.header("3. Plate Area & Masking")
+
+    # Tool labels for the radio button
+    selected_tool_label = st.radio(
+        "Select Drawing Tool",
+        options=["View", "Polygon Plate Area", "Exclusion Mask"],
+        index=0,
+        horizontal=True,
+        key="active_drawing_tool",
+        help="View: Preview image and overlays. Plate Area: Define the circular/polygonal analysis area. Exclusion Mask: Paint areas to ignore.",
+    )
+
+    is_plate_tool = selected_tool_label == "Polygon Plate Area"
+    current_mode = st.session_state.get("manual_plate_mode", "Auto")
+
+    if is_plate_tool and current_mode != "Manual Shape":
+        st.session_state["manual_plate_mode"] = "Manual Shape"
+
+    def on_mode_change():
+        new_mode = st.session_state["manual_plate_mode"]
+        if new_mode == "Auto":
+            if os.path.exists("gui_plate_batch_mask.png"):
+                os.remove("gui_plate_batch_mask.png")
+            if st.session_state.get("active_drawing_tool") == "Polygon Plate Area":
+                st.session_state["active_drawing_tool"] = "View"
+        st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
+
+    plate_mode = st.radio(
+        "Plate Detection Mode",
+        ["Auto", "Multi-Plate Grid", "Manual Circle", "Manual Shape"],
+        key="manual_plate_mode",
+        on_change=on_mode_change,
+        horizontal=False,
+    )
+
+    if plate_mode == "Multi-Plate Grid":
+        st.info("Specify the arrangement and labels for your plates.")
+        c_g1, c_g2 = st.columns(2)
+        def on_grid_change():
+            # Clear previous detection preview if grid changes
+            st.session_state.pop("preview_rois", None)
+            
+        grid_rows = c_g1.number_input("Rows", min_value=1, max_value=10, value=2, on_change=on_grid_change)
+        grid_cols = c_g2.number_input("Columns", min_value=1, max_value=10, value=3, on_change=on_grid_change)
+
+        if "grid_labels" not in st.session_state or len(st.session_state["grid_labels"]) != grid_rows or len(st.session_state["grid_labels"][0]) != grid_cols:
+            new_labels = []
+            for r in range(grid_rows):
+                row_labels = []
+                for c in range(grid_cols):
+                    try:
+                        old_val = st.session_state["grid_labels"][r][c]
+                        row_labels.append(old_val)
+                    except (KeyError, IndexError):
+                        prefix = chr(65 + r) if r < 26 else str(r)
+                        row_labels.append(f"{prefix}{c+1}")
+                new_labels.append(row_labels)
+            st.session_state["grid_labels"] = new_labels
+
+        c_l1, c_l2 = st.columns(2)
+        with c_l1.expander("Edit Plate Labels"):
+            for r in range(grid_rows):
+                cols_ui = st.columns(grid_cols)
+                for c in range(grid_cols):
+                    st.session_state["grid_labels"][r][c] = cols_ui[c].text_input(
+                        f"Label {r},{c}", 
+                        value=st.session_state["grid_labels"][r][c],
+                        key=f"label_input_{r}_{c}",
+                        label_visibility="collapsed"
+                    )
+        
+        if c_l2.button("Reset Labels", help="Reset all labels to default (A1, B1...)"):
+            st.session_state.pop("grid_labels", None)
+            st.rerun()
+
+        if st.button("Preview Plate Detection", use_container_width=True, help="Find plates in the current image to verify the grid setup."):
+            if input_paths:
+                from blenny.modules.detect_multi_plate import MultiPlateDetector
+                from blenny.pipeline.context import ImageData
+                from blenny.modules.load_image import ImageFileLoader
+                
+                with st.spinner("Finding plates..."):
+                    # Quick load and detect
+                    detect_dim = 1000
+                    loader = ImageFileLoader(max_dimension=detect_dim)
+                    data = ImageData(source=str(input_paths[0]))
+                    data = loader.run(data)
+                    
+                    detector = MultiPlateDetector(grid=[grid_rows, grid_cols], labels=st.session_state["grid_labels"], min_confidence_score=0.1)
+                    data = detector.run(data)
+                    
+                    # Store scaling factor to map back to original image
+                    h_orig, w_orig = bg_image.height, bg_image.width
+                    h_work, w_work = data.image.shape[:2]
+                    
+                    st.session_state["preview_rois"] = data.metadata.get("rois", [])
+                    st.session_state["preview_scale"] = (h_orig / h_work, w_orig / w_work)
+                    st.session_state["preview_flags"] = data.quality_flags
+                    st.success(f"Found {len(st.session_state['preview_rois'])} plates.")
+
+    manual_cy, manual_cx, manual_r = None, None, None
+    if plate_mode == "Manual Circle":
+        st.info("Tune center and radius with the controls below.")
+        def_cy, def_cx, def_r = 1000, 1000, 800
+        if input_files and len(input_files) == 1:
+            try:
+                img_peek = Image.open(input_files[0])
+                w, h = img_peek.size
+                def_cx, def_cy = w // 2, h // 2
+                def_r = int(min(w, h) * 0.4)
+            except Exception:
+                pass
+        manual_cy = compact_control(
+            "Center Y", "manual_cy", 0, 4000, def_cy, 1, "Y coordinate of the plate center."
+        )
+        manual_cx = compact_control(
+            "Center X", "manual_cx", 0, 4000, def_cx, 1, "X coordinate of the plate center."
+        )
+        manual_r = compact_control(
+            "Radius", "manual_r", 0, 2000, def_r, 1, "Radius of the plate in pixels."
+        )
+
+    active_tool = {
+        "View": "View",
+        "Polygon Plate Area": "Define Plate Area",
+        "Exclusion Mask": "Paint Exclusion Mask",
+    }[selected_tool_label]
+
+    brush_size = st.slider(
+        "Brush Size", 1, 100, 20, disabled=(active_tool != "Paint Exclusion Mask"), key="mask_brush_size"
+    )
+
+    c_cl1, c_cl2 = st.columns(2)
+    if c_cl1.button("Clear Plate", help="Reset the manual shape plate area"):
+        if os.path.exists("gui_plate_batch_mask.png"):
+            os.remove("gui_plate_batch_mask.png")
+        st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
+        st.rerun()
+    if c_cl2.button("Clear Mask", help="Reset the exclusion mask"):
+        if os.path.exists("gui_mask_batch_exclusion.png"):
+            os.remove("gui_mask_batch_exclusion.png")
+        st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
+        st.rerun()
+
+    st.divider()
+
+    # 4. Tuning Parameters
+    st.header("4. Tuning")
 
     # Image resize
     if "resize_enabled" not in st.session_state:
@@ -244,47 +391,45 @@ with st.sidebar:
         st.session_state["max_dimension"] = max_dimension_default
 
     resize_enabled = st.checkbox(
-        "Resize images before analysis",
+        "Resize scan for detection",
         key="resize_enabled",
-        help="Downscale each image so its longest side is at most the value below. "
-        "Preserves aspect ratio. Useful for speeding up large phone photos.",
+        help="Downscale the entire image before finding plates. Speeds up detection on large scanner files. "
+        "Analysis will still use the full-resolution original unless 'Resize sub-plates' is also checked.",
     )
 
-    # When the checkbox is first ticked, auto-populate max_dimension with the
-    # actual longest side of the current image so the user has a meaningful
-    # starting point rather than a hardcoded default.
-    _prev_resize = st.session_state.get("_prev_resize_enabled", False)
-    if resize_enabled and not _prev_resize:
-        _src = None
-        if input_files:
-            _src = input_files[0]
-        elif input_folder and Path(input_folder).is_dir():
-            from blenny.modules.load_image import IMAGE_EXTENSIONS
-
-            _candidates = sorted(
-                p for p in Path(input_folder).iterdir() if p.suffix.lower() in IMAGE_EXTENSIONS
-            )
-            if _candidates:
-                _src = _candidates[0]
-        if _src is not None:
-            try:
-                _img = Image.open(_src)
-                st.session_state["max_dimension"] = max(_img.size)
-            except Exception:
-                pass
-    st.session_state["_prev_resize_enabled"] = resize_enabled
-
     max_dimension = st.number_input(
-        "Max dimension (px)",
+        "Max scan dimension (px)",
         min_value=100,
         max_value=10000,
         step=100,
         key="max_dimension",
         disabled=not resize_enabled,
-        help="Longest side of the image will be scaled down to this many pixels. "
-        "Non-square images are scaled proportionally — no stretching.",
-        label_visibility="visible",
+        help="Longest side of the full image will be scaled to this many pixels for detection.",
     )
+
+    if plate_mode == "Multi-Plate Grid":
+        if "resize_sub_enabled" not in st.session_state:
+            st.session_state["resize_sub_enabled"] = False
+        if "max_sub_dimension" not in st.session_state:
+            st.session_state["max_sub_dimension"] = 1280
+
+        resize_sub_enabled = st.checkbox(
+            "Resize sub-plates for analysis",
+            key="resize_sub_enabled",
+            help="Downscale each individual plate before counting colonies. Recommended for YOLO (e.g. 1280px) to save RAM and improve speed.",
+        )
+        max_sub_dimension = st.number_input(
+            "Max sub-plate dimension (px)",
+            min_value=100,
+            max_value=4000,
+            step=100,
+            key="max_sub_dimension",
+            disabled=not resize_sub_enabled,
+            help="Longest side of each individual plate crop will be scaled to this many pixels for colony counting. 1280px is optimal for YOLO.",
+        )
+    else:
+        resize_sub_enabled = False
+        max_sub_dimension = None
 
     st.divider()
 
@@ -432,119 +577,16 @@ with st.sidebar:
         fallback_ecc = 1.0
         enable_multiplicity = False
 
-    st.divider()
-
-    # 4. Plate Area & Masking
-    st.header("4. Plate Area & Masking")
-
-    # Tool labels for the radio button
-    # We define this BEFORE the mode radio to determine if we should force a mode.
-    # Note: We use a key for the tool so we can query it safely.
-    selected_tool_label = st.radio(
-        "Select Drawing Tool",
-        options=["View", "Polygon Plate Area", "Exclusion Mask"],
-        index=0,
-        horizontal=True,
-        key="active_drawing_tool",
-        help="View: Preview image and overlays. Plate Area: Define the circular/polygonal analysis area. Exclusion Mask: Paint areas to ignore.",
-    )
-
-    # Determine if we should force "Manual Shape" because the Plate tool is active.
-    # We do this logic BEFORE the mode radio widget is created to avoid the crash.
-    is_plate_tool = selected_tool_label == "Polygon Plate Area"
-    current_mode = st.session_state.get("manual_plate_mode", "Auto")
-
-    if is_plate_tool and current_mode != "Manual Shape":
-        st.session_state["manual_plate_mode"] = "Manual Shape"
-        # No rerun needed yet, we haven't drawn the radio button below.
-
-    # If the user switches mode to "Auto", we should probably reset the tool to "View"
-    # to avoid confusion, and we definitely want to clear the custom mask.
-    # We use a callback on the radio to handle these cleanups.
-    def on_mode_change():
-        new_mode = st.session_state["manual_plate_mode"]
-        if new_mode == "Auto":
-            # Clear manual shape mask file if it exists
-            if os.path.exists("gui_plate_batch_mask.png"):
-                os.remove("gui_plate_batch_mask.png")
-            # Switch tool back to View if it was on Plate
-            if st.session_state.get("active_drawing_tool") == "Polygon Plate Area":
-                st.session_state["active_drawing_tool"] = "View"
-        st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
-
-    # Mode Selector for the analysis engine
-    plate_mode = st.radio(
-        "Plate Detection Mode",
-        ["Auto", "Manual Circle", "Manual Shape"],
-        key="manual_plate_mode",
-        on_change=on_mode_change,
-        horizontal=False,
-    )
-
-    manual_cy, manual_cx, manual_r = None, None, None
-    if plate_mode == "Manual Circle":
-        st.info("Tune center and radius with the controls below.")
-        def_cy, def_cx, def_r = 1000, 1000, 800
-        if input_files and len(input_files) == 1:
-            try:
-                img_peek = Image.open(input_files[0])
-                w, h = img_peek.size
-                def_cx, def_cy = w // 2, h // 2
-                def_r = int(min(w, h) * 0.4)
-            except Exception:
-                pass
-        manual_cy = compact_control(
-            "Center Y", "manual_cy", 0, 4000, def_cy, 1, "Y coordinate of the plate center."
-        )
-        manual_cx = compact_control(
-            "Center X", "manual_cx", 0, 4000, def_cx, 1, "X coordinate of the plate center."
-        )
-        manual_r = compact_control(
-            "Radius", "manual_r", 0, 2000, def_r, 1, "Radius of the plate in pixels."
-        )
-
-    # Map label back to internal tool name
-    active_tool = {
-        "View": "View",
-        "Polygon Plate Area": "Define Plate Area",
-        "Exclusion Mask": "Paint Exclusion Mask",
-    }[selected_tool_label]
-
-    # Show/Hide relevant controls based on tool
-    enable_mask = active_tool == "Paint Exclusion Mask"
-
-    brush_size = st.slider(
-        "Brush Size", 1, 100, 20, disabled=(active_tool != "Paint Exclusion Mask")
-    )
-
-    # Cleanup buttons
-    c_cl1, c_cl2 = st.columns(2)
-    if c_cl1.button("Clear Plate", help="Reset the manual shape plate area"):
-        if os.path.exists("gui_plate_batch_mask.png"):
-            os.remove("gui_plate_batch_mask.png")
-        st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
-        st.rerun()
-    if c_cl2.button("Clear Mask", help="Reset the exclusion mask"):
-        if os.path.exists("gui_mask_batch_exclusion.png"):
-            os.remove("gui_mask_batch_exclusion.png")
-        st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
-        st.rerun()
-
-    # Track mode changes for state cleanup (existing logic)
-    if (
-        "prev_plate_mode" in st.session_state
-        and plate_mode != "Manual Shape"
-        and st.session_state["prev_plate_mode"] == "Manual Shape"
-        and os.path.exists("gui_plate_batch_mask.png")
-    ):
-        os.remove("gui_plate_batch_mask.png")
-        st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
-    st.session_state["prev_plate_mode"] = plate_mode
-
     enable_debug = st.checkbox(
         "Save debug step images",
         value=False,
         help="Write intermediate images to gui_debug. Slower.",
+    )
+
+    enable_interactive = st.checkbox(
+        "Enable Interactive Review",
+        value=True,
+        help="Store results in memory for viewing and editing in the GUI. Uncheck for large batches to save RAM.",
     )
 
     # Initialize session state for manual interventions
@@ -620,6 +662,68 @@ if input_source:
 
         # --- Visual Context for Canvas ---
         canvas_bg_img = bg_image.copy()
+
+        if plate_mode == "Multi-Plate Grid":
+            from PIL import ImageDraw, ImageFont
+
+            draw = ImageDraw.Draw(canvas_bg_img)
+            rows = grid_rows
+            cols = grid_cols
+
+            # Draw Grid Lines
+            h, w = canvas_bg_img.height, canvas_bg_img.width
+            cell_h, cell_w = h / rows, w / cols
+
+            line_color = (0, 255, 255)  # Cyan
+            line_w = max(2, int(4 / scale))
+
+            for r in range(1, rows):
+                y = int(r * cell_h)
+                draw.line([(0, y), (w, y)], fill=line_color, width=line_w)
+            for c in range(1, cols):
+                x = int(c * cell_w)
+                draw.line([(x, 0), (x, h)], fill=line_color, width=line_w)
+
+            # Draw Expected or Detected Plate Circles
+            font_size = int(min(cell_h, cell_w) * 0.2)
+            try:
+                font = ImageFont.truetype("arial.ttf", font_size)
+            except Exception:
+                font = ImageFont.load_default()
+
+            rois = st.session_state.get("preview_rois", [])
+            scale_preview = st.session_state.get("preview_scale", (1.0, 1.0))
+
+            for r in range(rows):
+                for c in range(cols):
+                    # Default: Expected center
+                    cy = int((r + 0.5) * cell_h)
+                    cx = int((c + 0.5) * cell_w)
+                    rad = int(min(cell_h, cell_w) * 0.4)
+                    
+                    label = st.session_state["grid_labels"][r][c]
+                    color = (0, 120, 255) # Blue (Expected)
+                    
+                    # Check if we have a detected ROI for this label
+                    for roi in rois:
+                        if roi["label"] == label:
+                            # Use detected coordinates (scaled to current bg_image size)
+                            y0, x0, y1, x1 = roi["bbox"]
+                            local_cy, local_cx = roi["center_local"]
+                            
+                            # Map from detection space back to original space
+                            cy = int((y0 + local_cy) * scale_preview[0])
+                            cx = int((x0 + local_cx) * scale_preview[1])
+                            rad = int(roi["radius"] * max(scale_preview))
+                            color = (0, 255, 0) # Green (Detected)
+                            break
+
+                    draw.ellipse(
+                        [cx - rad, cy - rad, cx + rad, cy + rad], outline=color, width=line_w
+                    )
+                    # Draw label in center
+                    draw.text((cx, cy), label, fill=(255, 255, 0), font=font, anchor="mm")
+
         if plate_mode == "Manual Circle" and manual_cy is not None:
             from PIL import ImageDraw
 
@@ -910,6 +1014,69 @@ with col2:
                 overrides["detect_plate"].update(
                     {"crop": False, "force_mask_path": str(manual_shape_path)}
                 )
+
+            # --- Handle Multi-Plate Mode Injection ---
+            if plate_mode == "Multi-Plate Grid":
+                # Multi-plate is a bit different: we replace detect_plate with detect_multi_plate
+                # and wrap the core analysis in a sub_pipeline.
+
+                # 1. Build the sub-pipeline steps
+                # We extract the 'core' steps: detection/segmentation + measurement
+                core_step_names = [
+                    "threshold_segment",
+                    "yolo_detector",
+                    "measure_colonies",
+                    "classify_by_interior",
+                    "estimate_multiplicity",
+                ]
+                sub_steps = []
+                for s in raw_steps:
+                    if s["name"] in core_step_names:
+                        # Apply overrides to sub-steps too
+                        if s["name"] in overrides:
+                            s.setdefault("params", {}).update(overrides[s["name"]])
+                        sub_steps.append(s)
+
+                # Add individual exporters to sub-pipeline so they resolve {plate_label}
+                sub_steps.append(
+                    {
+                        "name": "export_annotated",
+                        "params": {
+                            "output_path": "{output_dir}/{stem}/{stem}_{plate_label}_annotated.png"
+                        },
+                    }
+                )
+                sub_steps.append(
+                    {
+                        "name": "export_csv",
+                        "params": {"output_path": "{output_dir}/{stem}/{stem}_results.csv"},
+                    }
+                )
+                sub_path_txt = "{output_dir}/{stem}/{stem}_summary.txt"
+                sub_steps.append({"name": "export_summary", "params": {"output_path": sub_path_txt}})
+
+                # 2. Reconstruct raw_steps
+                new_main_steps = [{"name": "load_image", "params": overrides["load_image"]}]
+                new_main_steps.append({
+                    "name": "detect_multi_plate",
+                    "params": {
+                        "grid": [grid_rows, grid_cols],
+                        "labels": st.session_state["grid_labels"],
+                        "min_confidence_score": 0.1,  # More lenient for GUI preview
+                        "radius_expand_frac": 0.02,
+                        "margin_frac": margin
+                    }
+                })
+                sub_pipeline_params = {"steps": sub_steps}
+                if resize_sub_enabled:
+                    sub_pipeline_params["max_subplate_dimension"] = int(max_sub_dimension)
+                
+                new_main_steps.append({
+                    "name": "sub_pipeline",
+                    "params": sub_pipeline_params
+                })
+                raw_steps = new_main_steps
+
             if mask_path and mask_path.exists():
                 overrides["apply_exclusion_mask"] = {"mask_path": str(mask_path)}
 
@@ -929,10 +1096,19 @@ with col2:
                 def gui_progress(current, total, name):
                     log_message(f"  [{current}/{total}] {name}...")
 
-                data = pipe.run(img_path, debug_dir=img_debug_dir, progress_callback=gui_progress)
+                data = pipe.run(img_path, output_dir=output_dir, debug_dir=img_debug_dir, progress_callback=gui_progress)
 
-                st.session_state["all_results"][img_path.stem] = data
-                st.session_state["result_stems"].append(img_path.stem)
+                if enable_interactive:
+                    # If this was a multi-plate scan, we flatten the results for the GUI
+                    if "multi_plate_results" in data.metadata:
+                        for sub_res in data.metadata["multi_plate_results"]:
+                            plabel = sub_res.metadata.get("plate_label", "unknown")
+                            display_name = f"{img_path.stem} [{plabel}]"
+                            st.session_state["all_results"][display_name] = sub_res
+                            st.session_state["result_stems"].append(display_name)
+                    else:
+                        st.session_state["all_results"][img_path.stem] = data
+                        st.session_state["result_stems"].append(img_path.stem)
 
             # Global completion message
             total_time = sum(
@@ -963,14 +1139,28 @@ if st.session_state.get("all_results"):
 
         curr_idx = st.session_state.get("current_view_idx", 0)
 
-        def update_idx(new_val):
-            st.session_state["current_view_idx"] = new_val
-            # Sync the selectbox key immediately to prevent it being sticky
-            st.session_state["stem_selector"] = stems[new_val]
+        # Update index callback for selectbox
+        def on_stem_change():
+            new_stem = st.session_state["stem_selector"]
+            st.session_state["current_view_idx"] = stems.index(new_stem)
 
-        if c_nav1.button("← Previous", disabled=(curr_idx == 0), use_container_width=True):
-            update_idx(curr_idx - 1)
-            st.rerun()
+        # Navigation functions for buttons
+        def go_prev():
+            new_idx = st.session_state["current_view_idx"] - 1
+            st.session_state["current_view_idx"] = new_idx
+            st.session_state["stem_selector"] = stems[new_idx]
+
+        def go_next():
+            new_idx = st.session_state["current_view_idx"] + 1
+            st.session_state["current_view_idx"] = new_idx
+            st.session_state["stem_selector"] = stems[new_idx]
+
+        c_nav1.button(
+            "← Previous", 
+            disabled=(curr_idx == 0), 
+            use_container_width=True,
+            on_click=go_prev
+        )
 
         # Dropdown for direct selection
         selected_stem = c_nav2.selectbox(
@@ -979,15 +1169,15 @@ if st.session_state.get("all_results"):
             index=curr_idx,
             label_visibility="collapsed",
             key="stem_selector",
+            on_change=on_stem_change
         )
-        # Update index if dropdown changed manually
-        if selected_stem != stems[curr_idx]:
-            st.session_state["current_view_idx"] = stems.index(selected_stem)
-            st.rerun()
 
-        if c_nav3.button("Next →", disabled=(curr_idx == len(stems) - 1), use_container_width=True):
-            update_idx(curr_idx + 1)
-            st.rerun()
+        c_nav3.button(
+            "Next →", 
+            disabled=(curr_idx == len(stems) - 1), 
+            use_container_width=True,
+            on_click=go_next
+        )
 
         # Get data for CURRENT selection
         stem = stems[st.session_state["current_view_idx"]]
@@ -1016,11 +1206,14 @@ if st.session_state.get("all_results"):
 
         # Live render
         img = annotator.render(data)
-        st.image(
-            img,
-            caption=f"{stem} — Reviewed Colonies: {data.metadata['colony_count']}",
-            width="stretch",
-        )
+        if img is not None:
+            st.image(
+                img,
+                caption=f"{stem} — Reviewed Colonies: {data.metadata['colony_count']}",
+                width="stretch",
+            )
+        else:
+            st.warning("Failed to render annotated image.")
 
         # --- Download Section ---
         c_dl1, c_dl2, c_dl3 = st.columns(3)
@@ -1038,30 +1231,38 @@ if st.session_state.get("all_results"):
             mime="text/plain",
             use_container_width=True,
         )
-        import io
+        if img is not None:
+            import io
 
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        c_dl3.download_button(
-            "Download Image",
-            buf.getvalue(),
-            file_name=f"{stem}_annotated.png",
-            mime="image/png",
-            use_container_width=True,
-        )
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            c_dl3.download_button(
+                "Download Image",
+                buf.getvalue(),
+                file_name=f"{stem}_annotated.png",
+                mime="image/png",
+                use_container_width=True,
+            )
 
         st.write("Check boxes to mark artifacts. Counts update instantly.")
 
         display_cols = [
+            "plate_label",
             "label",
             "is_artifact",
             "is_manual_review",
             "centroid_x",
             "centroid_y",
+            "centroid_x_global",
+            "centroid_y_global",
             "area_px",
             "area_ppm",
             "Type",
         ]
+        
+        # Filter display columns based on what's actually in the data
+        display_cols = [c for c in display_cols if c in df.columns]
+
         if "is_manual_review" not in df.columns:
             df["is_manual_review"] = False
         if "Type" not in df.columns:

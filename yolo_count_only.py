@@ -46,6 +46,9 @@ def run_counter(input_path, model_path, output_dir):
         image_files = []
         for ext in extensions:
             image_files.extend(list(input_p.glob(ext)))
+        
+        # Remove duplicates (happens on case-insensitive filesystems)
+        image_files = sorted(list(set(image_files)))
     else:
         image_files = [input_p]
 

@@ -20,7 +20,17 @@ class CSVExporter(Exporter):
         """If True, prepend a ``# provenance:`` comment line listing the steps run."""
 
     def export(self, data: ImageData) -> None:
-        path = Path(self.params.output_path)  # type: ignore[attr-defined]
+        variables = {
+            "stem": data.metadata.get("stem", "image"),
+            "input": data.source or "unknown",
+            "output_dir": data.metadata.get("output_dir", "."),
+            "plate_label": data.metadata.get("plate_label", "default"),
+        }
+        sub_path = self.params.output_path
+        for k, v in variables.items():
+            sub_path = sub_path.replace(f"{{{k}}}", str(v))
+
+        path = Path(sub_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w", newline="", encoding="utf-8") as fh:
             fh.write(self.generate_csv(data))
@@ -40,9 +50,12 @@ class CSVExporter(Exporter):
         # Define a nice column order for researchers.
         # Any remaining columns found in the data will follow these.
         preferred_order = [
+            "plate_label",
             "label",
             "centroid_x",
             "centroid_y",
+            "centroid_x_global",
+            "centroid_y_global",
             "area_px",
             "circularity",
             "solidity",
