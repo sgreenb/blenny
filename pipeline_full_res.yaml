@@ -8,8 +8,7 @@
 steps:
   - name: load_image
     params:
-      # Native resolution is used by default for maximum precision.
-      # Large scans may be slow; set to 2000-3000 to speed up if needed.
+      # YOLO models are typically trained on 1280px images.
       max_dimension: null
 
   - name: detect_plate
@@ -28,8 +27,7 @@ steps:
       model_path: "models/colony_model.pt"
       conf_threshold: 0.15
       iou_threshold: 0.8
-      imgsz: 3200
-      max_det: 3000
+      imgsz: 1280
       refine_mask: true
       output_key: "objects"
 

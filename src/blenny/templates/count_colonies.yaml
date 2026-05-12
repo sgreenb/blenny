@@ -19,8 +19,7 @@ steps:
 
   - name: detect_plate
     params:
-      radius_expand_frac: 0.0
-      margin_frac: 0.04
+      radius_scale: 1.0
       crop: false
 
   - name: apply_exclusion_mask

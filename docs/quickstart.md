@@ -184,23 +184,24 @@ blenny modules --json
 ### Common adjustments
 
 **A ring of false "colonies" appears along the plate rim.**
-The plate's bright reflective rim is being detected. Increase the rim
-exclusion margin:
+The plate's bright reflective rim is being detected. Decrease the plate
+radius scale:
 
 ```yaml
 - name: detect_plate
   params:
-    margin_frac: 0.12     # default 0.08; try 0.10–0.15 for wide reflective rims
+    radius_scale: 0.92     # default 1.0; try 0.90–0.95 for wide reflective rims
 ```
 
 **Colonies near the edge of the plate are missed.**
 The photo was taken at a slight angle so the plate looks elliptical, and
-the circle fitter chose a circle smaller than the actual plate:
+the circle fitter chose a circle smaller than the actual plate. Increase
+the radius scale:
 
 ```yaml
 - name: detect_plate
   params:
-    radius_expand_frac: 0.10   # default 0.05; raise for tilted shots
+    radius_scale: 1.05   # default 1.0; raise for tilted shots
 ```
 
 **Real edge colonies are being wrongly rejected as artifacts.**
@@ -255,7 +256,7 @@ You can override any parameter without editing the YAML:
 
 ```bash
 blenny run pipeline_classic.yaml -i plate.jpg -o results/ \
-  -v detect_plate.margin_frac=0.12 \
+  -v detect_plate.radius_scale=0.92 \
   -v classify_by_interior.interior_radius_frac=0.90
 ```
 
@@ -295,7 +296,7 @@ The GUI provides point-and-click access to everything above. After a run:
 4. Click **"Save Reviewed Results"** to write the final `colonies.csv` and `log.txt`.
 
 Sidebar sliders correspond to the most commonly tuned parameters:
-**Plate Rim Margin**, **Min Colony Area**, **Min Circularity**, and
+**Plate Radius Scale**, **Min Colony Area**, **Min Circularity**, and
 **Interior Radius Frac**. Sliders respect values loaded from a
 `reproducible_config.yaml` so you can restore a previous run's settings.
 
@@ -325,7 +326,7 @@ from blenny import Pipeline
 
 pipe = Pipeline.from_config([
     {"name": "load_image"},
-    {"name": "detect_plate", "params": {"margin_frac": 0.08}},
+    {"name": "detect_plate", "params": {"radius_scale": 0.95}},
     {"name": "correct_illumination"},
     {"name": "threshold_segment", "params": {"roi_mask_key": "plate"}},
     {"name": "measure_colonies"},

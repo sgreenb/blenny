@@ -9,8 +9,7 @@ steps:
   - name: "detect_multi_plate"
     params:
       grid: [2, 3]         # Change based on your scanner arrangement
-      radius_expand_frac: 0.02
-      margin_frac: 0.02
+      radius_scale: 1.0
       min_confidence_score: 0.20
 
   - name: "sub_pipeline"

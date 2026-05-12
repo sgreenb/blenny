@@ -115,6 +115,17 @@ st.markdown(
 # Find the CLI script relative to this app.py file
 cli_script = str((Path(__file__).parent.parent / "blenny-cli.py").resolve())
 
+# Paths for temporary GUI files
+GUI_TEMP_DIR = Path("gui_uploads")
+if "gui_initialized" not in st.session_state:
+    if GUI_TEMP_DIR.exists():
+        shutil.rmtree(GUI_TEMP_DIR)
+    GUI_TEMP_DIR.mkdir(exist_ok=True)
+    st.session_state["gui_initialized"] = True
+
+PLATE_MASK_PATH = GUI_TEMP_DIR / "gui_plate_batch_mask.png"
+EXCLUSION_MASK_PATH = GUI_TEMP_DIR / "gui_mask_batch_exclusion.png"
+
 # --- Sidebar: Configuration ---
 with st.sidebar:
     st.title("Blenny Control Panel")
@@ -175,7 +186,7 @@ with st.sidebar:
     )
 
     # Defaults
-    margin_default, min_ppm_default, min_circ_default = 0.04, 15, 0.7
+    radius_scale_default, min_ppm_default, min_circ_default = 1.0, 15, 0.7
     interior_radius_default = 0.85
     fallback_ecc_default = 0.55
     max_dimension_default = 2000
@@ -186,7 +197,7 @@ with st.sidebar:
         min_circ_default = 0.0
         max_dimension_default = 1280
         resize_default = False
-        margin_default = 0.02
+        radius_scale_default = 1.0
 
     if repro_file:
         try:
@@ -195,7 +206,7 @@ with st.sidebar:
             repro_data = yaml.safe_load(repro_file)
             st.success("Config loaded. Settings applied below.")
             steps = {s["name"]: s.get("params", {}) for s in repro_data.get("steps", [])}
-            margin_default = float(steps.get("detect_plate", {}).get("margin_frac", 0.04))
+            radius_scale_default = float(steps.get("detect_plate", {}).get("radius_scale", 1.0))
             min_ppm_default = int(steps.get("threshold_segment", {}).get("min_area_ppm", 15))
             min_circ_default = float(steps.get("threshold_segment", {}).get("min_circularity", 0.7))
             interior_radius_default = float(
@@ -237,6 +248,64 @@ with st.sidebar:
     # 3. Plate Area & Masking
     st.header("3. Plate Area & Masking")
 
+    # Compact Sliders with editable values and individual resets
+    def compact_control(label, key, min_val, max_val, default_val, step, help_text):
+        if key not in st.session_state:
+            st.session_state[key] = default_val
+
+        # Label Row - Attach help here so it's always visible next to the title
+        st.markdown(f"**{label}**", help=help_text)
+
+        # Control Row: [Input] [Slider] [Reset]
+        c1, c2, c3 = st.columns([1.2, 3, 0.8])
+
+        # Use on_change to sync the two widgets without lag
+        def sync_num():
+            new_val = st.session_state[f"num_{key}"]
+            st.session_state[key] = new_val
+            st.session_state[f"slide_{key}"] = new_val
+
+        def sync_slide():
+            new_val = st.session_state[f"slide_{key}"]
+            st.session_state[key] = new_val
+            st.session_state[f"num_{key}"] = new_val
+
+        # Handle individual reset BEFORE widgets are instantiated
+        if c3.button("Reset", key=f"reset_{key}", help=f"Reset {label}"):
+            st.session_state[key] = default_val
+            st.session_state[f"num_{key}"] = default_val
+            st.session_state[f"slide_{key}"] = default_val
+            st.rerun()
+
+        # Ensure sub-keys are initialized
+        if f"num_{key}" not in st.session_state:
+            st.session_state[f"num_{key}"] = st.session_state[key]
+        if f"slide_{key}" not in st.session_state:
+            st.session_state[f"slide_{key}"] = st.session_state[key]
+
+        c1.number_input(
+            label,
+            min_value=float(min_val) if isinstance(step, float) else int(min_val),
+            max_value=float(max_val) if isinstance(step, float) else int(max_val),
+            step=step,
+            key=f"num_{key}",
+            label_visibility="collapsed",
+            on_change=sync_num,
+        )
+
+        c2.slider(
+            label,
+            min_value=float(min_val) if isinstance(step, float) else int(min_val),
+            max_value=float(max_val) if isinstance(step, float) else int(max_val),
+            step=step,
+            key=f"slide_{key}",
+            label_visibility="collapsed",
+            help=help_text,
+            on_change=sync_slide,
+        )
+
+        return st.session_state[key]
+
     # Tool labels for the radio button
     # We define this BEFORE the mode radio to determine if we should force a mode.
     # Note: We use a key for the tool so we can query it safely.
@@ -265,8 +334,8 @@ with st.sidebar:
         new_mode = st.session_state["manual_plate_mode"]
         if new_mode == "Auto":
             # Clear manual shape mask file if it exists
-            if os.path.exists("gui_plate_batch_mask.png"):
-                os.remove("gui_plate_batch_mask.png")
+            if PLATE_MASK_PATH.exists():
+                PLATE_MASK_PATH.unlink()
             # Switch tool back to View if it was on Plate
             if st.session_state.get("active_drawing_tool") == "Polygon Plate Area":
                 st.session_state["active_drawing_tool"] = "View"
@@ -280,6 +349,20 @@ with st.sidebar:
         on_change=on_mode_change,
         horizontal=False,
     )
+
+    # Plate Radius Scale (available in Auto and Multi-Plate)
+    if plate_mode in ("Auto", "Multi-Plate Grid"):
+        radius_scale = compact_control(
+            "Plate Radius Scale",
+            "radius_scale",
+            0.5,
+            2.0,
+            radius_scale_default,
+            0.01,
+            "Scale the detected plate radius. Values < 1.0 add a margin (shrink); values > 1.0 expand the area (useful for tilted cameras).",
+        )
+    else:
+        radius_scale = 1.0
 
     if plate_mode == "Multi-Plate Grid":
         st.info("Specify the arrangement and labels for your plates.")
@@ -407,13 +490,13 @@ with st.sidebar:
     # Cleanup buttons
     c_cl1, c_cl2 = st.columns(2)
     if c_cl1.button("Clear Plate", help="Reset the manual shape plate area"):
-        if os.path.exists("gui_plate_batch_mask.png"):
-            os.remove("gui_plate_batch_mask.png")
+        if PLATE_MASK_PATH.exists():
+            PLATE_MASK_PATH.unlink()
         st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
         st.rerun()
     if c_cl2.button("Clear Mask", help="Reset the exclusion mask"):
-        if os.path.exists("gui_mask_batch_exclusion.png"):
-            os.remove("gui_mask_batch_exclusion.png")
+        if EXCLUSION_MASK_PATH.exists():
+            EXCLUSION_MASK_PATH.unlink()
         st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
         st.rerun()
 
@@ -422,9 +505,9 @@ with st.sidebar:
         "prev_plate_mode" in st.session_state
         and plate_mode != "Manual Shape"
         and st.session_state["prev_plate_mode"] == "Manual Shape"
-        and os.path.exists("gui_plate_batch_mask.png")
+        and PLATE_MASK_PATH.exists()
     ):
-        os.remove("gui_plate_batch_mask.png")
+        PLATE_MASK_PATH.unlink()
         st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
     st.session_state["prev_plate_mode"] = plate_mode
 
@@ -506,64 +589,6 @@ with st.sidebar:
 
     st.divider()
 
-    # Compact Sliders with editable values and individual resets
-    def compact_control(label, key, min_val, max_val, default_val, step, help_text):
-        if key not in st.session_state:
-            st.session_state[key] = default_val
-
-        # Label Row - Attach help here so it's always visible next to the title
-        st.markdown(f"**{label}**", help=help_text)
-
-        # Control Row: [Input] [Slider] [Reset]
-        c1, c2, c3 = st.columns([1.2, 3, 0.8])
-
-        # Use on_change to sync the two widgets without lag
-        def sync_num():
-            new_val = st.session_state[f"num_{key}"]
-            st.session_state[key] = new_val
-            st.session_state[f"slide_{key}"] = new_val
-
-        def sync_slide():
-            new_val = st.session_state[f"slide_{key}"]
-            st.session_state[key] = new_val
-            st.session_state[f"num_{key}"] = new_val
-
-        # Handle individual reset BEFORE widgets are instantiated
-        if c3.button("Reset", key=f"reset_{key}", help=f"Reset {label}"):
-            st.session_state[key] = default_val
-            st.session_state[f"num_{key}"] = default_val
-            st.session_state[f"slide_{key}"] = default_val
-            st.rerun()
-
-        # Ensure sub-keys are initialized
-        if f"num_{key}" not in st.session_state:
-            st.session_state[f"num_{key}"] = st.session_state[key]
-        if f"slide_{key}" not in st.session_state:
-            st.session_state[f"slide_{key}"] = st.session_state[key]
-
-        c1.number_input(
-            label,
-            min_value=float(min_val) if isinstance(step, float) else int(min_val),
-            max_value=float(max_val) if isinstance(step, float) else int(max_val),
-            step=step,
-            key=f"num_{key}",
-            label_visibility="collapsed",
-            on_change=sync_num,
-        )
-
-        c2.slider(
-            label,
-            min_value=float(min_val) if isinstance(step, float) else int(min_val),
-            max_value=float(max_val) if isinstance(step, float) else int(max_val),
-            step=step,
-            key=f"slide_{key}",
-            label_visibility="collapsed",
-            help=help_text,
-            on_change=sync_slide,
-        )
-
-        return st.session_state[key]
-
     if pipeline_mode == "Classic CV":
         if st.button("Reset All Tuning Defaults"):
             # Reset main keys and their synced widget counterparts
@@ -586,15 +611,6 @@ with st.sidebar:
             st.session_state["manual_exclude_ids"] = []
             st.rerun()
 
-        margin = compact_control(
-            "Plate Rim Margin",
-            "margin",
-            0.0,
-            0.2,
-            margin_default,
-            0.01,
-            "The fraction of the plate radius to exclude from the edge to avoid rim reflections.",
-        )
         min_area_ppm = compact_control(
             "Min Colony Size (ppm)",
             "min_area_ppm",
@@ -643,7 +659,6 @@ with st.sidebar:
         )
     else:
         # Defaults for YOLO logic
-        margin = 0.02
         min_area_ppm = 0
         min_circ = 0.0
         interior_radius = 1.0
@@ -696,9 +711,9 @@ if "last_input_paths" not in st.session_state:
 
 current_input_names = [str(p) for p in input_paths]
 if current_input_names != st.session_state["last_input_paths"]:
-    for p in ["gui_plate_batch_mask.png", "gui_mask_batch_exclusion.png"]:
-        if os.path.exists(p):
-            os.remove(p)
+    for p in [PLATE_MASK_PATH, EXCLUSION_MASK_PATH]:
+        if p.exists():
+            p.unlink()
     st.session_state["last_input_paths"] = current_input_names
 
 col1, col2 = st.columns(2)
@@ -714,6 +729,7 @@ if not input_source:
         "all_results",
         "result_stems",
         "current_view_idx",
+        "stem_selector",
     ):
         st.session_state.pop(_key, None)
 
@@ -787,7 +803,8 @@ if input_source:
                             # Map from detection space back to original space
                             cy = int((y0 + local_cy) * scale_preview[0])
                             cx = int((x0 + local_cx) * scale_preview[1])
-                            rad = int(roi["radius"] * max(scale_preview))
+                            # radius_eff already includes the radius_scale modifier from MultiPlateDetector
+                            rad = int(roi["radius_eff"] * max(scale_preview))
                             color = (0, 255, 0)  # Green (Detected)
                             break
 
@@ -809,7 +826,7 @@ if input_source:
                 width=max(1, int(5 / scale)),
             )
             # Analysis Area (Green - Matches final output)
-            r_eff = r * (1.0 - margin)
+            r_eff = r * radius_scale
             draw.ellipse(
                 [manual_cx - r_eff, manual_cy - r_eff, manual_cx + r_eff, manual_cy + r_eff],
                 outline="green",
@@ -824,14 +841,8 @@ if input_source:
             )
 
         # --- Integrated Drawing Area ---
-        manual_shape_path = (
-            Path("gui_plate_batch_mask.png") if Path("gui_plate_batch_mask.png").exists() else None
-        )
-        mask_path = (
-            Path("gui_mask_batch_exclusion.png")
-            if Path("gui_mask_batch_exclusion.png").exists()
-            else None
-        )
+        manual_shape_path = PLATE_MASK_PATH if PLATE_MASK_PATH.exists() else None
+        mask_path = EXCLUSION_MASK_PATH if EXCLUSION_MASK_PATH.exists() else None
 
         # Tool Logic
         tool = active_tool  # We now always use the canvas to keep scaling consistent
@@ -898,10 +909,10 @@ if input_source:
                         mask_im = mask_canvas.resize(bg_image.size, Image.Resampling.NEAREST)
 
                         if tool == "Define Plate Area":
-                            manual_shape_path = Path("gui_plate_batch_mask.png")
+                            manual_shape_path = PLATE_MASK_PATH
                             mask_im.save(manual_shape_path)
                         else:
-                            mask_path = Path("gui_mask_batch_exclusion.png")
+                            mask_path = EXCLUSION_MASK_PATH
                             mask_im.save(mask_path)
 
             # Show input preview if in View mode and canvas isn't being used
@@ -921,7 +932,7 @@ if input_source:
                         width=5,
                     )
                     # Analysis Area (Green)
-                    r_eff = r * (1.0 - margin)
+                    r_eff = r * radius_scale
                     draw.ellipse(
                         [
                             manual_cx - r_eff,
@@ -987,6 +998,7 @@ with col2:
             "all_results",
             "result_stems",
             "current_view_idx",
+            "stem_selector",
         ):
             st.session_state.pop(_key, None)
 
@@ -1061,7 +1073,7 @@ with col2:
 
             overrides = {
                 "load_image": {"max_dimension": int(max_dimension) if resize_enabled else None},
-                "detect_plate": {"margin_frac": margin, "crop": False},
+                "detect_plate": {"radius_scale": radius_scale, "crop": False},
                 "threshold_segment": {
                     "min_area": None,
                     "min_area_ppm": min_area_ppm,
@@ -1136,8 +1148,7 @@ with col2:
                         "grid": [grid_rows, grid_cols],
                         "labels": st.session_state["grid_labels"],
                         "min_confidence_score": 0.1,  # More lenient for GUI preview
-                        "radius_expand_frac": 0.02,
-                        "margin_frac": margin
+                        "radius_scale": radius_scale
                     }
                 })
                 sub_pipeline_params = {"steps": sub_steps}
@@ -1210,35 +1221,48 @@ if st.session_state.get("all_results"):
         # --- Navigation Header ---
         c_nav1, c_nav2, c_nav3 = st.columns([1.2, 3, 1.2])
 
-        curr_idx = st.session_state.get("current_view_idx", 0)
+        # Initialize selection state if missing or invalid
+        if "current_view_idx" not in st.session_state or st.session_state["current_view_idx"] >= len(
+            stems
+        ):
+            st.session_state["current_view_idx"] = 0
+            st.session_state["stem_selector"] = stems[0]
 
-        def update_idx(new_val):
-            st.session_state["current_view_idx"] = new_val
-            # We don't manually set stem_selector here because it causes an error
-            # if the widget was already instantiated in the previous script run.
-            # Instead, we rely on the 'index' parameter of selectbox being
-            # driven by current_view_idx.
+        curr_idx = st.session_state["current_view_idx"]
 
-        if c_nav1.button("← Previous", disabled=(curr_idx == 0), use_container_width=True):
-            update_idx(curr_idx - 1)
-            st.rerun()
+        def go_prev():
+            st.session_state["current_view_idx"] -= 1
+            st.session_state["stem_selector"] = stems[st.session_state["current_view_idx"]]
+
+        def go_next():
+            st.session_state["current_view_idx"] += 1
+            st.session_state["stem_selector"] = stems[st.session_state["current_view_idx"]]
+
+        def on_stem_change():
+            st.session_state["current_view_idx"] = stems.index(st.session_state["stem_selector"])
+
+        c_nav1.button(
+            "← Previous",
+            disabled=(curr_idx == 0),
+            use_container_width=True,
+            on_click=go_prev,
+        )
 
         # Dropdown for direct selection
-        selected_stem = c_nav2.selectbox(
+        c_nav2.selectbox(
             "Select Plate",
             options=stems,
-            index=curr_idx,
             label_visibility="collapsed",
             key="stem_selector",
+            on_change=on_stem_change,
         )
-        # Update index if dropdown changed manually
-        if selected_stem != stems[curr_idx]:
-            st.session_state["current_view_idx"] = stems.index(selected_stem)
-            st.rerun()
 
-        if c_nav3.button("Next →", disabled=(curr_idx == len(stems) - 1), use_container_width=True):
-            update_idx(curr_idx + 1)
-            st.rerun()
+        c_nav3.button(
+            "Next →",
+            disabled=(curr_idx == len(stems) - 1),
+            use_container_width=True,
+            on_click=go_next,
+        )
 
         # Get data for CURRENT selection
         stem = stems[st.session_state["current_view_idx"]]

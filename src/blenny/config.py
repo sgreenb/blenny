@@ -6,7 +6,7 @@ A pipeline YAML looks like:
       - name: load_image
       - name: detect_plate
         params:
-          margin_frac: 0.05
+          radius_scale: 0.95
       - name: export_csv
         params:
           output_path: "{output_dir}/{stem}/colonies.csv"

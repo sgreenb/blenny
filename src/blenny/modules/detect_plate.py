@@ -52,29 +52,11 @@ class PlateDetector(Preprocessor):
         mask_key: str = "plate"
         """Key under which the plate mask is stored in ``data.masks``."""
 
-        margin_frac: float = 0.04
-        """Shrink the plate mask by this fraction of the radius.
+        radius_scale: float = 1.0
+        """Scale factor for the detected plate radius.
 
-        Real plate photos almost always include a bright reflective rim that
-        otherwise gets segmented as a chain of small false-positive arcs.
-        4% is a good default for raw radius detection. Reduce to ``0.02``
-        for flatbed scans, raise to ``0.08`` if rim contamination persists.
-        """
-
-        radius_expand_frac: float = 0.0
-        """Expand the detected plate radius by this fraction before applying
-        ``margin_frac``.
-
-        Off-axis camera angles make the plate appear slightly elliptical, and
-        Hough circle detection then fits a circle smaller than the true plate.
-        Expanding the radius before margin trimming recovers colonies near the
-        far edge that would otherwise fall outside the analysis region. The
-        ``InteriorColonyClassifier`` (if present in the pipeline) cleans up
-        any extra rim artifacts that the expansion introduces.
-
-        Default ``0.0`` preserves backward compatibility. Set to ``0.05``
-        for typical hand-held phone photos; ``0.10`` for clearly off-axis
-        shots where the plate ellipse is visible.
+        Values < 1.0 act as a margin (shrink); values > 1.0 expand the area
+        (useful for tilted camera angles).
         """
 
         force_cy: int | None = None
@@ -152,8 +134,10 @@ class PlateDetector(Preprocessor):
         ):
             cy = round(self.params.force_cy * load_scale)
             cx = round(self.params.force_cx * load_scale)
-            r_hough = round(self.params.force_r * load_scale)
+            r_eff = round(self.params.force_r * load_scale)
+            r = r_eff
             score = 1.0
+            r_hough = r_eff
         else:
             edges = feature.canny(gray, sigma=self.params.canny_sigma)  # type: ignore[attr-defined]
 
@@ -184,6 +168,37 @@ class PlateDetector(Preprocessor):
             )
             score = float(accums[0])
 
+            # --- Sub-pixel Refinement via Least Squares ---
+            # We use the FULL RESOLUTION edges for refinement if available.
+            # This recovers precision lost during the 512px downsampling.
+            try:
+                from scipy import optimize
+
+                # Find edges on the original grayscale image
+                edges_full = feature.canny(gray_full, sigma=self.params.canny_sigma)
+                ys_f, xs_f = np.where(edges_full)
+
+                # Narrow band around the scaled hough radius to find rim pixels
+                dists = np.sqrt((ys_f - cy)**2 + (xs_f - cx)**2)
+                rim_pixels_mask = (dists > r_hough * 0.8) & (dists < r_hough * 1.2)
+
+                if np.sum(rim_pixels_mask) > 50:
+                    pts_y, pts_x = ys_f[rim_pixels_mask], xs_f[rim_pixels_mask]
+
+                    def f_circle(coords):
+                        xc, yc = coords
+                        ri = np.sqrt((pts_x - xc)**2 + (pts_y - yc)**2)
+                        return ri - ri.mean()
+
+                    (cx_ref, cy_ref), _ = optimize.leastsq(f_circle, (float(cx), float(cy)))
+                    r_ref = np.sqrt((pts_x - cx_ref)**2 + (pts_y - cy_ref)**2).mean()
+
+                    # Update with refined coordinates
+                    cy, cx, r_hough = int(round(cy_ref)), int(round(cx_ref)), int(round(r_ref))
+            except Exception:
+                # Fallback to Hough if refinement fails (e.g. scipy not installed or no edges)
+                pass
+
             if score < self.params.min_confidence_score:
                 data.add_flag(
                     "low_plate_confidence",
@@ -192,13 +207,15 @@ class PlateDetector(Preprocessor):
                     severity="warning",
                 )
 
-        # Apply optional expansion *before* margin trimming. The bbox, mask,
-        # and stored ``plate_radius`` all use the expanded radius so downstream
-        # geometry (e.g. InteriorColonyClassifier) sees a single consistent
-        # "plate radius" derived from the user-tunable knobs.
-        expand: float = self.params.radius_expand_frac  # type: ignore[attr-defined]
-        r = r_hough + round(r_hough * expand)
-        r_eff = max(1, r - round(r * self.params.margin_frac))  # type: ignore[attr-defined]
+            # Apply radius scale factor to the detected radius.
+            # Scale < 1.0 acts as a margin (shrinking the analysis area).
+            # Scale > 1.0 acts as expansion (recovering edges in off-axis shots).
+            scale: float = self.params.radius_scale  # type: ignore[attr-defined]
+            r_eff = max(1, round(r_hough * scale))
+
+            # The bounding box for cropping uses the larger of the two to ensure
+            # we don't lose image context when shrinking.
+            r = max(r_hough, r_eff)
 
         # Build mask in the original frame.
         mask = np.zeros((h_full, w_full), dtype=bool)

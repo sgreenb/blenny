@@ -1,0 +1,31 @@
+
+Profiling 1 image(s) x 1 repeat(s)...
+  sp01_img10.jpg  →  4.6s
+
+======================================================================
+  Blenny Pipeline Timing Profile
+======================================================================
+  Pipeline : pipeline_yolo.yaml
+  Images   : 1 image(s), 1 repeat(s) each  (1 total runs)
+  Wall time: 4.6s total  |  4.6s avg per run
+  Pipeline : 4.59s avg step total (excludes runner overhead)
+----------------------------------------------------------------------
+  Step                           Module                        Avg(s)      %  Bar
+----------------------------------------------------------------------
+  detect_plate                   PlateDetector                  3.444  75.1%  ███████████████░░░░░
+  yolo_detector                  YoloDetector                   0.407   8.9%  ██░░░░░░░░░░░░░░░░░░
+  measure_colonies               ColonyMeasurer                 0.338   7.4%  █░░░░░░░░░░░░░░░░░░░
+  export_annotated               AnnotatedImageExporter         0.279   6.1%  █░░░░░░░░░░░░░░░░░░░
+  load_image                     ImageFileLoader                0.117   2.6%  █░░░░░░░░░░░░░░░░░░░
+  export_csv                     CSVExporter                    0.001   0.0%  ░░░░░░░░░░░░░░░░░░░░
+  export_summary                 SummaryExporter                0.001   0.0%  ░░░░░░░░░░░░░░░░░░░░
+  add_manual_colonies            ManualColonyAdder              0.000   0.0%  ░░░░░░░░░░░░░░░░░░░░
+  apply_exclusion_mask           ExclusionMasker                0.000   0.0%  ░░░░░░░░░░░░░░░░░░░░
+  filter_by_id                   IDFilter                       0.000   0.0%  ░░░░░░░░░░░░░░░░░░░░
+----------------------------------------------------------------------
+  TOTAL                                                         4.586
+======================================================================
+
+  Tip: the slowest steps are the best candidates for optimisation.
+  Consider profiling with --repeat 3 on a high-res image for stable results.
+

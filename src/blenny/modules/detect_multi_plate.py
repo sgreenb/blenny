@@ -32,8 +32,10 @@ class MultiPlateDetector(Preprocessor):
         canny_sigma: float = 1.5
         """Gaussian sigma for the Canny edge detector."""
 
-        margin_frac: float = 0.02
-        """Shrink the plate mask by this fraction of the radius."""
+        radius_scale: float = 1.0
+        """Scale factor for the detected plate radius.
+        Values < 1.0 act as a margin (shrink); values > 1.0 expand the area.
+        """
 
         min_confidence_score: float = 0.20
         """Minimum Hough accumulator score to accept a plate."""
@@ -44,10 +46,6 @@ class MultiPlateDetector(Preprocessor):
         min_diameter_image_frac: float = 0.10
         """Minimum plate diameter as a fraction of the shortest image dimension (H or W).
         Helps filter out small artifacts or large colonies being misidentified as plates."""
-
-        radius_expand_frac: float = 0.02
-        """Expand the detected plate radius by this fraction before applying ``margin_frac``.
-        Helps recover colonies near the far edge of the plate."""
 
         detection_dimension: int = 512
         """Internal resolution for plate detection in each grid cell.
@@ -188,18 +186,18 @@ class MultiPlateDetector(Preprocessor):
             r_raw = p["radius"]
             cy, cx = p["cy_global"], p["cx_global"]
             
-            # Apply optional expansion
-            expand: float = self.params.radius_expand_frac # type: ignore[attr-defined]
-            r = r_raw + round(r_raw * expand)
+            # Apply radius scale factor
+            scale: float = self.params.radius_scale  # type: ignore[attr-defined]
+            r_eff = max(1, round(r_raw * scale))
+            
+            # Use larger of raw or effective radius for cropping to keep context
+            r = max(r_raw, r_eff)
             
             # Global bounding box for cropping with a safety buffer
             # Use a slightly larger relative buffer
             buffer = int(r * 0.05) + 20 
             y0_crop, y1_crop = max(0, cy - r - buffer), min(h, cy + r + buffer + 1)
             x0_crop, x1_crop = max(0, cx - r - buffer), min(w, cx + r + buffer + 1)
-            
-            # Local plate mask parameters (within the crop)
-            r_eff = max(1, r - round(r * self.params.margin_frac))
             
             rois.append({
                 "label": p["label"],

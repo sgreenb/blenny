@@ -5,8 +5,7 @@ steps:
     params:
       grid: [2, 3]
       min_confidence_score: 0.1
-      radius_expand_frac: 0.02
-      margin_frac: 0.02
+      radius_scale: 1.0
       
   - name: "sub_pipeline"
     params:

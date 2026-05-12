@@ -1,0 +1,31 @@
+
+Profiling 1 image(s) x 1 repeat(s)...
+  sp01_img10.jpg  →  4.2s
+
+======================================================================
+  Blenny Pipeline Timing Profile
+======================================================================
+  Pipeline : pipeline_full_res.yaml
+  Images   : 1 image(s), 1 repeat(s) each  (1 total runs)
+  Wall time: 4.2s total  |  4.2s avg per run
+  Pipeline : 4.19s avg step total (excludes runner overhead)
+----------------------------------------------------------------------
+  Step                           Module                        Avg(s)      %  Bar
+----------------------------------------------------------------------
+  export_annotated               AnnotatedImageExporter         1.624  38.7%  ████████░░░░░░░░░░░░
+  measure_colonies               ColonyMeasurer                 1.374  32.8%  ███████░░░░░░░░░░░░░
+  detect_plate                   PlateDetector                  0.726  17.3%  ███░░░░░░░░░░░░░░░░░
+  yolo_detector                  YoloDetector                   0.394   9.4%  ██░░░░░░░░░░░░░░░░░░
+  load_image                     ImageFileLoader                0.071   1.7%  ░░░░░░░░░░░░░░░░░░░░
+  export_csv                     CSVExporter                    0.001   0.0%  ░░░░░░░░░░░░░░░░░░░░
+  export_summary                 SummaryExporter                0.001   0.0%  ░░░░░░░░░░░░░░░░░░░░
+  apply_exclusion_mask           ExclusionMasker                0.000   0.0%  ░░░░░░░░░░░░░░░░░░░░
+  add_manual_colonies            ManualColonyAdder              0.000   0.0%  ░░░░░░░░░░░░░░░░░░░░
+  filter_by_id                   IDFilter                       0.000   0.0%  ░░░░░░░░░░░░░░░░░░░░
+----------------------------------------------------------------------
+  TOTAL                                                         4.191
+======================================================================
+
+  Tip: the slowest steps are the best candidates for optimisation.
+  Consider profiling with --repeat 3 on a high-res image for stable results.
+

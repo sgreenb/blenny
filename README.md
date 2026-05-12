@@ -131,10 +131,10 @@ Blenny is designed to be CLI first.
 ### Parameter Overrides
 Tweak any pipeline parameter on the fly without editing the YAML:
 ```bash
-# Change the minimum colony area and exclusion margin
+# Change the minimum colony area and plate radius scale
 blenny run pipeline_classic.yaml -i plate.jpg -o results/ \
   -v threshold_segment.min_area=50 \
-  -v detect_plate.margin_frac=0.05
+  -v detect_plate.radius_scale=1.05
 ```
 
 ---

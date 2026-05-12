@@ -200,7 +200,7 @@ class ColonyMeasurer(FeatureExtractor):
                 "suspect_high_count",
                 f"Detected {n} colonies, which exceeds max_plausible_count={max_count}. "
                 "Results may contain many false positives (rim artifacts, noise). "
-                "Check the annotated image and consider increasing margin_frac "
+                "Check the annotated image and consider adjusting radius_scale "
                 "or the circularity/solidity filters.",
                 severity="warning",
             )

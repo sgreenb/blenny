@@ -1,0 +1,41 @@
+steps:
+- name: load_image
+  params:
+    max_dimension: 1280
+- name: detect_plate
+  params:
+    margin_frac: 0.02
+    crop: false
+- name: apply_exclusion_mask
+  params:
+    mask_path: null
+- name: yolo_detector
+  params:
+    model_path: models/colony_model.pt
+    conf_threshold: 0.15
+    iou_threshold: 0.8
+    imgsz: 1280
+    refine_mask: true
+    output_key: objects
+- name: add_manual_colonies
+  params:
+    coordinates: []
+- name: measure_colonies
+  params:
+    mask_key: objects
+    roi_mask_key: plate
+- name: filter_by_id
+  params:
+    exclude_ids: []
+- name: export_csv
+  params:
+    output_path: '{output_dir}/{stem}/colonies.csv'
+- name: export_summary
+  params:
+    output_path: '{output_dir}/{stem}/log.txt'
+- name: export_annotated
+  params:
+    output_path: '{output_dir}/{stem}/annotated.png'
+_blenny_version: 0.0.1
+_pipeline_source: C:\Users\samgr\Github\blenny\pipeline_yolo.yaml
+_run_at: '2026-05-10T17:59:37'
