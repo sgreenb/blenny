@@ -45,6 +45,7 @@ gui_debug/
 gui_results/
 gui_uploads/
 examples/output/
+sandbox/
 
 # Development / ML Training
 ml_training/
