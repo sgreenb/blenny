@@ -49,6 +49,14 @@ class MultiPlateDetector(Preprocessor):
         """Expand the detected plate radius by this fraction before applying ``margin_frac``.
         Helps recover colonies near the far edge of the plate."""
 
+        detection_dimension: int = 512
+        """Internal resolution for plate detection in each grid cell.
+
+        Finding the plate doesn't require full resolution. Downscaling each
+        grid cell to this dimension (long side) makes the Hough transform
+        much faster.
+        """
+
     def process(self, image: Any, data: ImageData) -> Any:
         rows, cols = self.params.grid
         gray = color.rgb2gray(image) if image.ndim == 3 else image.astype(float) / 255.0
@@ -72,11 +80,25 @@ class MultiPlateDetector(Preprocessor):
                 x0 = max(0, c * cell_w - padding_w)
                 x1 = min(w, (c + 1) * cell_w + padding_w)
                 
-                cell_gray = gray[y0:y1, x0:x1]
+                cell_gray_full = gray[y0:y1, x0:x1]
+                ch_full, cw_full = cell_gray_full.shape
+
+                # --- Downsample cell for detection speed ---
+                det_dim: int = self.params.detection_dimension  # type: ignore[attr-defined]
+                if det_dim > 0 and max(ch_full, cw_full) > det_dim:
+                    det_scale = det_dim / max(ch_full, cw_full)
+                    new_ch, new_cw = int(ch_full * det_scale), int(cw_full * det_scale)
+                    cell_gray = transform.resize(
+                        cell_gray_full, (new_ch, new_cw), order=1, anti_aliasing=False
+                    )
+                else:
+                    cell_gray = cell_gray_full
+                    det_scale = 1.0
+
                 ch, cw = cell_gray.shape
 
                 # Radius range relative to cell size
-                rmin_abs = int((self.params.min_diameter_image_frac * min(h, w)) / 2)
+                rmin_abs = int((self.params.min_diameter_image_frac * min(h, w)) / 2 * det_scale)
                 rmin_cell = int(self.params.min_radius_frac * min(ch, cw))
                 rmin = max(rmin_abs, rmin_cell)
                 rmax = int(self.params.max_radius_frac * min(ch, cw))
@@ -94,18 +116,23 @@ class MultiPlateDetector(Preprocessor):
 
                 if len(accums) > 0 and accums[0] >= self.params.min_confidence_score:
                     # Found a potential plate via Hough
-                    cy_h, cx_h, r_h = int(cys[0]), int(cxs[0]), int(rs[0])
+                    cy_h, cx_h, r_h = (
+                        int(round(cys[0] / det_scale)),
+                        int(round(cxs[0] / det_scale)),
+                        int(round(rs[0] / det_scale)),
+                    )
                     
                     # --- Sub-pixel Refinement via Least Squares ---
-                    # We use the edge pixels found earlier to fine-tune the fit
+                    # We use the FULL RESOLUTION edges for refinement if available
                     try:
                         from scipy import optimize
-                        ys, xs = np.where(edges)
-                        dists = np.sqrt((ys - cy_h)**2 + (xs - cx_h)**2)
-                        # Narrow band around the hough radius
+                        edges_full = feature.canny(cell_gray_full, sigma=self.params.canny_sigma)
+                        ys_f, xs_f = np.where(edges_full)
+                        dists = np.sqrt((ys_f - cy_h)**2 + (xs_f - cx_h)**2)
+                        # Narrow band around the scaled hough radius
                         mask = (dists > r_h * 0.8) & (dists < r_h * 1.2)
                         if np.sum(mask) > 50:
-                            pts_y, pts_x = ys[mask], xs[mask]
+                            pts_y, pts_x = ys_f[mask], xs_f[mask]
                             def f_circle(coords):
                                 xc, yc = coords
                                 ri = np.sqrt((pts_x - xc)**2 + (pts_y - yc)**2)

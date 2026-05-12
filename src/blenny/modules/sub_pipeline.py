@@ -97,17 +97,24 @@ class SubPipeline(Module):
             sub_data = self._inner_pipeline.run(sub_data)
             all_sub_results.append(sub_data)
             
-            # 3. Map measurements back to global space
+            # 3. Map measurements back to global space (original image resolution)
             for row in sub_data.measurements:
                 row["plate_label"] = label
-                if "centroid_row" in row:
-                    row["centroid_row_global"] = (row["centroid_row"] / sub_scale_y) + y0_hr
-                if "centroid_col" in row:
-                    row["centroid_col_global"] = (row["centroid_col"] / sub_scale_x) + x0_hr
-                if "y" in row:
-                    row["y_global"] = (row["y"] / sub_scale_y) + y0_hr
-                if "x" in row:
-                    row["x_global"] = (row["x"] / sub_scale_x) + x0_hr
+                
+                # Map centroids
+                for key in ["centroid_y", "centroid_x"]:
+                    if key in row:
+                        scale = sub_scale_y if "y" in key else sub_scale_x
+                        offset = y0_hr if "y" in key else x0_hr
+                        row[f"{key}_global"] = (row[key] / scale) + offset
+
+                # Map bounding boxes
+                for key in ["bbox_y0", "bbox_x0", "bbox_y1", "bbox_x1"]:
+                    if key in row:
+                        scale = sub_scale_y if "y" in key else sub_scale_x
+                        offset = y0_hr if "y" in key else x0_hr
+                        row[f"{key}_global"] = (row[key] / scale) + offset
+                
                 all_measurements.append(row)
             
             # 4. Bubble up quality flags
