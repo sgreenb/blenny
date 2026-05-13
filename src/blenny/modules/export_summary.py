@@ -73,6 +73,11 @@ class SummaryExporter(Exporter):
         else:
             lines.append("No colonies detected to measure.")
 
+        if m.get("per_plate_counts"):
+            lines.extend(["", "--- Per-Plate Counts ---"])
+            for label, count in m["per_plate_counts"].items():
+                lines.append(f"{label}: {count}")
+
         if m.get("classification_counts"):
             lines.extend(["", "--- Classifications ---"])
             for label, count in m["classification_counts"].items():
@@ -82,42 +87,6 @@ class SummaryExporter(Exporter):
             lines.extend(["", "--- Quality Flags & Warnings ---"])
             for flag in data.quality_flags:
                 lines.append(f"[{flag.severity.upper()}] {flag.code}: {flag.message}")
-
-        # --- Per-Colony Table (Step 3 Requirement) ---
-        if data.measurements:
-            lines.extend(["", "--- Per-Colony Measurements ---"])
-            # Header
-            header = f"{'Plate':<10} {'ID':<4} {'X':>7} {'Y':>7} {'Area':>8} {'R':>5} {'G':>5} {'B':>5} {'H':>5} {'S':>5} {'V':>5} {'Type':<10}"
-            lines.append(header)
-            lines.append("-" * len(header))
-
-            # Show colonies first, then artifacts. Measurements are already
-            # re-labeled and re-ordered in classify_interior / filter_by_id.
-            for r in data.measurements:
-                plabel = str(r.get("plate_label", plate_label))[:10]
-                cid = str(r.get("label", "?"))
-                x = f"{float(r.get('centroid_x', 0)):.1f}"
-                y = f"{float(r.get('centroid_y', 0)):.1f}"
-                area = str(int(r.get("area_px", 0)))
-
-                # Colors (optional)
-                rgb_hsv = []
-                for k in ["mean_r", "mean_g", "mean_b", "mean_h", "mean_s", "mean_v"]:
-                    val = r.get(k)
-                    rgb_hsv.append(f"{float(val):.2f}" if val is not None else "-")
-
-                ctype = "Colony"
-                if r.get("is_artifact"):
-                    ctype = "Artifact"
-                elif int(r.get("colony_count_estimate", 1)) >= 2:
-                    ctype = f"Merged(x{r['colony_count_estimate']})"
-
-                lines.append(
-                    f"{plabel:<10} {cid:<4} {x:>7} {y:>7} {area:>8} "
-                    f"{rgb_hsv[0]:>5} {rgb_hsv[1]:>5} {rgb_hsv[2]:>5} "
-                    f"{rgb_hsv[3]:>5} {rgb_hsv[4]:>5} {rgb_hsv[5]:>5} "
-                    f"{ctype:<10}"
-                )
 
         lines.extend(["", "--- Pipeline Provenance ---"])
         provenance = " -> ".join(p.step for p in data.provenance)

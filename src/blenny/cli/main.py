@@ -30,18 +30,16 @@ from blenny.pipeline import MODULES, Pipeline
 
 app = typer.Typer(
     name="blenny",
-    help="Blenny: A toolkit for analyzing plates and microscopy images.\n\n"
+    help="Blenny: A toolkit for analyzing colonies on petri plates.\n\n"
     "Documentation: https://github.com/your-org/blenny\n\n"
     "CORE WORKFLOW:\n"
     "  1. Initialize pipelines:   blenny init\n"
-    "  2. Run the analysis:       blenny run pipeline_yolo.yaml --input plate.jpg --output results/\n"
-    "  3. Multi-plate analysis:   blenny run multi.yaml -i scan.jpg -o out/ -v detect_multi_plate.grid=[2,3]\n"
-    "  4. Inspect modules:        blenny modules\n"
-    "  5. Launch the GUI:         blenny gui\n\n"
-    "Single-image outputs: annotated.png, colonies.csv, log.txt\n"
-    "Multi-plate outputs:  One folder per scan containing per-plate images and a combined CSV.\n"
-    "Batch outputs add:    summary.csv (with per-plate columns), batch_log.txt\n"
-    "Optional:             --provenance (provenance.json)  --debug-dir (step images)",
+    "  2. Run the analysis:       blenny run pipeline_yolo.yaml -i plate.jpg -o results/\n"
+    "  3. Multi-plate analysis:   blenny run pipeline_multi.yaml -i scan.jpg -o out/ -v detect_multi_plate.grid=[2,3]\n"
+    "  4. Launch the GUI:         blenny gui\n\n"
+    "Standard outputs: image_name_annotated.png, image_name_colonies.csv, image_name_colonies.txt\n"
+    "Batch outputs:    summary.csv (includes per-plate counts), batch_log.txt\n"
+    "Optional:         --provenance (provenance.json)  --debug-dir (step images)",
     no_args_is_help=True,
     add_completion=False,
     rich_markup_mode="rich",
@@ -75,10 +73,9 @@ def _root(
 
 @app.command(
     help="Run a YAML pipeline on one image or a batch.\n\n"
-    "Outputs per image: annotated.png, colonies.csv, log.txt\n"
-    "Multi-plate outputs: One folder per scan with per-plate images and a unified CSV.\n"
-    "Batch outputs (auto or --summary): summary.csv (includes per-plate counts), batch_log.txt\n"
-    "Optional: --provenance for provenance.json, --debug-dir for step images"
+    "Standard outputs: image_name_annotated.png, image_name_colonies.csv, image_name_colonies.txt\n"
+    "Batch outputs:    summary.csv (includes per-plate counts), batch_log.txt\n"
+    "Optional:         --provenance for provenance.json, --debug-dir for step images"
 )
 def run(
     pipeline_path: Annotated[

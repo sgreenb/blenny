@@ -6,7 +6,7 @@ import copy
 from pathlib import Path
 from typing import Any
 
-from blenny.pipeline import BlennyParams, ImageData, Module, register
+from blenny.pipeline import BlennyParams, ImageData, Module, Exporter, register
 from blenny.pipeline.runner import Pipeline
 import numpy as np
 from skimage.draw import disk
@@ -40,6 +40,12 @@ class SubPipeline(Module):
         all_measurements = []
         all_sub_results = []
         
+        # Create global masks for the parent image (working resolution)
+        h_work, w_work = data.image.shape[:2]
+        global_labels = np.zeros((h_work, w_work), dtype=np.int32)
+        global_plate_mask = np.zeros((h_work, w_work), dtype=bool)
+        next_global_id = 1
+
         # Keep track of where sub-provenance starts in the parent list
         # Capture current provenance length to insert sub-provenance later
         from blenny.pipeline.context import ProvenanceRecord
@@ -47,7 +53,8 @@ class SubPipeline(Module):
         n_rois = len(rois)
         for i, roi in enumerate(rois):
             label = roi["label"]
-            y0, x0, y1, x1 = roi["bbox"]
+            y0, x0, y1, x1 = [int(v) for v in roi["bbox"]]
+            target_h, target_w = y1 - y0, x1 - x0
             
             # 1. Create a local context for this ROI
             source_img = data.original_image if data.original_image is not None else data.image
@@ -76,9 +83,23 @@ class SubPipeline(Module):
             local_mask = np.zeros((lh_final, lw_final), dtype=bool)
             cy_l, cx_l = int(roi["center_local"][0] * scale_y * sub_scale_y), int(roi["center_local"][1] * scale_x * sub_scale_x)
             r_eff = int(roi["radius_eff"] * max(scale_x, scale_y) * max(sub_scale_x, sub_scale_y))
-            rr, cc = disk((cy_l, cx_l), r_eff, shape=(lh_final, lw_final))
-            local_mask[rr, cc] = True
+            rr_m, cc_m = disk((cy_l, cx_l), r_eff, shape=(lh_final, lw_final))
+            local_mask[rr_m, cc_m] = True
             
+            # Map sub-plate mask into global plate mask
+            if (lh_final, lw_final) != (target_h, target_w):
+                from skimage.transform import resize
+                plate_mask_orig = resize(
+                    local_mask.astype(float),
+                    (target_h, target_w),
+                    order=0,
+                    preserve_range=True,
+                    anti_aliasing=False
+                ).astype(bool)
+            else:
+                plate_mask_orig = local_mask
+            global_plate_mask[y0:y1, x0:x1] |= plate_mask_orig
+
             sub_data = ImageData(
                 source=f"{data.source} [{label}]",
                 image=local_image,
@@ -97,25 +118,74 @@ class SubPipeline(Module):
             sub_data = self._inner_pipeline.run(sub_data)
             all_sub_results.append(sub_data)
             
+            # Map sub-labels into the global mask if present
+            sub_mask_key = "objects" # Default, could be parameterized
+            local_to_global = {}
+            if sub_mask_key in sub_data.masks:
+                sub_labels = sub_data.masks[sub_mask_key]
+                # Map local sub_labels to global labels at the correct offset
+                sub_h, sub_w = sub_labels.shape
+                
+                if (sub_h, sub_w) != (target_h, target_w):
+                    from skimage.transform import resize
+                    sub_labels_orig = resize(
+                        sub_labels.astype(float),
+                        (target_h, target_w),
+                        order=0,
+                        preserve_range=True,
+                        anti_aliasing=False
+                    ).astype(np.int32)
+                else:
+                    sub_labels_orig = sub_labels
+                
+                unique_labels = np.unique(sub_labels_orig)
+                unique_labels = unique_labels[unique_labels > 0]
+                
+                # Shift IDs and write to global mask
+                for sub_id in unique_labels:
+                    global_labels[y0:y1, x0:x1][sub_labels_orig == sub_id] = next_global_id
+                    local_to_global[sub_id] = next_global_id
+                    next_global_id += 1
+
             # 3. Map measurements back to global space (original image resolution)
             for row in sub_data.measurements:
-                row["plate_label"] = label
+                # We deepcopy the row to ensure no shared mutable state (like dicts/lists)
+                # between the sub-plate results and the global combined result.
+                global_row = copy.deepcopy(row)
+                global_row["plate_label"] = label
                 
+                # Update segment_label to match the global mask we just built
+                # We find the global ID by matching the local ID.
+                # (We could have stored a map, but this is fine for N < 1000)
+                sub_id = row.get("segment_label") or row.get("label")
+                if sub_id in local_to_global:
+                    global_row["segment_label"] = local_to_global[sub_id]
+
                 # Map centroids
                 for key in ["centroid_y", "centroid_x"]:
-                    if key in row:
-                        scale = sub_scale_y if "y" in key else sub_scale_x
-                        offset = y0_hr if "y" in key else x0_hr
-                        row[f"{key}_global"] = (row[key] / scale) + offset
+                    if key in global_row:
+                        s = sub_scale_y if "y" in key else sub_scale_x
+                        p = scale_y if "y" in key else scale_x
+                        o = y0 if "y" in key else x0
+                        global_row[key] = (global_row[key] / s) / p + o
+                        
+                        # Also map _global centroids
+                        offset_hr = y0_hr if "y" in key else x0_hr
+                        global_row[f"{key}_global"] = (row[key] / s) + offset_hr
 
                 # Map bounding boxes
                 for key in ["bbox_y0", "bbox_x0", "bbox_y1", "bbox_x1"]:
-                    if key in row:
-                        scale = sub_scale_y if "y" in key else sub_scale_x
-                        offset = y0_hr if "y" in key else x0_hr
-                        row[f"{key}_global"] = (row[key] / scale) + offset
+                    if key in global_row:
+                        s = sub_scale_y if "y" in key else sub_scale_x
+                        p = scale_y if "y" in key else scale_x
+                        o = y0 if "y" in key else x0
+                        global_row[key] = (global_row[key] / s) / p + o
+                        
+                        # Also map _global bounding boxes
+                        offset_hr = y0_hr if "y" in key else x0_hr
+                        global_row[f"{key}_global"] = (row[key] / s) + offset_hr
                 
-                all_measurements.append(row)
+                all_measurements.append(global_row)
             
             # 4. Bubble up quality flags
             for flag in sub_data.quality_flags:
@@ -139,6 +209,10 @@ class SubPipeline(Module):
         data.metadata["colony_count"] = len([m for m in all_measurements if not m.get("is_artifact")])
         data.metadata["artifact_count"] = len([m for m in all_measurements if m.get("is_artifact")])
         data.metadata["multi_plate_results"] = all_sub_results
+
+        # Write the combined masks to the parent data
+        data.masks["objects"] = global_labels
+        data.masks["plate"] = global_plate_mask
 
         per_plate_counts = {}
         for roi in rois:
@@ -176,4 +250,15 @@ class SubPipeline(Module):
         data.metadata["per_plate_counts"] = ordered_per_plate_counts
         data.measurements.extend(all_measurements)
         
+        # Write the combined mask to the parent data
+        data.masks["objects"] = global_labels
+
         return data
+
+    def export(self, data: ImageData) -> None:
+        """Re-run exporters in the inner pipeline for all sub-results."""
+        all_sub_results = data.metadata.get("multi_plate_results", [])
+        for sub_data in all_sub_results:
+            for step in self._inner_pipeline.steps:
+                if isinstance(step, Exporter):
+                    step.export(sub_data)

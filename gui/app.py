@@ -8,7 +8,10 @@ from tkinter import filedialog
 
 import numpy as np
 import streamlit as st
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageFile
+
+# Allow loading of slightly truncated images (common in some scanner/camera outputs)
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 from blenny import templates
 from blenny.modules.classify_interior import InteriorColonyClassifier
@@ -78,6 +81,86 @@ def _compat_image_to_url(image_data, width, *args, **kwargs):
 st_image.image_to_url = _compat_image_to_url
 
 from streamlit_drawable_canvas import st_canvas  # noqa: E402
+
+def generate_batch_summary(batch_data, output_dir):
+    """Generate batch-level summary.csv and batch_log.txt."""
+    import csv
+    from datetime import datetime
+
+    summary_path = Path(output_dir) / "summary.csv"
+    log_path = Path(output_dir) / "batch_log.txt"
+
+    rows = []
+    expected_plate_cols = set()
+    
+    for data in batch_data:
+        m = data.metadata
+        row = {
+            "input": data.source or "unknown",
+            "stem": m.get("stem", "unknown"),
+            "status": "ok", # GUI only stores successful runs
+            "colony_count": m.get("colony_count", 0),
+            "n_quality_flags": len(data.quality_flags),
+            "flag_codes": "|".join(f.code for f in data.quality_flags),
+        }
+        # Add per-plate counts if present
+        if "per_plate_counts" in m:
+            for plabel, count in m["per_plate_counts"].items():
+                col_name = f"plate_{plabel}_count"
+                row[col_name] = count
+                expected_plate_cols.add(col_name)
+        rows.append(row)
+
+    if not rows:
+        return
+
+    # 1. Write summary.csv
+    # Build fieldnames: standard first, then plate counts, then others
+    fieldnames = ["input", "stem", "status", "colony_count"]
+    sorted_plate_cols = sorted(list(expected_plate_cols))
+    fieldnames.extend(sorted_plate_cols)
+    
+    # Add any remaining keys
+    all_keys = set()
+    for r in rows:
+        all_keys.update(r.keys())
+    for k in sorted(list(all_keys)):
+        if k not in fieldnames:
+            fieldnames.append(k)
+
+    with open(summary_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+
+    # 2. Write batch_log.txt
+    total_time = sum(sum(p.duration_s for p in d.provenance) for d in batch_data)
+    lines = [
+        "=== Blenny Batch Processing Log ===",
+        f"Total images:    {len(rows)}",
+        f"Total duration:  {total_time:.1f}s",
+        f"Generated at:    {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        "",
+        f"{'Image':<30} {'Status':<10} {'Count':<10} {'Flags':<10} {'Per-Plate Counts'}",
+        "-" * 100,
+    ]
+    for r in rows:
+        name = r.get("stem", "unknown")[:30]
+        status = r.get("status", "ok")
+        count = str(r.get("colony_count", "-"))
+        flags = str(r.get("n_quality_flags", "-"))
+        
+        p_counts = []
+        for k in sorted_plate_cols:
+            if k in r:
+                plabel = k[6:-6]
+                p_counts.append(f"{plabel}:{r[k]}")
+        p_str = ", ".join(p_counts)
+        
+        lines.append(f"{name:<30} {status:<10} {count:<10} {flags:<10} {p_str}")
+
+    log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
 
 # Set page config for a clean, professional look
 st.set_page_config(
@@ -1016,6 +1099,7 @@ with col2:
 
             st.session_state["all_results"] = {}
             st.session_state["result_stems"] = []
+            st.session_state["batch_runs"] = []  # Store (ImageData, Pipeline) pairs
             st.session_state["current_view_idx"] = 0
 
             # Setup base pipeline config
@@ -1131,14 +1215,6 @@ with col2:
                         },
                     }
                 )
-                sub_steps.append(
-                    {
-                        "name": "export_csv",
-                        "params": {"output_path": "{output_dir}/{stem}/{stem}_results.csv"},
-                    }
-                )
-                sub_path_txt = "{output_dir}/{stem}/{stem}_summary.txt"
-                sub_steps.append({"name": "export_summary", "params": {"output_path": sub_path_txt}})
 
                 # 2. Reconstruct raw_steps
                 new_main_steps = [{"name": "load_image", "params": overrides["load_image"]}]
@@ -1159,10 +1235,43 @@ with col2:
                     "name": "sub_pipeline",
                     "params": sub_pipeline_params
                 })
+
+                # Add exporters for the full multi-plate image
+                new_main_steps.append({
+                    "name": "export_annotated",
+                    "params": {"output_path": "{output_dir}/{stem}/{stem}_annotated.png"}
+                })
+                new_main_steps.append({
+                    "name": "export_csv",
+                    "params": {"output_path": "{output_dir}/{stem}/{stem}_colonies.csv"}
+                })
+                new_main_steps.append({
+                    "name": "export_summary",
+                    "params": {"output_path": "{output_dir}/{stem}/{stem}_colonies.txt"}
+                })
+                
                 raw_steps = new_main_steps
 
             if mask_path and mask_path.exists():
                 overrides["apply_exclusion_mask"] = {"mask_path": str(mask_path)}
+
+            # Standard exporters for non-multi-plate mode
+            if plate_mode != "Multi-Plate Grid":
+                # Filter out any existing exporters to avoid duplicates
+                raw_steps = [s for s in raw_steps if not s["name"].startswith("export_")]
+                
+                raw_steps.append({
+                    "name": "export_annotated",
+                    "params": {"output_path": "{output_dir}/{stem}/{stem}_annotated.png"}
+                })
+                raw_steps.append({
+                    "name": "export_csv",
+                    "params": {"output_path": "{output_dir}/{stem}/{stem}_colonies.csv"}
+                })
+                raw_steps.append({
+                    "name": "export_summary",
+                    "params": {"output_path": "{output_dir}/{stem}/{stem}_colonies.txt"}
+                })
 
             for step in raw_steps:
                 if step["name"] in overrides:
@@ -1181,6 +1290,7 @@ with col2:
                     log_message(f"  [{current}/{total}] {name}...")
 
                 data = pipe.run(img_path, output_dir=output_dir, debug_dir=img_debug_dir, progress_callback=gui_progress)
+                st.session_state["batch_runs"].append((data, pipe))
 
                 if enable_interactive:
                     # If this was a multi-plate scan, we flatten the results for the GUI
@@ -1190,6 +1300,11 @@ with col2:
                             display_name = f"{img_path.stem} [{plabel}]"
                             st.session_state["all_results"][display_name] = sub_res
                             st.session_state["result_stems"].append(display_name)
+                        
+                        # Add the main scan to the results at the END
+                        display_name = f"{img_path.stem} [Full Scan]"
+                        st.session_state["all_results"][display_name] = data
+                        st.session_state["result_stems"].append(display_name)
                     else:
                         st.session_state["all_results"][img_path.stem] = data
                         st.session_state["result_stems"].append(img_path.stem)
@@ -1197,9 +1312,12 @@ with col2:
             # Global completion message
             total_time = sum(
                 sum(p.duration_s for p in d.provenance)
-                for d in st.session_state["all_results"].values()
+                for d, p in st.session_state["batch_runs"]
             )
             log_message(f"Batch complete: {len(input_imgs)} images in {total_time:.2f}s.")
+            
+            # Generate batch summary files in the temporary results dir
+            generate_batch_summary([d for d, p in st.session_state["batch_runs"]], output_dir)
 
             # Stash pipeline for later rendering/saving
             st.session_state["analysis_pipeline"] = pipe
@@ -1312,7 +1430,7 @@ if st.session_state.get("all_results"):
         c_dl2.download_button(
             "Download Log",
             summarizer.generate_text(data),
-            file_name=f"{stem}_log.txt",
+            file_name=f"{stem}_colonies.txt",
             mime="text/plain",
             use_container_width=True,
         )
@@ -1345,18 +1463,24 @@ if st.session_state.get("all_results"):
             "Type",
         ]
 
+        if "is_manual_review" not in df.columns:
+            df["is_manual_review"] = False
+        if "is_artifact" not in df.columns:
+            df["is_artifact"] = False
+        if "colony_count_estimate" not in df.columns:
+            df["colony_count_estimate"] = 1
+
         # Filter display columns based on what's actually in the data
         display_cols = [c for c in display_cols if c in df.columns]
 
-        if "is_manual_review" not in df.columns:
-            df["is_manual_review"] = False
         if "Type" not in df.columns:
 
             def get_type(row):
-                if row["is_artifact"]:
+                if row.get("is_artifact"):
                     return "Artifact"
-                if int(row["colony_count_estimate"]) >= 2:
-                    return f"Merged(x{int(row['colony_count_estimate'])})"
+                est = int(row.get("colony_count_estimate", 1))
+                if est >= 2:
+                    return f"Merged(x{est})"
                 return "Colony"
 
             df["Type"] = df.apply(get_type, axis=1)
@@ -1394,7 +1518,31 @@ if st.session_state.get("all_results"):
                         data.measurements[idx]["is_manual_review"] = True
                         changed = True
                 if changed:
+                    # Update current view
                     InteriorColonyClassifier.update_count(data.measurements, data)
+                    
+                    # Also update main parent data if this is a sub-plate
+                    if " [" in stem:
+                        parent_stem = stem.split(" [")[0]
+                        parent_data = next((d for d, p in st.session_state["batch_runs"] if d.metadata.get("stem") == parent_stem), None)
+                        if parent_data:
+                            InteriorColonyClassifier.update_count(parent_data.measurements, parent_data)
+                            
+                            # Re-calculate per_plate_counts
+                            per_plate_counts = {}
+                            for m in parent_data.measurements:
+                                if not m.get("is_artifact"):
+                                    pl = m.get("plate_label", "unknown")
+                                    per_plate_counts[pl] = per_plate_counts.get(pl, 0) + 1
+                            
+                            # Preserve order/presence of plates
+                            if "per_plate_counts" in parent_data.metadata:
+                                for pl in parent_data.metadata["per_plate_counts"]:
+                                    if pl in per_plate_counts:
+                                        parent_data.metadata["per_plate_counts"][pl] = per_plate_counts[pl]
+                                    else:
+                                        parent_data.metadata["per_plate_counts"][pl] = 0
+
                     st.rerun()
 
         # Batch Save Button
@@ -1403,20 +1551,67 @@ if st.session_state.get("all_results"):
         )
         if st.button(f"Save All results to {save_dir.name}", type="primary", width="stretch"):
             save_dir.mkdir(parents=True, exist_ok=True)
-            for s, d in all_data.items():
-                cur_save_dir = save_dir / s
+            
+            # Use the stored batch_runs (main ImageData + Pipeline)
+            batch_runs = st.session_state.get("batch_runs", [])
+            
+            for d, p in batch_runs:
+                stem = d.metadata.get("stem", "unknown")
+                cur_save_dir = save_dir / stem
                 cur_save_dir.mkdir(parents=True, exist_ok=True)
-                for step in pipe.steps:
-                    if not hasattr(step, "export"):
-                        continue
-                    orig_path = getattr(step.params, "output_path", None)
-                    if orig_path:
-                        filename = Path(orig_path).name
-                        step.params.output_path = str(cur_save_dir / filename)
-                    step.export(d)
-                    if orig_path:
-                        step.params.output_path = orig_path
-            st.success(f"All {len(all_data)} plate results saved to {save_dir}")
+                
+                # Update output_dir in metadata so exporters use it
+                old_output_dir = d.metadata.get("output_dir")
+                d.metadata["output_dir"] = str(save_dir)
+                
+                for step in p.steps:
+                    # Handle SubPipeline separately to update its inner paths
+                    if step.registry_name == "sub_pipeline":
+                        # Temporarily update inner exporter paths
+                        orig_inner_paths = []
+                        for inner_step in step._inner_pipeline.steps:
+                            if hasattr(inner_step, "export") and hasattr(inner_step.params, "output_path"):
+                                orig_inner_paths.append((inner_step, inner_step.params.output_path))
+                                if old_output_dir:
+                                    try:
+                                        rel = Path(inner_step.params.output_path).relative_to(old_output_dir)
+                                        inner_step.params.output_path = str(Path(save_dir) / rel)
+                                    except ValueError:
+                                        pass
+                        
+                        step.export(d)
+                        
+                        # Restore inner paths
+                        for inner_step, orig_path in orig_inner_paths:
+                            inner_step.params.output_path = orig_path
+                    
+                    elif hasattr(step, "export"):
+                        orig_path = getattr(step.params, "output_path", None)
+                        if orig_path:
+                            if old_output_dir:
+                                try:
+                                    rel = Path(orig_path).relative_to(old_output_dir)
+                                    new_path = str(Path(save_dir) / rel)
+                                except ValueError:
+                                    new_path = orig_path
+                            else:
+                                filename = Path(orig_path).name
+                                new_path = str(cur_save_dir / filename)
+                            
+                            step.params.output_path = new_path
+                            step.export(d)
+                            step.params.output_path = orig_path
+                        else:
+                            step.export(d)
+                
+                # Restore metadata
+                if old_output_dir:
+                    d.metadata["output_dir"] = old_output_dir
+
+            # Also generate the batch summary in the new save_dir
+            generate_batch_summary([d for d, p in batch_runs], save_dir)
+            
+            st.success(f"All {len(batch_runs)} image results (including sub-plates) saved to {save_dir}")
 
         with st.expander("View Live Summary"):
             st.text(summarizer.generate_text(data))
