@@ -55,6 +55,12 @@ class MultiPlateDetector(Preprocessor):
         much faster.
         """
 
+        refine: bool = False
+        """If True, perform a high-resolution circle refinement after the
+        initial Hough detection. Improves centering but increases runtime
+        significantly on high-res scans.
+        """
+
     def process(self, image: Any, data: ImageData) -> Any:
         rows, cols = self.params.grid
         gray = color.rgb2gray(image) if image.ndim == 3 else image.astype(float) / 255.0
@@ -121,29 +127,30 @@ class MultiPlateDetector(Preprocessor):
                     )
                     
                     # --- Sub-pixel Refinement via Least Squares ---
-                    # We use the FULL RESOLUTION edges for refinement if available
-                    try:
-                        from scipy import optimize
-                        edges_full = feature.canny(cell_gray_full, sigma=self.params.canny_sigma)
-                        ys_f, xs_f = np.where(edges_full)
-                        dists = np.sqrt((ys_f - cy_h)**2 + (xs_f - cx_h)**2)
-                        # Narrow band around the scaled hough radius
-                        mask = (dists > r_h * 0.8) & (dists < r_h * 1.2)
-                        if np.sum(mask) > 50:
-                            pts_y, pts_x = ys_f[mask], xs_f[mask]
-                            def f_circle(coords):
-                                xc, yc = coords
-                                ri = np.sqrt((pts_x - xc)**2 + (pts_y - yc)**2)
-                                return ri - ri.mean()
-                            
-                            (cx_ref, cy_ref), _ = optimize.leastsq(f_circle, (float(cx_h), float(cy_h)))
-                            r_ref = np.sqrt((pts_x - cx_ref)**2 + (pts_y - cy_ref)**2).mean()
-                            
-                            # Update with refined coordinates
-                            cy_h, cx_h, r_h = int(cy_ref), int(cx_ref), int(r_ref)
-                    except Exception:
-                        # Fallback to Hough if refinement fails
-                        pass
+                    # Only performed if refine=True
+                    if self.params.refine:
+                        try:
+                            from scipy import optimize
+                            edges_full = feature.canny(cell_gray_full, sigma=self.params.canny_sigma)
+                            ys_f, xs_f = np.where(edges_full)
+                            dists = np.sqrt((ys_f - cy_h)**2 + (xs_f - cx_h)**2)
+                            # Narrow band around the scaled hough radius
+                            mask = (dists > r_h * 0.8) & (dists < r_h * 1.2)
+                            if np.sum(mask) > 50:
+                                pts_y, pts_x = ys_f[mask], xs_f[mask]
+                                def f_circle(coords):
+                                    xc, yc = coords
+                                    ri = np.sqrt((pts_x - xc)**2 + (pts_y - yc)**2)
+                                    return ri - ri.mean()
+                                
+                                (cx_ref, cy_ref), _ = optimize.leastsq(f_circle, (float(cx_h), float(cy_h)))
+                                r_ref = np.sqrt((pts_x - cx_ref)**2 + (pts_y - cy_ref)**2).mean()
+                                
+                                # Update with refined coordinates
+                                cy_h, cx_h, r_h = int(cy_ref), int(cx_ref), int(r_ref)
+                        except Exception:
+                            # Fallback to Hough if refinement fails
+                            pass
 
                     found_plates.append({
                         "label": label,
