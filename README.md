@@ -27,7 +27,7 @@ pip install -e .
 
 ### 2. Run your first analysis
 ```bash
-# Generate default pipelines (pipeline_yolo.yaml and pipeline_classic.yaml)
+# Generate default pipelines (pipeline_yolo.yaml, pipeline_classic.yaml, and pipeline_multi.yaml)
 blenny init
 
 # Run the YOLO ML pipeline (Recommended: Faster and more robust)
