@@ -113,17 +113,22 @@ class MultiPlateDetector(Preprocessor):
                 edges = feature.canny(cell_gray, sigma=self.params.canny_sigma)
                 hough = transform.hough_circle(edges, radii)
                 
-                # We only need the top 1 peak per sector
-                accums, cxs, cys, rs = transform.hough_circle_peaks(hough, radii, total_num_peaks=1)
+                # --- OPTIMIZED PEAK FINDING ---
+                # Since we only ever want the single best circle per sector, we
+                # can bypass the expensive skimage.transform.hough_circle_peaks
+                # (which does non-maximum suppression) and just take the argmax.
+                idx = np.argmax(hough)
+                r_idx, cy_idx, cx_idx = np.unravel_index(idx, hough.shape)
+                accum = hough[r_idx, cy_idx, cx_idx]
 
                 label = self._get_label(r, c)
 
-                if len(accums) > 0 and accums[0] >= self.params.min_confidence_score:
-                    # Found a potential plate via Hough
+                if accum >= self.params.min_confidence_score:
+                    # Found a potential plate via Hough. Map back to cell coords.
                     cy_h, cx_h, r_h = (
-                        int(round(cys[0] / det_scale)),
-                        int(round(cxs[0] / det_scale)),
-                        int(round(rs[0] / det_scale)),
+                        int(round(cy_idx / det_scale)),
+                        int(round(cx_idx / det_scale)),
+                        int(round(radii[r_idx] / det_scale)),
                     )
                     
                     # --- Sub-pixel Refinement via Least Squares ---
@@ -157,7 +162,7 @@ class MultiPlateDetector(Preprocessor):
                         "cy_global": cy_h + y0,
                         "cx_global": cx_h + x0,
                         "radius": r_h,
-                        "score": float(accums[0]),
+                        "score": float(accum),
                         "grid_pos": (r, c)
                     })
                 else:
