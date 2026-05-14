@@ -18,7 +18,7 @@ Blenny combines modern deep learning (YOLO) with classical computer vision to pr
 Blenny requires Python 3.11+.
 
 ```bash
-git clone https://github.com/your-org/blenny.git
+git clone https://github.com/sgreenb/blenny.git
 cd blenny
 pip install -e .
 ```
