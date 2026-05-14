@@ -9,12 +9,13 @@ Public API:
     - :class:`Pipeline` (the runner)
 """
 
+from pydantic import Field
+
 from blenny.pipeline.base import (
     BlennyParams,
     Classifier,
     Exporter,
     FeatureExtractor,
-    Field,
     Loader,
     Module,
     Preprocessor,
