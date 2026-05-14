@@ -66,8 +66,8 @@ class YoloDetector(Segmenter):
         # Determine inference size: never upscale beyond the input image size
         h, w = image.shape[:2]
         max_dim = max(h, w)
-        inference_imgsz = self.params.imgsz # type: ignore[attr-defined]
-        
+        inference_imgsz = self.params.imgsz  # type: ignore[attr-defined]
+
         if inference_imgsz > max_dim:
             # Round up to nearest multiple of 32 for YOLO architecture
             inference_imgsz = ((max_dim + 31) // 32) * 32
@@ -120,10 +120,10 @@ class YoloDetector(Segmenter):
                     # Refine using Otsu thresholding within the box
                     crop = image[y1:y2, x1:x2]
 
-                    # Convert to gray 8-bit for OpenCV. 
+                    # Convert to gray 8-bit for OpenCV.
                     # OpenCV functions (cvtColor, threshold) often require uint8 or uint16.
                     if crop.dtype != np.uint8:
-                        if crop.max() <= 1.1: # Likely 0-1 float
+                        if crop.max() <= 1.1:  # Likely 0-1 float
                             crop_ui8 = (crop * 255).astype(np.uint8)
                         else:
                             crop_ui8 = crop.astype(np.uint8)
@@ -149,8 +149,8 @@ class YoloDetector(Segmenter):
                     refined = cv2.bitwise_and(thresh, thresh, mask=circ_mask)
 
                     # --- SAFETY CHECK FOR SMALL COLONIES ---
-                    # If Otsu resulted in a tiny mask (less than 5% of the box), 
-                    # it might have failed due to low contrast. In this case, 
+                    # If Otsu resulted in a tiny mask (less than 5% of the box),
+                    # it might have failed due to low contrast. In this case,
                     # we fall back to the central ellipse to avoid losing the colony.
                     if np.sum(refined > 0) < (h_c * w_c * 0.05):
                         cv2.ellipse(

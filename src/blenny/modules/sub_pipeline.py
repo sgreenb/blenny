@@ -6,15 +6,17 @@ import copy
 from pathlib import Path
 from typing import Any
 
-from blenny.pipeline import BlennyParams, ImageData, Module, Exporter, register
-from blenny.pipeline.runner import Pipeline
 import numpy as np
 from skimage.draw import disk
+
+from blenny.pipeline import BlennyParams, Exporter, Field, ImageData, Module, register
+from blenny.pipeline.runner import Pipeline
+
 
 @register("sub_pipeline")
 class SubPipeline(Module):
     class Params(BlennyParams):
-        steps: list[dict[str, Any]] = []
+        steps: list[dict[str, Any]] = Field(default_factory=list)
         """List of module configurations to run on each ROI."""
 
         roi_metadata_key: str = "rois"
@@ -32,14 +34,14 @@ class SubPipeline(Module):
         # Populate stem and output_dir if available from source or metadata
         if data.source and "stem" not in data.metadata:
             data.metadata["stem"] = Path(data.source).stem
-        
+
         rois = data.metadata.get(self.params.roi_metadata_key, [])
         if not rois:
             return data
 
         all_measurements = []
         all_sub_results = []
-        
+
         # Create global masks for the parent image (working resolution)
         h_work, w_work = data.image.shape[:2]
         global_labels = np.zeros((h_work, w_work), dtype=np.int32)
@@ -49,13 +51,13 @@ class SubPipeline(Module):
         # Keep track of where sub-provenance starts in the parent list
         # Capture current provenance length to insert sub-provenance later
         from blenny.pipeline.context import ProvenanceRecord
-        
-        n_rois = len(rois)
-        for i, roi in enumerate(rois):
+
+        len(rois)
+        for _i, roi in enumerate(rois):
             label = roi["label"]
             y0, x0, y1, x1 = [int(v) for v in roi["bbox"]]
             target_h, target_w = y1 - y0, x1 - x0
-            
+
             # 1. Create a local context for this ROI
             source_img = data.original_image if data.original_image is not None else data.image
             h_orig, w_orig = source_img.shape[:2]
@@ -65,36 +67,43 @@ class SubPipeline(Module):
             x0_hr, x1_hr = int(x0 * scale_x), int(x1 * scale_x)
             local_image = source_img[y0_hr:y1_hr, x0_hr:x1_hr]
             lh, lw = local_image.shape[:2]
-            
+
             sub_scale_y, sub_scale_x = 1.0, 1.0
-            max_dim: int | None = self.params.max_subplate_dimension # type: ignore[attr-defined]
+            max_dim: int | None = self.params.max_subplate_dimension  # type: ignore[attr-defined]
             if max_dim and max(lh, lw) > max_dim:
                 from skimage.transform import resize
+
                 new_scale = max_dim / max(lh, lw)
                 new_h, new_w = int(lh * new_scale), int(lw * new_scale)
                 orig_dtype = local_image.dtype
                 if orig_dtype == np.uint8:
-                    local_image = (resize(local_image, (new_h, new_w), anti_aliasing=True) * 255).astype(np.uint8)
+                    local_image = (
+                        resize(local_image, (new_h, new_w), anti_aliasing=True) * 255
+                    ).astype(np.uint8)
                 else:
                     local_image = resize(local_image, (new_h, new_w), anti_aliasing=True)
                 sub_scale_y, sub_scale_x = new_h / lh, new_w / lw
-            
+
             lh_final, lw_final = local_image.shape[:2]
             local_mask = np.zeros((lh_final, lw_final), dtype=bool)
-            cy_l, cx_l = int(roi["center_local"][0] * scale_y * sub_scale_y), int(roi["center_local"][1] * scale_x * sub_scale_x)
+            cy_l, cx_l = (
+                int(roi["center_local"][0] * scale_y * sub_scale_y),
+                int(roi["center_local"][1] * scale_x * sub_scale_x),
+            )
             r_eff = int(roi["radius_eff"] * max(scale_x, scale_y) * max(sub_scale_x, sub_scale_y))
             rr_m, cc_m = disk((cy_l, cx_l), r_eff, shape=(lh_final, lw_final))
             local_mask[rr_m, cc_m] = True
-            
+
             # Map sub-plate mask into global plate mask
             if (lh_final, lw_final) != (target_h, target_w):
                 from skimage.transform import resize
+
                 plate_mask_orig = resize(
                     local_mask.astype(float),
                     (target_h, target_w),
                     order=0,
                     preserve_range=True,
-                    anti_aliasing=False
+                    anti_aliasing=False,
                 ).astype(bool)
             else:
                 plate_mask_orig = local_mask
@@ -108,39 +117,46 @@ class SubPipeline(Module):
             sub_data.masks["plate"] = local_mask
             sub_data.metadata["plate_label"] = label
             sub_data.metadata["plate_center"] = (cy_l, cx_l)
-            sub_data.metadata["plate_radius"] = int(roi["radius"] * max(scale_x, scale_y) * max(sub_scale_x, sub_scale_y))
-            
-            for key in ["output_dir", "stem"]:
+            sub_data.metadata["plate_radius"] = int(
+                roi["radius"] * max(scale_x, scale_y) * max(sub_scale_x, sub_scale_y)
+            )
+
+            for key in ["output_dir", "stem", "original_size_wh"]:
                 if key in data.metadata:
                     sub_data.metadata[key] = data.metadata[key]
-            
+
+            # Record the ROI's bounding box in the original image coordinate frame.
+            # This allows modules like ExclusionMasker to correctly crop global masks.
+            sub_data.metadata["plate_bbox"] = (y0_hr, x0_hr, y1_hr, x1_hr)
+
             # 2. Run inner pipeline
             sub_data = self._inner_pipeline.run(sub_data)
             all_sub_results.append(sub_data)
-            
+
             # Map sub-labels into the global mask if present
-            sub_mask_key = "objects" # Default, could be parameterized
+            sub_mask_key = "objects"  # Default, could be parameterized
             local_to_global = {}
             if sub_mask_key in sub_data.masks:
                 sub_labels = sub_data.masks[sub_mask_key]
                 # Map local sub_labels to global labels at the correct offset
                 sub_h, sub_w = sub_labels.shape
-                
+
                 if (sub_h, sub_w) != (target_h, target_w):
                     from skimage.transform import resize
+
                     sub_labels_orig = resize(
                         sub_labels.astype(float),
                         (target_h, target_w),
                         order=0,
                         preserve_range=True,
-                        anti_aliasing=False
+                        anti_aliasing=False,
                     ).astype(np.int32)
                 else:
                     sub_labels_orig = sub_labels
-                
+
                 unique_labels = np.unique(sub_labels_orig)
                 unique_labels = unique_labels[unique_labels > 0]
-                
+
                 # Shift IDs and write to global mask
                 for sub_id in unique_labels:
                     global_labels[y0:y1, x0:x1][sub_labels_orig == sub_id] = next_global_id
@@ -153,7 +169,7 @@ class SubPipeline(Module):
                 # between the sub-plate results and the global combined result.
                 global_row = copy.deepcopy(row)
                 global_row["plate_label"] = label
-                
+
                 # Update segment_label to match the global mask we just built
                 # We find the global ID by matching the local ID.
                 # (We could have stored a map, but this is fine for N < 1000)
@@ -168,7 +184,7 @@ class SubPipeline(Module):
                         p = scale_y if "y" in key else scale_x
                         o = y0 if "y" in key else x0
                         global_row[key] = (global_row[key] / s) / p + o
-                        
+
                         # Also map _global centroids
                         offset_hr = y0_hr if "y" in key else x0_hr
                         global_row[f"{key}_global"] = (row[key] / s) + offset_hr
@@ -180,13 +196,13 @@ class SubPipeline(Module):
                         p = scale_y if "y" in key else scale_x
                         o = y0 if "y" in key else x0
                         global_row[key] = (global_row[key] / s) / p + o
-                        
+
                         # Also map _global bounding boxes
                         offset_hr = y0_hr if "y" in key else x0_hr
                         global_row[f"{key}_global"] = (row[key] / s) + offset_hr
-                
+
                 all_measurements.append(global_row)
-            
+
             # 4. Bubble up quality flags
             for flag in sub_data.quality_flags:
                 flag.message = f"[{label}] {flag.message}"
@@ -201,12 +217,14 @@ class SubPipeline(Module):
                         step=f"[{label}] {rec.step}",
                         module_class=rec.module_class,
                         params=rec.params,
-                        duration_s=rec.duration_s
+                        duration_s=rec.duration_s,
                     )
                 )
 
         # Update global metadata for summary exporters
-        data.metadata["colony_count"] = len([m for m in all_measurements if not m.get("is_artifact")])
+        data.metadata["colony_count"] = len(
+            [m for m in all_measurements if not m.get("is_artifact")]
+        )
         data.metadata["artifact_count"] = len([m for m in all_measurements if m.get("is_artifact")])
         data.metadata["multi_plate_results"] = all_sub_results
 
@@ -217,19 +235,19 @@ class SubPipeline(Module):
         per_plate_counts = {}
         for roi in rois:
             per_plate_counts[roi["label"]] = 0
-            
+
         for m in all_measurements:
             if not m.get("is_artifact"):
                 pl = m.get("plate_label", "unknown")
                 per_plate_counts[pl] = per_plate_counts.get(pl, 0) + 1
-        
+
         expected_labels = []
         detector_params = None
         for step in data.provenance:
             if step.module_class == "MultiPlateDetector":
                 detector_params = step.params
                 break
-        
+
         if detector_params:
             rows_p, cols_p = detector_params.get("grid", [1, 1])
             labels_config = detector_params.get("labels")
@@ -239,17 +257,14 @@ class SubPipeline(Module):
                         expected_labels.append(labels_config[r_p][c_p])
                     else:
                         expected_labels.append(str(r_p * cols_p + c_p + 1))
-        
+
         ordered_per_plate_counts = {}
         for el in expected_labels:
-            if el in per_plate_counts:
-                ordered_per_plate_counts[el] = per_plate_counts[el]
-            else:
-                ordered_per_plate_counts[el] = "NA"
+            ordered_per_plate_counts[el] = per_plate_counts.get(el, "NA")
 
         data.metadata["per_plate_counts"] = ordered_per_plate_counts
         data.measurements.extend(all_measurements)
-        
+
         # Write the combined mask to the parent data
         data.masks["objects"] = global_labels
 

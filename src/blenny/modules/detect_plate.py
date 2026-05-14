@@ -108,11 +108,11 @@ class PlateDetector(Preprocessor):
 
             mask_im = Image.open(self.params.force_mask_path).convert("L")
             mask = np.asarray(mask_im) > 127
-            if mask.shape != (h, w):
+            if mask.shape != (h_full, w_full):
                 # Resize if needed (e.g. if mask was drawn on a thumb)
                 from skimage.transform import resize
 
-                mask = resize(mask, (h, w), order=0, anti_aliasing=False)
+                mask = resize(mask, (h_full, w_full), order=0, anti_aliasing=False)
 
             data.masks[self.params.mask_key] = mask
             # For non-circular plates, we estimate a "center" and "radius"
@@ -147,9 +147,15 @@ class PlateDetector(Preprocessor):
             radii = np.unique(radii)
 
             hough = transform.hough_circle(edges, radii)
-            accums, cxs, cys, rs = transform.hough_circle_peaks(hough, radii, total_num_peaks=1)
 
-            if len(accums) == 0:
+            # --- OPTIMIZED PEAK FINDING ---
+            # Since we only ever want the single best circle, we can bypass the
+            # expensive skimage.transform.hough_circle_peaks and just take the argmax.
+            idx = np.argmax(hough)
+            r_idx, cy_idx, cx_idx = np.unravel_index(idx, hough.shape)
+            score = float(hough[r_idx, cy_idx, cx_idx])
+
+            if score <= 0:
                 data.add_flag(
                     "plate_not_found",
                     "PlateDetector could not locate a circular plate; "
@@ -162,11 +168,10 @@ class PlateDetector(Preprocessor):
 
             # Scale coordinates back to the input 'image' resolution
             cy, cx, r_hough = (
-                int(round(cys[0] / det_scale)),
-                int(round(cxs[0] / det_scale)),
-                int(round(rs[0] / det_scale)),
+                round(cy_idx / det_scale),
+                round(cx_idx / det_scale),
+                round(radii[r_idx] / det_scale),
             )
-            score = float(accums[0])
 
             # --- Sub-pixel Refinement via Least Squares ---
             # We use the FULL RESOLUTION edges for refinement if available.
@@ -179,7 +184,7 @@ class PlateDetector(Preprocessor):
                 ys_f, xs_f = np.where(edges_full)
 
                 # Narrow band around the scaled hough radius to find rim pixels
-                dists = np.sqrt((ys_f - cy)**2 + (xs_f - cx)**2)
+                dists = np.sqrt((ys_f - cy) ** 2 + (xs_f - cx) ** 2)
                 rim_pixels_mask = (dists > r_hough * 0.8) & (dists < r_hough * 1.2)
 
                 if np.sum(rim_pixels_mask) > 50:
@@ -187,14 +192,14 @@ class PlateDetector(Preprocessor):
 
                     def f_circle(coords):
                         xc, yc = coords
-                        ri = np.sqrt((pts_x - xc)**2 + (pts_y - yc)**2)
+                        ri = np.sqrt((pts_x - xc) ** 2 + (pts_y - yc) ** 2)
                         return ri - ri.mean()
 
                     (cx_ref, cy_ref), _ = optimize.leastsq(f_circle, (float(cx), float(cy)))
-                    r_ref = np.sqrt((pts_x - cx_ref)**2 + (pts_y - cy_ref)**2).mean()
+                    r_ref = np.sqrt((pts_x - cx_ref) ** 2 + (pts_y - cy_ref) ** 2).mean()
 
                     # Update with refined coordinates
-                    cy, cx, r_hough = int(round(cy_ref)), int(round(cx_ref)), int(round(r_ref))
+                    cy, cx, r_hough = round(cy_ref), round(cx_ref), round(r_ref)
             except Exception:
                 # Fallback to Hough if refinement fails (e.g. scipy not installed or no edges)
                 pass

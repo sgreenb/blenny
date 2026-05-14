@@ -451,15 +451,11 @@ with st.sidebar:
         st.info("Specify the arrangement and labels for your plates.")
         c_g1, c_g2 = st.columns(2)
 
-        def on_grid_change():
-            # Clear previous detection preview if grid changes
-            st.session_state.pop("preview_rois", None)
-
         grid_rows = c_g1.number_input(
-            "Rows", min_value=1, max_value=10, value=2, on_change=on_grid_change
+            "Rows", min_value=1, max_value=10, value=2
         )
         grid_cols = c_g2.number_input(
-            "Columns", min_value=1, max_value=10, value=3, on_change=on_grid_change
+            "Columns", min_value=1, max_value=10, value=3
         )
 
         if (
@@ -495,39 +491,6 @@ with st.sidebar:
         if c_l2.button("Reset Labels", help="Reset all labels to default (A1, B1...)"):
             st.session_state.pop("grid_labels", None)
             st.rerun()
-
-        if st.button(
-            "Preview Plate Detection",
-            use_container_width=True,
-            help="Find plates in the current image to verify the grid setup.",
-        ):
-            if input_paths:
-                from blenny.modules.load_image import ImageFileLoader
-                from blenny.modules.detect_multi_plate import MultiPlateDetector
-                from blenny.pipeline.context import ImageData
-
-                with st.spinner("Finding plates..."):
-                    # Quick load and detect
-                    detect_dim = 1000
-                    loader = ImageFileLoader(max_dimension=detect_dim)
-                    data = ImageData(source=str(input_paths[0]))
-                    data = loader.run(data)
-
-                    detector = MultiPlateDetector(
-                        grid=[grid_rows, grid_cols],
-                        labels=st.session_state["grid_labels"],
-                        min_confidence_score=0.1,
-                    )
-                    data = detector.run(data)
-
-                    # Store scaling factor to map back to original image
-                    h_orig, w_orig = bg_image.height, bg_image.width
-                    h_work, w_work = data.image.shape[:2]
-
-                    st.session_state["preview_rois"] = data.metadata.get("rois", [])
-                    st.session_state["preview_scale"] = (h_orig / h_work, w_orig / w_work)
-                    st.session_state["preview_flags"] = data.quality_flags
-                    st.success(f"Found {len(st.session_state['preview_rois'])} plates.")
 
     manual_cy, manual_cx, manual_r = None, None, None
     if plate_mode == "Manual Circle":
@@ -754,10 +717,22 @@ with st.sidebar:
         help="Write intermediate images to gui_debug. Slower.",
     )
 
+    generate_annotated = st.checkbox(
+        "Generate annotated images",
+        value=True,
+        help="Generate PNG images with colony outlines. Uncheck for large batches to save time and space.",
+    )
+
+    # Disable interactive review if annotated images are not generated
+    enable_interactive_val = True
+    if not generate_annotated:
+        enable_interactive_val = False
+
     enable_interactive = st.checkbox(
         "Enable Interactive Review",
-        value=True,
-        help="Store results in memory for viewing and editing in the GUI. Uncheck for large batches to save RAM.",
+        value=enable_interactive_val,
+        disabled=not generate_annotated,
+        help="Store results in memory for viewing and editing in the GUI. Uncheck for large batches to save RAM. Requires annotated images.",
     )
 
     # Initialize session state for manual interventions
@@ -863,33 +838,15 @@ if input_source:
             except Exception:
                 font = ImageFont.load_default()
 
-            rois = st.session_state.get("preview_rois", [])
-            scale_preview = st.session_state.get("preview_scale", (1.0, 1.0))
-
             for r in range(rows):
                 for c in range(cols):
-                    # Default: Expected center
+                    # Draw Expected center
                     cy = int((r + 0.5) * cell_h)
                     cx = int((c + 0.5) * cell_w)
                     rad = int(min(cell_h, cell_w) * 0.4)
 
                     label = st.session_state["grid_labels"][r][c]
                     color = (0, 120, 255)  # Blue (Expected)
-
-                    # Check if we have a detected ROI for this label
-                    for roi in rois:
-                        if roi["label"] == label:
-                            # Use detected coordinates (scaled to current bg_image size)
-                            y0, x0, y1, x1 = roi["bbox"]
-                            local_cy, local_cx = roi["center_local"]
-
-                            # Map from detection space back to original space
-                            cy = int((y0 + local_cy) * scale_preview[0])
-                            cx = int((x0 + local_cx) * scale_preview[1])
-                            # radius_eff already includes the radius_scale modifier from MultiPlateDetector
-                            rad = int(roi["radius_eff"] * max(scale_preview))
-                            color = (0, 255, 0)  # Green (Detected)
-                            break
 
                     draw.ellipse(
                         [cx - rad, cy - rad, cx + rad, cy + rad], outline=color, width=line_w
@@ -1192,6 +1149,7 @@ with col2:
                 # 1. Build the sub-pipeline steps
                 # We extract the 'core' steps: detection/segmentation + measurement
                 core_step_names = [
+                    "apply_exclusion_mask",
                     "threshold_segment",
                     "yolo_detector",
                     "measure_colonies",
@@ -1207,14 +1165,15 @@ with col2:
                         sub_steps.append(s)
 
                 # Add individual exporters to sub-pipeline so they resolve {plate_label}
-                sub_steps.append(
-                    {
-                        "name": "export_annotated",
-                        "params": {
-                            "output_path": "{output_dir}/{stem}/{stem}_{plate_label}_annotated.png"
-                        },
-                    }
-                )
+                if generate_annotated:
+                    sub_steps.append(
+                        {
+                            "name": "export_annotated",
+                            "params": {
+                                "output_path": "{output_dir}/{stem}/{stem}_{plate_label}_annotated.png"
+                            },
+                        }
+                    )
 
                 # 2. Reconstruct raw_steps
                 new_main_steps = [{"name": "load_image", "params": overrides["load_image"]}]
@@ -1237,17 +1196,22 @@ with col2:
                 })
 
                 # Add exporters for the full multi-plate image
-                new_main_steps.append({
-                    "name": "export_annotated",
-                    "params": {"output_path": "{output_dir}/{stem}/{stem}_annotated.png"}
-                })
+                if generate_annotated:
+                    new_main_steps.append({
+                        "name": "export_annotated",
+                        "params": {"output_path": "{output_dir}/{stem}/{stem}_annotated.png"}
+                    })
+                
+                csv_path = "{output_dir}/{stem}/{stem}_colonies.csv" if generate_annotated else "{output_dir}/{stem}_colonies.csv"
+                txt_path = "{output_dir}/{stem}/{stem}_colonies.txt" if generate_annotated else "{output_dir}/{stem}_colonies.txt"
+
                 new_main_steps.append({
                     "name": "export_csv",
-                    "params": {"output_path": "{output_dir}/{stem}/{stem}_colonies.csv"}
+                    "params": {"output_path": csv_path}
                 })
                 new_main_steps.append({
                     "name": "export_summary",
-                    "params": {"output_path": "{output_dir}/{stem}/{stem}_colonies.txt"}
+                    "params": {"output_path": txt_path}
                 })
                 
                 raw_steps = new_main_steps
@@ -1260,17 +1224,22 @@ with col2:
                 # Filter out any existing exporters to avoid duplicates
                 raw_steps = [s for s in raw_steps if not s["name"].startswith("export_")]
                 
-                raw_steps.append({
-                    "name": "export_annotated",
-                    "params": {"output_path": "{output_dir}/{stem}/{stem}_annotated.png"}
-                })
+                if generate_annotated:
+                    raw_steps.append({
+                        "name": "export_annotated",
+                        "params": {"output_path": "{output_dir}/{stem}/{stem}_annotated.png"}
+                    })
+                
+                csv_path = "{output_dir}/{stem}/{stem}_colonies.csv" if generate_annotated else "{output_dir}/{stem}_colonies.csv"
+                txt_path = "{output_dir}/{stem}/{stem}_colonies.txt" if generate_annotated else "{output_dir}/{stem}_colonies.txt"
+
                 raw_steps.append({
                     "name": "export_csv",
-                    "params": {"output_path": "{output_dir}/{stem}/{stem}_colonies.csv"}
+                    "params": {"output_path": csv_path}
                 })
                 raw_steps.append({
                     "name": "export_summary",
-                    "params": {"output_path": "{output_dir}/{stem}/{stem}_colonies.txt"}
+                    "params": {"output_path": txt_path}
                 })
 
             for step in raw_steps:
@@ -1557,8 +1526,11 @@ if st.session_state.get("all_results"):
             
             for d, p in batch_runs:
                 stem = d.metadata.get("stem", "unknown")
-                cur_save_dir = save_dir / stem
-                cur_save_dir.mkdir(parents=True, exist_ok=True)
+                if generate_annotated:
+                    cur_save_dir = save_dir / stem
+                    cur_save_dir.mkdir(parents=True, exist_ok=True)
+                else:
+                    cur_save_dir = save_dir
                 
                 # Update output_dir in metadata so exporters use it
                 old_output_dir = d.metadata.get("output_dir")
@@ -1577,8 +1549,12 @@ if st.session_state.get("all_results"):
                                         rel = Path(inner_step.params.output_path).relative_to(old_output_dir)
                                         inner_step.params.output_path = str(Path(save_dir) / rel)
                                     except ValueError:
-                                        pass
-                        
+                                        # If path doesn't contain old_output_dir, it might be already flattened
+                                        if not generate_annotated:
+                                            # We need to make sure it's flattened
+                                            p_name = Path(inner_step.params.output_path).name
+                                            inner_step.params.output_path = str(save_dir / f"{stem}_{p_name}")
+
                         step.export(d)
                         
                         # Restore inner paths
@@ -1593,10 +1569,17 @@ if st.session_state.get("all_results"):
                                     rel = Path(orig_path).relative_to(old_output_dir)
                                     new_path = str(Path(save_dir) / rel)
                                 except ValueError:
-                                    new_path = orig_path
+                                    if not generate_annotated:
+                                        p_name = Path(orig_path).name
+                                        new_path = str(save_dir / f"{stem}_{p_name}")
+                                    else:
+                                        new_path = orig_path
                             else:
                                 filename = Path(orig_path).name
-                                new_path = str(cur_save_dir / filename)
+                                if generate_annotated:
+                                    new_path = str(cur_save_dir / filename)
+                                else:
+                                    new_path = str(save_dir / f"{stem}_{filename}")
                             
                             step.params.output_path = new_path
                             step.export(d)

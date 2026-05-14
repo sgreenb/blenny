@@ -40,35 +40,35 @@ class ExclusionMasker(Preprocessor):
 
         # Load mask and convert to boolean (True = areas to EXCLUDE)
         with Image.open(path) as im:
-            # The mask from the GUI is typically drawn on a resized version
-            # of the original image. We first stretch it back to the
-            # original image's dimensions to recover the global coordinate frame.
-            orig = data.original_image
-            if orig is None:
-                orig = image  # Fallback
+            # 1. Determine the reference frame of the mask.
+            # In the GUI, masks are saved at the resolution of the original image.
+            # We use 'original_size_wh' from metadata if available.
+            full_w, full_h = data.metadata.get("original_size_wh", (None, None))
 
-            orig_h, orig_w = orig.shape[:2]
-            if im.size != (orig_w, orig_h):
-                im = im.resize((orig_w, orig_h), Image.Resampling.NEAREST)
+            if full_w is not None and (im.size != (full_w, full_h)):
+                # Resize the global mask to match the full image frame
+                im = im.resize((full_w, full_h), Image.Resampling.NEAREST)
 
-            mask_full = np.asarray(im.convert("L")) > 0
+            mask_array = np.asarray(im.convert("L")) > 0
 
-        # Now, if the image has been CROPPED (by detect_plate), we must crop
-        # the mask using the same bounding box.
+        # 2. If we are in a ROI (cropped by detect_plate or sub_pipeline),
+        # crop the global mask to match the ROI's bounding box.
         bbox = data.metadata.get("plate_bbox")  # (y0, x0, y1, x1)
         if bbox is not None:
-            y0, x0, y1, x1 = bbox
-            mask_full = mask_full[y0:y1, x0:x1]
+            y0, x0, y1, x1 = [int(v) for v in bbox]
+            # Boundary safety
+            mh, mw = mask_array.shape
+            y0, y1 = max(0, y0), min(mh, y1)
+            x0, x1 = max(0, x0), min(mw, x1)
+            mask_array = mask_array[y0:y1, x0:x1]
 
-        # Finally, if the image has been RESIZED (by load_image max_dimension),
-        # we must resize the (possibly cropped) mask to match the current 'image'.
+        # 3. Finally, resize the (possibly cropped) mask to match the current 'image'.
+        # This handles cases where load_image or sub_pipeline performed resizing.
         cur_h, cur_w = image.shape[:2]
-        if mask_full.shape != (cur_h, cur_w):
+        if mask_array.shape != (cur_h, cur_w):
             from skimage.transform import resize
 
-            mask_arr = resize(mask_full, (cur_h, cur_w), order=0, anti_aliasing=False) > 0.5
-        else:
-            mask_arr = mask_full
+            mask_array = resize(mask_array, (cur_h, cur_w), order=0, anti_aliasing=False) > 0.5
 
         target_key = self.params.target_mask_key  # type: ignore[attr-defined]
         if target_key not in data.masks:
@@ -81,6 +81,14 @@ class ExclusionMasker(Preprocessor):
 
         # The target mask (e.g. 'plate') defines where we WANT to count.
         # We logical-AND it with the INVERSE of the exclusion mask.
-        data.masks[target_key] = data.masks[target_key].astype(bool) & ~mask_arr
+        target_mask = data.masks[target_key].astype(bool)
+
+        # Final safety check before bitwise operation
+        if target_mask.shape != mask_array.shape:
+            from skimage.transform import resize
+
+            mask_array = resize(mask_array, target_mask.shape, order=0, anti_aliasing=False) > 0.5
+
+        data.masks[target_key] = target_mask & ~mask_array
 
         return image

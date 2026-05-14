@@ -91,7 +91,7 @@ class Pipeline:
         ctx = self._coerce_input(data)
         if output_dir is not None:
             ctx.metadata["output_dir"] = str(output_dir)
-        
+
         dwriter = None
         if debug_dir is not None:
             from blenny.pipeline.debug import DebugWriter

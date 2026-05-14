@@ -320,8 +320,8 @@ def test_exclusion_masker_subtracts_from_target(tmp_path: Path) -> None:
 
     # 4. Center should now be False, edges should be True
     # Use == for numpy boolean scalars
-    assert data.masks["plate"][50, 50] == False
-    assert data.masks["plate"][10, 10] == True
+    assert not data.masks["plate"][50, 50]
+    assert data.masks["plate"][10, 10]
 
 
 # --- CSVExporter --------------------------------------------------------------

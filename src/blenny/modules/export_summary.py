@@ -38,7 +38,7 @@ class SummaryExporter(Exporter):
         m = data.metadata
         plate_label = m.get("plate_label", "")
         label_header = f"Plate Label:      {plate_label}\n" if plate_label else ""
-        
+
         # We only want to summarize non-artifact colonies in the main stats,
         # but the table at the bottom will show everything.
         colonies = [r for r in data.measurements if not r.get("is_artifact", False)]
@@ -59,7 +59,7 @@ class SummaryExporter(Exporter):
             "--- Size Distribution of Counted Colonies (pixels) ---",
         ]
         # Remove empty strings from list if plate_label was missing
-        lines = [l for l in lines if l]
+        lines = [line for line in lines if line]
 
         if areas:
             lines.extend(

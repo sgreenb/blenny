@@ -31,7 +31,7 @@ from blenny.pipeline import MODULES, Pipeline
 app = typer.Typer(
     name="blenny",
     help="Blenny: A toolkit for analyzing colonies on petri plates.\n\n"
-    "Documentation: https://github.com/your-org/blenny\n\n"
+    "Documentation: https://github.com/sgreenb/blenny\n\n"
     "CORE WORKFLOW:\n"
     "  1. Initialize pipelines:   blenny init\n"
     "  2. Run the analysis:       blenny run pipeline_yolo.yaml -i plate.jpg -o results/\n"
@@ -131,6 +131,13 @@ def run(
             help="Enable or disable merged-colony multiplicity estimation (default: enabled).",
         ),
     ] = True,
+    annotated_images: Annotated[
+        bool,
+        typer.Option(
+            "--annotated-images/--no-annotated-images",
+            help="Generate annotated PNG images for each plate (default: enabled).",
+        ),
+    ] = True,
     fail_fast: Annotated[
         bool,
         typer.Option(
@@ -165,6 +172,30 @@ def run(
         for step in raw_steps:
             if step["name"] == "estimate_multiplicity":
                 step.setdefault("params", {})["enabled"] = False
+
+    if not annotated_images:
+        # 1. Remove export_annotated modules
+        raw_steps = [s for s in raw_steps if s["name"] != "export_annotated"]
+        # Recursively handle sub_pipeline
+        for step in raw_steps:
+            if step["name"] == "sub_pipeline" and "params" in step and "steps" in step["params"]:
+                step["params"]["steps"] = [
+                    s for s in step["params"]["steps"] if s["name"] != "export_annotated"
+                ]
+
+        # 2. Flatten output paths if they follow the /{stem}/ pattern
+        def flatten_paths(steps: list[dict[str, Any]]) -> None:
+            for s in steps:
+                if "params" in s:
+                    for k, v in s["params"].items():
+                        if isinstance(v, str) and "{output_dir}/{stem}/" in v:
+                            s["params"][k] = v.replace(
+                                "{output_dir}/{stem}/", "{output_dir}/{stem}_"
+                            )
+                if s["name"] == "sub_pipeline" and "params" in s and "steps" in s["params"]:
+                    flatten_paths(s["params"]["steps"])
+
+        flatten_paths(raw_steps)
 
     # Pre-detect if we are in multi-plate mode to fix column ordering in summary.csv
     expected_plate_columns: list[str] = []
@@ -238,7 +269,9 @@ def run(
     for img in inputs:
         stem = img.stem
         per_image_dir = output_dir / stem
-        per_image_dir.mkdir(parents=True, exist_ok=True)
+        if annotated_images:
+            per_image_dir.mkdir(parents=True, exist_ok=True)
+
         resolved = substitute_paths(raw_steps, input_path=img, output_dir=output_dir)
         if first_resolved is None:
             first_resolved = resolved
@@ -267,14 +300,22 @@ def run(
 
         elapsed = time.perf_counter() - t0
         if write_provenance:
-            _write_provenance(per_image_dir / "provenance.json", data, img)
+            prov_path = (
+                per_image_dir / "provenance.json"
+                if annotated_images
+                else output_dir / f"{stem}_provenance.json"
+            )
+            _write_provenance(prov_path, data, img)
         summary_rows.append(
             {
                 "input": str(img),
                 "stem": stem,
                 "status": "ok",
                 "colony_count": data.metadata.get("colony_count"),
-                **{f"plate_{k}_count": v for k, v in data.metadata.get("per_plate_counts", {}).items()},
+                **{
+                    f"plate_{k}_count": v
+                    for k, v in data.metadata.get("per_plate_counts", {}).items()
+                },
                 "n_quality_flags": len(data.quality_flags),
                 "flag_codes": "|".join(f.code for f in data.quality_flags),
                 "duration_s": round(elapsed, 3),
@@ -313,7 +354,9 @@ def run(
     # Only write batch summary files if requested OR if there are multiple images
     # and the user hasn't explicitly disabled them.
     if write_summary is True or (write_summary is None and len(inputs) > 1):
-        _write_summary_csv(output_dir / "summary.csv", summary_rows, plate_cols=expected_plate_columns)
+        _write_summary_csv(
+            output_dir / "summary.csv", summary_rows, plate_cols=expected_plate_columns
+        )
         _write_batch_log_txt(
             output_dir / "batch_log.txt", summary_rows, time.perf_counter() - t_batch
         )
@@ -576,7 +619,7 @@ def _write_batch_log_txt(path: Path, rows: list[dict[str, Any]], duration: float
         status = r.get("status", "failed")
         count = str(r.get("colony_count", "-"))
         flags = str(r.get("n_quality_flags", "-"))
-        
+
         # Extract plate counts from the row dict (keys starting with plate_)
         p_counts = []
         for k, v in r.items():
@@ -584,34 +627,36 @@ def _write_batch_log_txt(path: Path, rows: list[dict[str, Any]], duration: float
                 plabel = k[6:-6]
                 p_counts.append(f"{plabel}:{v}")
         p_str = ", ".join(p_counts)
-        
+
         lines.append(f"{name:<30} {status:<10} {count:<10} {flags:<10} {p_str}")
 
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def _write_summary_csv(path: Path, rows: list[dict[str, Any]], plate_cols: list[str] | None = None) -> None:
+def _write_summary_csv(
+    path: Path, rows: list[dict[str, Any]], plate_cols: list[str] | None = None
+) -> None:
     import csv
 
     if not rows:
         path.write_text("# no images processed\n", encoding="utf-8")
         return
-    
+
     # Standard columns
     fieldnames = ["input", "stem", "status", "colony_count"]
-    
+
     # Add plate columns in fixed order if provided
     if plate_cols:
         for pc in plate_cols:
             if pc not in fieldnames:
                 fieldnames.append(pc)
-    
+
     # Add any other columns found in the rows (flags, etc.)
     for row in rows:
         for k in row:
             if k not in fieldnames:
                 fieldnames.append(k)
-                
+
     with path.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()

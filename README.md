@@ -4,6 +4,12 @@
 
 Blenny combines modern deep learning (YOLO) with classical computer vision to provide fast, accurate, and auditable colony counts from simple photos or high-res scans.
 
+![Masking and Review](screenshots/masking_and_review.png)
+*Interactive review: Define custom analysis areas with polygonal masks, paint out contaminants with the exclusion tool, and instantly update counts by marking artifacts.*
+
+![Multi-plate Analysis](screenshots/multiplate.png)
+*High-throughput mode: Automatically detect and analyze multiple plates in a single scan, with custom position-based labeling and individual plate review.*
+
 ---
 
 ## Quick Start
@@ -31,7 +37,11 @@ blenny run pipeline_yolo.yaml --input plate.jpg --output results/
 ### 3. View Results
 Results land in `results/<image_name>/`:
 - **`image_name_annotated.png`**: Original image with every detected colony outlined and numbered.
-- **`image_name_colonies.csv`**: One row per colony with ID, coordinates, area, and color (RGB/HSV).
+- **`image_name_colonies.csv`**: One row per colony with rich quantification data, including:
+  - **Spatial**: ID, Centroid (X, Y), Area (px, ppm), Bounding Box.
+  - **Morphology**: Circularity, Solidity, Eccentricity.
+  - **Color**: Mean RGB and HSV values.
+  - **Audit**: Artifact status, classification reason, and image source.
 - **`image_name_colonies.txt`**: A human-readable report with count statistics and quality flags.
 
 ---
