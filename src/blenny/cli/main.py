@@ -37,8 +37,8 @@ app = typer.Typer(
     "  2. Run the analysis:       blenny run pipeline_yolo.yaml -i plate.jpg -o results/\n"
     "  3. Multi-plate analysis:   blenny run pipeline_multi.yaml -i scan.jpg -o out/ -v detect_multi_plate.grid=[2,3]\n"
     "  4. Launch the GUI:         blenny gui\n\n"
-    "Standard outputs: image_name_annotated.png, image_name_colonies.csv, image_name_colonies.txt\n"
-    "Batch outputs:    summary.csv (includes per-plate counts), batch_log.txt\n"
+    "Standard outputs: image_name_annotated.png, image_name_colonies.csv, image_name_run_summary.txt\n"
+    "Batch outputs:    batch_summary.csv (includes per-plate counts)\n"
     "Optional:         --provenance (provenance.json)  --debug-dir (step images)",
     no_args_is_help=True,
     add_completion=False,
@@ -73,8 +73,8 @@ def _root(
 
 @app.command(
     help="Run a YAML pipeline on one image or a batch.\n\n"
-    "Standard outputs: image_name_annotated.png, image_name_colonies.csv, image_name_colonies.txt\n"
-    "Batch outputs:    summary.csv (includes per-plate counts), batch_log.txt\n"
+    "Standard outputs: image_name_annotated.png, image_name_colonies.csv, image_name_run_summary.txt\n"
+    "Batch outputs:    batch_summary.csv (includes per-plate counts)\n"
     "Optional:         --provenance for provenance.json, --debug-dir for step images"
 )
 def run(
@@ -121,7 +121,7 @@ def run(
         bool | None,
         typer.Option(
             "--summary/--no-summary",
-            help="Save batch summary.csv and batch_log.txt. Defaults to True if multiple images are processed.",
+            help="Save batch batch_summary.csv. Defaults to True if multiple images are processed.",
         ),
     ] = None,
     multiplicity: Annotated[
@@ -355,10 +355,7 @@ def run(
     # and the user hasn't explicitly disabled them.
     if write_summary is True or (write_summary is None and len(inputs) > 1):
         _write_summary_csv(
-            output_dir / "summary.csv", summary_rows, plate_cols=expected_plate_columns
-        )
-        _write_batch_log_txt(
-            output_dir / "batch_log.txt", summary_rows, time.perf_counter() - t_batch
+            output_dir / "batch_summary.csv", summary_rows, plate_cols=expected_plate_columns
         )
 
     total = time.perf_counter() - t_batch
@@ -599,38 +596,6 @@ def _to_jsonable(obj: Any) -> Any:
         return obj.tolist()
     return obj
 
-
-def _write_batch_log_txt(path: Path, rows: list[dict[str, Any]], duration: float) -> None:
-    """Dump a human-readable batch_log.txt for the entire batch."""
-    if not rows:
-        path.write_text("No images processed.\n", encoding="utf-8")
-        return
-
-    lines = [
-        "=== Blenny Batch Processing Log ===",
-        f"Total images:    {len(rows)}",
-        f"Total duration:  {duration:.1f}s",
-        "",
-        f"{'Image':<30} {'Status':<10} {'Count':<10} {'Flags':<10} {'Per-Plate Counts'}",
-        "-" * 100,
-    ]
-    for r in rows:
-        name = r.get("stem", "unknown")[:30]
-        status = r.get("status", "failed")
-        count = str(r.get("colony_count", "-"))
-        flags = str(r.get("n_quality_flags", "-"))
-
-        # Extract plate counts from the row dict (keys starting with plate_)
-        p_counts = []
-        for k, v in r.items():
-            if k.startswith("plate_") and k.endswith("_count"):
-                plabel = k[6:-6]
-                p_counts.append(f"{plabel}:{v}")
-        p_str = ", ".join(p_counts)
-
-        lines.append(f"{name:<30} {status:<10} {count:<10} {flags:<10} {p_str}")
-
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _write_summary_csv(

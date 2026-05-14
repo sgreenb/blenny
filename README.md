@@ -42,7 +42,7 @@ Results land in `results/<image_name>/`:
   - **Morphology**: Circularity, Solidity, Eccentricity.
   - **Color**: Mean RGB and HSV values.
   - **Audit**: Artifact status, classification reason, and image source.
-- **`image_name_colonies.txt`**: A human-readable report with count statistics and quality flags.
+- **`image_name_run_summary.txt`**: A human-readable report with count statistics and quality flags.
 
 ---
 
@@ -88,7 +88,7 @@ For high-throughput scanning of multiple plates at once:
 - **Smart Multiplicity**: Uses geometric heuristics to identify and count merged colonies.
 - **Artifact Rejection**: Automatically filters out plate rims, scratches, and pen marks.
 - **Quality Flags**: Warns you if a plate has a suspect count, many edge-touches, or poor detection confidence.
-- **Batch Processing**: One-command analysis for entire directories with `summary.csv` and `batch_log.txt`.
+- **Batch Processing**: One-command analysis for entire directories with `batch_summary.csv`.
 
 ---
 

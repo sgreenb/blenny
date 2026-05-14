@@ -83,22 +83,23 @@ st_image.image_to_url = _compat_image_to_url
 from streamlit_drawable_canvas import st_canvas  # noqa: E402
 
 def generate_batch_summary(batch_data, output_dir):
-    """Generate batch-level summary.csv and batch_log.txt."""
+    """Generate batch-level batch_summary.csv."""
     import csv
-    from datetime import datetime
 
-    summary_path = Path(output_dir) / "summary.csv"
-    log_path = Path(output_dir) / "batch_log.txt"
+    if len(batch_data) <= 1:
+        return
+
+    summary_path = Path(output_dir) / "batch_summary.csv"
 
     rows = []
     expected_plate_cols = set()
-    
+
     for data in batch_data:
         m = data.metadata
         row = {
             "input": data.source or "unknown",
             "stem": m.get("stem", "unknown"),
-            "status": "ok", # GUI only stores successful runs
+            "status": "ok",  # GUI only stores successful runs
             "colony_count": m.get("colony_count", 0),
             "n_quality_flags": len(data.quality_flags),
             "flag_codes": "|".join(f.code for f in data.quality_flags),
@@ -114,12 +115,12 @@ def generate_batch_summary(batch_data, output_dir):
     if not rows:
         return
 
-    # 1. Write summary.csv
+    # 1. Write batch_summary.csv
     # Build fieldnames: standard first, then plate counts, then others
     fieldnames = ["input", "stem", "status", "colony_count"]
     sorted_plate_cols = sorted(list(expected_plate_cols))
     fieldnames.extend(sorted_plate_cols)
-    
+
     # Add any remaining keys
     all_keys = set()
     for r in rows:
@@ -132,34 +133,6 @@ def generate_batch_summary(batch_data, output_dir):
         writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
-
-    # 2. Write batch_log.txt
-    total_time = sum(sum(p.duration_s for p in d.provenance) for d in batch_data)
-    lines = [
-        "=== Blenny Batch Processing Log ===",
-        f"Total images:    {len(rows)}",
-        f"Total duration:  {total_time:.1f}s",
-        f"Generated at:    {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        "",
-        f"{'Image':<30} {'Status':<10} {'Count':<10} {'Flags':<10} {'Per-Plate Counts'}",
-        "-" * 100,
-    ]
-    for r in rows:
-        name = r.get("stem", "unknown")[:30]
-        status = r.get("status", "ok")
-        count = str(r.get("colony_count", "-"))
-        flags = str(r.get("n_quality_flags", "-"))
-        
-        p_counts = []
-        for k in sorted_plate_cols:
-            if k in r:
-                plabel = k[6:-6]
-                p_counts.append(f"{plabel}:{r[k]}")
-        p_str = ", ".join(p_counts)
-        
-        lines.append(f"{name:<30} {status:<10} {count:<10} {flags:<10} {p_str}")
-
-    log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 # Set page config for a clean, professional look
@@ -1203,7 +1176,7 @@ with col2:
                     })
                 
                 csv_path = "{output_dir}/{stem}/{stem}_colonies.csv" if generate_annotated else "{output_dir}/{stem}_colonies.csv"
-                txt_path = "{output_dir}/{stem}/{stem}_colonies.txt" if generate_annotated else "{output_dir}/{stem}_colonies.txt"
+                txt_path = "{output_dir}/{stem}/{stem}_run_summary.txt" if generate_annotated else "{output_dir}/{stem}_run_summary.txt"
 
                 new_main_steps.append({
                     "name": "export_csv",
@@ -1231,7 +1204,7 @@ with col2:
                     })
                 
                 csv_path = "{output_dir}/{stem}/{stem}_colonies.csv" if generate_annotated else "{output_dir}/{stem}_colonies.csv"
-                txt_path = "{output_dir}/{stem}/{stem}_colonies.txt" if generate_annotated else "{output_dir}/{stem}_colonies.txt"
+                txt_path = "{output_dir}/{stem}/{stem}_run_summary.txt" if generate_annotated else "{output_dir}/{stem}_run_summary.txt"
 
                 raw_steps.append({
                     "name": "export_csv",
@@ -1397,9 +1370,9 @@ if st.session_state.get("all_results"):
             use_container_width=True,
         )
         c_dl2.download_button(
-            "Download Log",
+            "Download Summary",
             summarizer.generate_text(data),
-            file_name=f"{stem}_colonies.txt",
+            file_name=f"{stem}_run_summary.txt",
             mime="text/plain",
             use_container_width=True,
         )

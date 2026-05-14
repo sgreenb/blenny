@@ -31,10 +31,6 @@ class SubPipeline(Module):
         self._inner_pipeline = Pipeline.from_config(self.params.steps)
 
     def run(self, data: ImageData) -> ImageData:
-        # Populate stem and output_dir if available from source or metadata
-        if data.source and "stem" not in data.metadata:
-            data.metadata["stem"] = Path(data.source).stem
-
         rois = data.metadata.get(self.params.roi_metadata_key, [])
         if not rois:
             return data
@@ -52,7 +48,6 @@ class SubPipeline(Module):
         # Capture current provenance length to insert sub-provenance later
         from blenny.pipeline.context import ProvenanceRecord
 
-        len(rois)
         for _i, roi in enumerate(rois):
             label = roi["label"]
             y0, x0, y1, x1 = [int(v) for v in roi["bbox"]]

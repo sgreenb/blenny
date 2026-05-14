@@ -52,7 +52,7 @@ steps:
 
   - name: export_summary
     params:
-      output_path: "{output_dir}/{stem}/log.txt"
+      output_path: "{output_dir}/{stem}/{stem}_run_summary.txt"
 
   - name: export_annotated
     params:

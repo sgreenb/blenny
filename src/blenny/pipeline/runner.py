@@ -89,6 +89,9 @@ class Pipeline:
         ``(step_index, total_steps, step_name)``.
         """
         ctx = self._coerce_input(data)
+        if ctx.source and "stem" not in ctx.metadata:
+            ctx.metadata["stem"] = Path(ctx.source).stem
+
         if output_dir is not None:
             ctx.metadata["output_dir"] = str(output_dir)
 
