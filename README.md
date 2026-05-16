@@ -15,9 +15,7 @@ Blenny combines modern deep learning (YOLO) with classical computer vision to pr
 ## Quick Start
 
 ### 1. Installation
-Blenny requires **Python 3.11, 3.12, or 3.13** (Python 3.12 is recommended). 
-
-> **Important:** Some deep learning libraries may not be compatible with Python 3.14 yet.
+Blenny requires **Python 3.11, 3.12, or 3.13** Python 3.14 may or may not work, depending on your platform.
 
 #### Recommended: Installation with Poetry
 Poetry ensures all dependencies (including specific versions of Torch and NumPy) are installed correctly without conflicts.
@@ -30,14 +28,6 @@ Poetry ensures all dependencies (including specific versions of Torch and NumPy)
    # Force use of Python 3.12 if you have multiple versions
    poetry env use python3.12 
    poetry install
-   ```
-3. **Setup Blenny Pipelines**:
-   ```bash
-   poetry run blenny init
-   ```
-3. **Run Blenny**:
-   ```bash
-   poetry run blenny gui
    ```
 
 #### Alternative: Basic Pip installation
