@@ -262,18 +262,20 @@ with st.sidebar:
         st.markdown("**OR Try a Test Image**")
         test_images = sorted(list(test_plates_dir.glob("*.[jJ][pP][gG]")) + list(test_plates_dir.glob("*.[pP][nN][gG]")))
         
+        @st.cache_data
+        def get_thumbnail(path):
+            img = Image.open(path)
+            img.thumbnail((100, 100))
+            return img
+
         # Use columns for thumbnails
         cols = st.columns(4)
         for i, img_path in enumerate(test_images):
             with cols[i % 4]:
-                # Load a small thumbnail
-                thumb = Image.open(img_path)
-                thumb.thumbnail((100, 100))
+                thumb = get_thumbnail(img_path)
                 st.image(thumb, width="stretch")
                 if st.button("Load", key=f"load_test_{i}", width="stretch"):
-                    # We simulate an uploaded file by setting the session state
                     st.session_state["selected_test_image"] = img_path
-                    # Clear previous uploads to avoid confusion
                     st.session_state.pop("folder_path", None)
                     st.rerun()
     
@@ -1096,7 +1098,8 @@ with col2:
                 if "gui_log" not in st.session_state:
                     st.session_state["gui_log"] = ""
                 st.session_state["gui_log"] += msg + "\n"
-                log_container.text(st.session_state["gui_log"])
+                # Use a code block to keep fixed width and reduce jitter
+                log_container.code(st.session_state["gui_log"], language="text")
 
             st.session_state["gui_log"] = ""
             input_imgs = input_paths
@@ -1456,23 +1459,32 @@ if st.session_state.get("all_results"):
             import io
             import zipfile
 
-            zip_buffer = io.BytesIO()
-            with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
-                # Add CSV
-                zip_file.writestr(f"{stem}_colonies.csv", csv_exporter.generate_csv(data))
-                
-                # Add Summary
-                zip_file.writestr(f"{stem}_run_summary.txt", summarizer.generate_text(data))
-                
-                # Add Image if exists
-                if img is not None:
-                    img_buf = io.BytesIO()
-                    img.save(img_buf, format='PNG')
-                    zip_file.writestr(f"{stem}_annotated.png", img_buf.getvalue())
+            @st.cache_data
+            def create_zip_results(stem, measurements_csv, summary_text, annotated_image_bytes):
+                zip_buffer = io.BytesIO()
+                with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
+                    zip_file.writestr(f"{stem}_colonies.csv", measurements_csv)
+                    zip_file.writestr(f"{stem}_run_summary.txt", summary_text)
+                    if annotated_image_bytes:
+                        zip_file.writestr(f"{stem}_annotated.png", annotated_image_bytes)
+                return zip_buffer.getvalue()
+
+            img_bytes = None
+            if img is not None:
+                img_buf = io.BytesIO()
+                img.save(img_buf, format='PNG')
+                img_bytes = img_buf.getvalue()
+
+            zip_data = create_zip_results(
+                stem, 
+                csv_exporter.generate_csv(data), 
+                summarizer.generate_text(data), 
+                img_bytes
+            )
 
             st.download_button(
                 label=f"Download All Results for {stem} (.zip)",
-                data=zip_buffer.getvalue(),
+                data=zip_data,
                 file_name=f"{stem}_results.zip",
                 mime="application/zip",
                 width="stretch",
@@ -1565,6 +1577,7 @@ if st.session_state.get("all_results"):
             ],
             hide_index=True,
             width="stretch",
+            height=400,  # Fixed height prevents page jumping when toggling artifacts
             key=f"editor_{stem}",
         )
 
