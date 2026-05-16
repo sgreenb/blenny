@@ -37,7 +37,8 @@ Poetry ensures all dependencies (including specific versions of Torch and NumPy)
 3. **Running from Poetry**
    ```bash
    poetry run python -m blenny [command]
-```
+   ```
+
 #### Alternative: Basic Pip installation
 If you prefer standard pip, ensure you are using a compatible Python version:
    ```bash
