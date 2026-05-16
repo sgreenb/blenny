@@ -256,6 +256,33 @@ with st.sidebar:
         "Upload Plate Images", type=["jpg", "jpeg", "png", "tif"], accept_multiple_files=True
     )
 
+    # Test Plates Section
+    test_plates_dir = Path("test_plates")
+    if test_plates_dir.exists():
+        st.markdown("**OR Try a Test Image**")
+        test_images = sorted(list(test_plates_dir.glob("*.[jJ][pP][gG]")) + list(test_plates_dir.glob("*.[pP][nN][gG]")))
+        
+        # Use columns for thumbnails
+        cols = st.columns(4)
+        for i, img_path in enumerate(test_images):
+            with cols[i % 4]:
+                # Load a small thumbnail
+                thumb = Image.open(img_path)
+                thumb.thumbnail((100, 100))
+                st.image(thumb, width="stretch")
+                if st.button("Load", key=f"load_test_{i}", width="stretch"):
+                    # We simulate an uploaded file by setting the session state
+                    st.session_state["selected_test_image"] = img_path
+                    # Clear previous uploads to avoid confusion
+                    st.session_state.pop("folder_path", None)
+                    st.rerun()
+    
+    if "selected_test_image" in st.session_state:
+        st.info(f"Loaded: {st.session_state['selected_test_image'].name}")
+        if st.button("Clear Test Image"):
+            st.session_state.pop("selected_test_image", None)
+            st.rerun()
+
     # Input Folder Picker
     RUNNING_ON_WEB = is_running_on_web()
     
@@ -792,8 +819,11 @@ with st.sidebar:
     run_btn = st.button("Run Analysis", type="primary", width="stretch")
 
 # --- Main Area ---
+# --- Input Source Logic ---
 input_source = None
 input_paths = []
+
+# Use uploaded files first
 if input_files:
     input_source = "files"
     # Save the uploaded files temporarily
@@ -803,6 +833,14 @@ if input_files:
         p = temp_dir / f.name
         p.write_bytes(f.getvalue())
         input_paths.append(p)
+    # Clear test image if user uploads something new
+    st.session_state.pop("selected_test_image", None)
+
+# Then check for a selected test image
+elif "selected_test_image" in st.session_state:
+    input_source = "test"
+    input_paths = [st.session_state["selected_test_image"]]
+
 elif input_folder and Path(input_folder).exists() and Path(input_folder).is_dir():
     input_source = "folder"
     folder_path = Path(input_folder)
@@ -1413,33 +1451,61 @@ if st.session_state.get("all_results"):
                 st.warning("No image available for preview.")
 
         # --- Download Section ---
-        c_dl1, c_dl2, c_dl3 = st.columns(3)
-        c_dl1.download_button(
-            "Download CSV",
-            csv_exporter.generate_csv(data),
-            file_name=f"{stem}_colonies.csv",
-            mime="text/csv",
-            width="stretch",
-        )
-        c_dl2.download_button(
-            "Download Summary",
-            summarizer.generate_text(data),
-            file_name=f"{stem}_run_summary.txt",
-            mime="text/plain",
-            width="stretch",
-        )
-        if img is not None:
+        if RUNNING_ON_WEB:
+            # Combined Download for Web
             import io
+            import zipfile
 
-            buf = io.BytesIO()
-            img.save(buf, format="PNG")
-            c_dl3.download_button(
-                "Download Image",
-                buf.getvalue(),
-                file_name=f"{stem}_annotated.png",
-                mime="image/png",
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
+                # Add CSV
+                zip_file.writestr(f"{stem}_colonies.csv", csv_exporter.generate_csv(data))
+                
+                # Add Summary
+                zip_file.writestr(f"{stem}_run_summary.txt", summarizer.generate_text(data))
+                
+                # Add Image if exists
+                if img is not None:
+                    img_buf = io.BytesIO()
+                    img.save(img_buf, format='PNG')
+                    zip_file.writestr(f"{stem}_annotated.png", img_buf.getvalue())
+
+            st.download_button(
+                label=f"Download All Results for {stem} (.zip)",
+                data=zip_buffer.getvalue(),
+                file_name=f"{stem}_results.zip",
+                mime="application/zip",
+                width="stretch",
+                type="primary"
+            )
+        else:
+            c_dl1, c_dl2, c_dl3 = st.columns(3)
+            c_dl1.download_button(
+                "Download CSV",
+                csv_exporter.generate_csv(data),
+                file_name=f"{stem}_colonies.csv",
+                mime="text/csv",
                 width="stretch",
             )
+            c_dl2.download_button(
+                "Download Summary",
+                summarizer.generate_text(data),
+                file_name=f"{stem}_run_summary.txt",
+                mime="text/plain",
+                width="stretch",
+            )
+            if img is not None:
+                import io
+
+                buf = io.BytesIO()
+                img.save(buf, format="PNG")
+                c_dl3.download_button(
+                    "Download Image",
+                    buf.getvalue(),
+                    file_name=f"{stem}_annotated.png",
+                    mime="image/png",
+                    width="stretch",
+                )
 
         st.write("Check boxes to mark artifacts. Counts update instantly.")
 
@@ -1539,32 +1605,33 @@ if st.session_state.get("all_results"):
 
                     st.rerun()
 
-        # Batch Save/Update Button
-        save_dir = Path(output_folder_input).resolve()
-        if st.button(f"Save/Update All results to {save_dir.name}", type="primary", width="stretch", help="Write or update all result files to the specified output folder."):
-            save_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Use the stored batch_runs (main ImageData + Pipeline)
-            batch_runs = st.session_state.get("batch_runs", [])
-            
-            for d, p in batch_runs:
-                # Update output_dir in metadata so exporters use the new destination
-                old_output_dir = d.metadata.get("output_dir")
-                d.metadata["output_dir"] = str(save_dir)
+        # Batch Save/Update Button (Local Only)
+        if not RUNNING_ON_WEB:
+            save_dir = Path(output_folder_input).resolve()
+            if st.button(f"Save/Update All results to {save_dir.name}", type="primary", width="stretch", help="Write or update all result files to the specified output folder."):
+                save_dir.mkdir(parents=True, exist_ok=True)
                 
-                for step in p.steps:
-                    if hasattr(step, "export"):
-                        step.export(d)
+                # Use the stored batch_runs (main ImageData + Pipeline)
+                batch_runs = st.session_state.get("batch_runs", [])
                 
-                # Restore original metadata
-                if old_output_dir:
-                    d.metadata["output_dir"] = old_output_dir
+                for d, p in batch_runs:
+                    # Update output_dir in metadata so exporters use the new destination
+                    old_output_dir = d.metadata.get("output_dir")
+                    d.metadata["output_dir"] = str(save_dir)
+                    
+                    for step in p.steps:
+                        if hasattr(step, "export"):
+                            step.export(d)
+                    
+                    # Restore original metadata
+                    if old_output_dir:
+                        d.metadata["output_dir"] = old_output_dir
 
-            # Also generate the batch summary in the destination dir
-            generate_batch_summary([d for d, p in batch_runs], save_dir)
-            generate_batch_colonies([d for d, p in batch_runs], save_dir)
-            
-            st.success(f"All {len(batch_runs)} image results (including sub-plates) saved to {save_dir}")
+                # Also generate the batch summary in the destination dir
+                generate_batch_summary([d for d, p in batch_runs], save_dir)
+                generate_batch_colonies([d for d, p in batch_runs], save_dir)
+                
+                st.success(f"All {len(batch_runs)} image results (including sub-plates) saved to {save_dir}")
 
         with st.expander("View Live Summary"):
             st.text(summarizer.generate_text(data))
