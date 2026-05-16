@@ -267,7 +267,7 @@ with st.sidebar:
             help="Path to a directory on your machine.",
         )
         c_f2.markdown("<div style='height: 29px;'></div>", unsafe_allow_html=True)
-        if c_f2.button("Browse", key="browse_input", help="Browse for input folder", use_container_width=True):
+        if c_f2.button("Browse", key="browse_input", help="Browse for input folder", width="stretch"):
             selected = local_folder_picker("Select Input Folder")
             if selected:
                 st.session_state["folder_path"] = selected
@@ -282,7 +282,7 @@ with st.sidebar:
             help="Directory where results will be saved. [Required]",
         )
         c_o2.markdown("<div style='height: 29px;'></div>", unsafe_allow_html=True)
-        if c_o2.button("Browse", key="browse_output", help="Browse for output folder", use_container_width=True):
+        if c_o2.button("Browse", key="browse_output", help="Browse for output folder", width="stretch"):
             selected = local_folder_picker("Select Output Folder")
             if selected:
                 st.session_state["output_folder_path"] = selected
@@ -789,7 +789,7 @@ with st.sidebar:
 
     st.divider()
 
-    run_btn = st.button("Run Analysis", type="primary", use_container_width=True)
+    run_btn = st.button("Run Analysis", type="primary", width="stretch")
 
 # --- Main Area ---
 input_source = None
@@ -1007,7 +1007,7 @@ if input_source:
             if active_tool == "View":
                 st.subheader("Input Preview")
                 display_img = canvas_bg_img
-                st.image(display_img, use_container_width=True, caption=f"Reference: {ref_image_path.name}")
+                st.image(display_img, width="stretch", caption=f"Reference: {ref_image_path.name}")
 
             if len(input_paths) > 1:
                 st.write(
@@ -1347,7 +1347,7 @@ if st.session_state.get("all_results"):
         c_nav1.button(
             "← Previous",
             disabled=(curr_idx == 0),
-            use_container_width=True,
+            width="stretch",
             on_click=go_prev,
         )
 
@@ -1363,7 +1363,7 @@ if st.session_state.get("all_results"):
         c_nav3.button(
             "Next →",
             disabled=(curr_idx == len(stems) - 1),
-            use_container_width=True,
+            width="stretch",
             on_click=go_next,
         )
 
@@ -1398,7 +1398,7 @@ if st.session_state.get("all_results"):
             st.image(
                 img,
                 caption=f"{stem} — Reviewed Colonies: {data.metadata['colony_count']}",
-                use_container_width=True,
+                width="stretch",
             )
         else:
             # Fallback to original image if annotation fails or was skipped
@@ -1407,7 +1407,7 @@ if st.session_state.get("all_results"):
                 st.image(
                     display_img,
                     caption=f"{stem} (Original) — Reviewed Colonies: {data.metadata['colony_count']}",
-                    use_container_width=True,
+                    width="stretch",
                 )
             else:
                 st.warning("No image available for preview.")
@@ -1419,14 +1419,14 @@ if st.session_state.get("all_results"):
             csv_exporter.generate_csv(data),
             file_name=f"{stem}_colonies.csv",
             mime="text/csv",
-            use_container_width=True,
+            width="stretch",
         )
         c_dl2.download_button(
             "Download Summary",
             summarizer.generate_text(data),
             file_name=f"{stem}_run_summary.txt",
             mime="text/plain",
-            use_container_width=True,
+            width="stretch",
         )
         if img is not None:
             import io
@@ -1438,7 +1438,7 @@ if st.session_state.get("all_results"):
                 buf.getvalue(),
                 file_name=f"{stem}_annotated.png",
                 mime="image/png",
-                use_container_width=True,
+                width="stretch",
             )
 
         st.write("Check boxes to mark artifacts. Counts update instantly.")
@@ -1498,7 +1498,7 @@ if st.session_state.get("all_results"):
                 "Type",
             ],
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
             key=f"editor_{stem}",
         )
 
@@ -1541,7 +1541,7 @@ if st.session_state.get("all_results"):
 
         # Batch Save/Update Button
         save_dir = Path(output_folder_input).resolve()
-        if st.button(f"Save/Update All results to {save_dir.name}", type="primary", use_container_width=True, help="Write or update all result files to the specified output folder."):
+        if st.button(f"Save/Update All results to {save_dir.name}", type="primary", width="stretch", help="Write or update all result files to the specified output folder."):
             save_dir.mkdir(parents=True, exist_ok=True)
             
             # Use the stored batch_runs (main ImageData + Pipeline)
