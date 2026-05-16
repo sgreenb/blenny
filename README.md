@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="screenshots/blenny_logo.png" width="200" alt="Blenny Logo">
+</p>
+
 # Blenny
 
 **A free, open-source toolkit for analyzing colonies on petri plates.**

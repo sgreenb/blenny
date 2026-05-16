@@ -1,3 +1,4 @@
+import base64
 import os
 import shutil
 import subprocess
@@ -191,7 +192,21 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-st.title("Blenny Plate Reader")
+
+logo_path = Path(__file__).parent.parent / "screenshots" / "blenny_logo.png"
+if logo_path.exists():
+    with open(logo_path, "rb") as f:
+        logo_base64 = base64.b64encode(f.read()).decode()
+    st.markdown(
+        f"""
+        <div style="display: flex; justify-content: center;">
+            <img src="data:image/png;base64,{logo_base64}" width="200">
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+st.markdown("<h1 style='text-align: center;'>Blenny Plate Reader</h1>", unsafe_allow_html=True)
 
 # Allow the drawable-canvas iframe (and its column) to scroll horizontally
 # instead of clipping the right edge of the plate preview when the browser
