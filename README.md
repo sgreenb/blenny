@@ -23,7 +23,7 @@ cd blenny
 pip install -e .
 ```
 
-#### Alternative: Robust Installation (Recommended for Researchers)
+#### Alternative: Robust Installation
 If you encounter compatibility issues with different Python versions or package conflicts, we recommend using **pyenv** and **poetry**. These tools ensure you are using the exact environment used to develop and test Blenny.
 
 1. **Setup the environment**:
