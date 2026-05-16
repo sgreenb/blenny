@@ -4,9 +4,8 @@ emoji: 🐟
 colorFrom: blue
 colorTo: green
 sdk: streamlit
-sdk_version: 1.35.0
-python_version: 3.11
-app_file: app.py
+python_version: 3.10
+app_file: gui/app.py
 pinned: false
 license: gpl-3.0
 ---

@@ -5,6 +5,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Add the 'src' directory to sys.path so 'blenny' can be imported
+# when running on Hugging Face or other environments.
+root_dir = Path(__file__).parent.parent
+if str(root_dir / "src") not in sys.path:
+    sys.path.append(str(root_dir / "src"))
+
 import numpy as np
 import streamlit as st
 from PIL import Image, ImageOps, ImageFile
