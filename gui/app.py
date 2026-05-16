@@ -135,6 +135,56 @@ def generate_batch_summary(batch_data, output_dir):
         writer.writerows(rows)
 
 
+def generate_batch_colonies(batch_data, output_dir):
+    """Generate batch-level batch_colonies.csv."""
+    import csv
+
+    if not batch_data:
+        return
+
+    all_measurements = []
+    for data in batch_data:
+        all_measurements.extend(data.measurements)
+
+    if not all_measurements:
+        return
+
+    path = Path(output_dir) / "batch_colonies.csv"
+
+    # Define the exact preferred order from CSVExporter to match its format
+    preferred_order = [
+        "plate_label",
+        "label",
+        "centroid_x",
+        "centroid_y",
+        "centroid_x_global",
+        "centroid_y_global",
+        "area_px",
+        "circularity",
+        "solidity",
+        "eccentricity",
+        "mean_r",
+        "mean_g",
+        "mean_b",
+        "mean_h",
+        "mean_s",
+        "mean_v",
+        "is_artifact",
+        "artifact_reason",
+        "source",
+    ]
+
+    fieldnames = []
+    for p in preferred_order:
+        if any(p in m for m in all_measurements):
+            fieldnames.append(p)
+
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(all_measurements)
+
+
 # Set page config for a clean, professional look
 st.set_page_config(
     page_title="Blenny Plate Reader",
@@ -168,8 +218,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Find the CLI script relative to this app.py file
-cli_script = str((Path(__file__).parent.parent / "blenny-cli.py").resolve())
+# CLI execution command
+cli_cmd = [sys.executable, "-m", "blenny"]
 
 # Paths for temporary GUI files
 GUI_TEMP_DIR = Path("gui_uploads")
@@ -211,7 +261,7 @@ with st.sidebar:
     output_folder_input = c_o1.text_input(
         "Output Folder",
         value=st.session_state.get("output_folder_path", ""),
-        help="Directory where results will be saved. Defaults to gui_results/<image_name>/ if left blank.",
+        help="Directory where results will be saved. [Required]",
     )
     c_o2.markdown("<div style='height: 29px;'></div>", unsafe_allow_html=True)
     if c_o2.button("Browse", key="browse_output", help="Browse for output folder", width="stretch"):
@@ -283,19 +333,19 @@ with st.sidebar:
         and not Path("pipeline_yolo.yaml").exists()
         and st.button("Generate Default Pipelines")
     ):
-        subprocess.run([sys.executable, cli_script, "init"])
-        st.success("Created pipeline_classic.yaml and pipeline_yolo.yaml")
+        subprocess.run(cli_cmd + ["init"])
+        st.success("Created pipeline_classic.yaml, pipeline_yolo.yaml, and pipeline_multi.yaml")
 
-    default_pipeline = "pipeline_yolo.yaml"
+    if pipeline_mode == "YOLO ML":
+        default_pipeline = "pipeline_yolo.yaml"
+    else:
+        default_pipeline = "pipeline_classic.yaml"
+
     if not Path(default_pipeline).exists():
-        # Fallback to classic if yolo is missing
-        if Path("pipeline_classic.yaml").exists():
-            default_pipeline = "pipeline_classic.yaml"
-        else:
-            # Try finding it relative to the app root if it doesn't exist in CWD
-            root_pipeline = Path(__file__).parent.parent / "pipeline_yolo.yaml"
-            if root_pipeline.exists():
-                default_pipeline = str(root_pipeline.resolve())
+        # Try finding it relative to the app root if it doesn't exist in CWD
+        root_pipeline = Path(__file__).parent.parent / default_pipeline
+        if root_pipeline.exists():
+            default_pipeline = str(root_pipeline.resolve())
 
     pipeline_path = st.text_input("Pipeline Path", value=default_pipeline)
 
@@ -693,19 +743,20 @@ with st.sidebar:
     generate_annotated = st.checkbox(
         "Generate annotated images",
         value=True,
-        help="Generate PNG images with colony outlines. Uncheck for large batches to save time and space.",
+        help="Create and save PNG images with colony outlines. Uncheck for large batches to save time and space.",
+        key="gen_ann_check",
     )
 
-    # Disable interactive review if annotated images are not generated
-    enable_interactive_val = True
-    if not generate_annotated:
-        enable_interactive_val = False
+    save_subfolders = st.checkbox(
+        "Save Plate Data as Subfolders",
+        value=True,
+        help="If checked, results for each plate are saved in a subfolder named after the image. If unchecked, all files are saved directly in the output folder with prefixes.",
+    )
 
     enable_interactive = st.checkbox(
         "Enable Interactive Review",
-        value=enable_interactive_val,
-        disabled=not generate_annotated,
-        help="Store results in memory for viewing and editing in the GUI. Uncheck for large batches to save RAM. Requires annotated images.",
+        value=st.session_state.get("gen_ann_check", True),
+        help="View and edit results in the GUI after analysis. Uncheck for large batches to save RAM.",
     )
 
     # Initialize session state for manual interventions
@@ -858,7 +909,7 @@ if input_source:
         mask_path = EXCLUSION_MASK_PATH if EXCLUSION_MASK_PATH.exists() else None
 
         # Tool Logic
-        tool = active_tool  # We now always use the canvas to keep scaling consistent
+        tool = active_tool if active_tool != "View" else None
 
         # Overlay existing masks as translucent context guides
         if manual_shape_path:
@@ -929,52 +980,9 @@ if input_source:
                             mask_im.save(mask_path)
 
             # Show input preview if in View mode and canvas isn't being used
-            if active_tool == "View" and ("working_canvas" not in locals() or not working_canvas):
+            if active_tool == "View":
                 st.subheader("Input Preview")
-                display_img = bg_image
-                if plate_mode == "Manual Circle" and manual_cy is not None:
-                    from PIL import ImageDraw
-
-                    draw_img = display_img.copy()
-                    draw = ImageDraw.Draw(draw_img)
-                    r = manual_r
-                    # Raw Plate (Blue)
-                    draw.ellipse(
-                        [manual_cx - r, manual_cy - r, manual_cx + r, manual_cy + r],
-                        outline="blue",
-                        width=5,
-                    )
-                    # Analysis Area (Green)
-                    r_eff = r * radius_scale
-                    draw.ellipse(
-                        [
-                            manual_cx - r_eff,
-                            manual_cy - r_eff,
-                            manual_cx + r_eff,
-                            manual_cy + r_eff,
-                        ],
-                        outline="green",
-                        width=3,
-                    )
-                    # Interior Zone (Yellow)
-                    r_int = r_eff * interior_radius
-                    draw.ellipse(
-                        [
-                            manual_cx - r_int,
-                            manual_cy - r_int,
-                            manual_cx + r_int,
-                            manual_cy + r_int,
-                        ],
-                        outline="yellow",
-                        width=2,
-                    )
-                    draw.line(
-                        [manual_cx - 20, manual_cy, manual_cx + 20, manual_cy], fill="blue", width=3
-                    )
-                    draw.line(
-                        [manual_cx, manual_cy - 20, manual_cx, manual_cy + 20], fill="blue", width=3
-                    )
-                    display_img = draw_img
+                display_img = canvas_bg_img
                 st.image(display_img, width="stretch", caption=f"Reference: {ref_image_path.name}")
 
             if len(input_paths) > 1:
@@ -989,12 +997,16 @@ else:
 
 with col2:
     if run_btn and input_source:
-        output_dir = Path("gui_results")
-        debug_dir = Path("gui_debug") if enable_debug else None
+        if not output_folder_input.strip():
+            st.error("Please specify an Output Folder before running analysis.")
+            st.stop()
 
-        # Wipe the temp working directories
-        if output_dir.exists():
-            shutil.rmtree(output_dir)
+        output_dir = Path(output_folder_input)
+        debug_dir = output_dir / "debug" if enable_debug else None
+
+        # Wipe previous results in the output dir if they exist
+        # NOTE: We only wipe if it looks like a blenny output dir or if we want to be safe.
+        # To avoid destroying user data, let's just ensure it exists.
         output_dir.mkdir(parents=True, exist_ok=True)
         if debug_dir and debug_dir.exists():
             shutil.rmtree(debug_dir)
@@ -1119,6 +1131,13 @@ with col2:
                 # Multi-plate is a bit different: we replace detect_plate with detect_multi_plate
                 # and wrap the core analysis in a sub_pipeline.
 
+                if save_subfolders:
+                    sub_path_prefix = "{output_dir}/{stem}/{stem}_{plate_label}"
+                    main_path_prefix = "{output_dir}/{stem}/{stem}"
+                else:
+                    sub_path_prefix = "{output_dir}/{stem}_{plate_label}"
+                    main_path_prefix = "{output_dir}/{stem}"
+
                 # 1. Build the sub-pipeline steps
                 # We extract the 'core' steps: detection/segmentation + measurement
                 core_step_names = [
@@ -1143,7 +1162,7 @@ with col2:
                         {
                             "name": "export_annotated",
                             "params": {
-                                "output_path": "{output_dir}/{stem}/{stem}_{plate_label}_annotated.png"
+                                "output_path": f"{sub_path_prefix}_annotated.png"
                             },
                         }
                     )
@@ -1172,19 +1191,16 @@ with col2:
                 if generate_annotated:
                     new_main_steps.append({
                         "name": "export_annotated",
-                        "params": {"output_path": "{output_dir}/{stem}/{stem}_annotated.png"}
+                        "params": {"output_path": f"{main_path_prefix}_annotated.png"}
                     })
                 
-                csv_path = "{output_dir}/{stem}/{stem}_colonies.csv" if generate_annotated else "{output_dir}/{stem}_colonies.csv"
-                txt_path = "{output_dir}/{stem}/{stem}_run_summary.txt" if generate_annotated else "{output_dir}/{stem}_run_summary.txt"
-
                 new_main_steps.append({
                     "name": "export_csv",
-                    "params": {"output_path": csv_path}
+                    "params": {"output_path": f"{main_path_prefix}_colonies.csv"}
                 })
                 new_main_steps.append({
                     "name": "export_summary",
-                    "params": {"output_path": txt_path}
+                    "params": {"output_path": f"{main_path_prefix}_run_summary.txt"}
                 })
                 
                 raw_steps = new_main_steps
@@ -1192,28 +1208,30 @@ with col2:
             if mask_path and mask_path.exists():
                 overrides["apply_exclusion_mask"] = {"mask_path": str(mask_path)}
 
-            # Standard exporters for non-multi-plate mode
-            if plate_mode != "Multi-Plate Grid":
-                # Filter out any existing exporters to avoid duplicates
-                raw_steps = [s for s in raw_steps if not s["name"].startswith("export_")]
-                
-                if generate_annotated:
-                    raw_steps.append({
-                        "name": "export_annotated",
-                        "params": {"output_path": "{output_dir}/{stem}/{stem}_annotated.png"}
-                    })
-                
-                csv_path = "{output_dir}/{stem}/{stem}_colonies.csv" if generate_annotated else "{output_dir}/{stem}_colonies.csv"
-                txt_path = "{output_dir}/{stem}/{stem}_run_summary.txt" if generate_annotated else "{output_dir}/{stem}_run_summary.txt"
+        # Standard exporters for non-multi-plate mode
+        if plate_mode != "Multi-Plate Grid":
+            # Filter out any existing exporters to avoid duplicates
+            raw_steps = [s for s in raw_steps if not s["name"].startswith("export_")]
+            
+            if save_subfolders:
+                path_prefix = "{output_dir}/{stem}/{stem}"
+            else:
+                path_prefix = "{output_dir}/{stem}"
 
+            if generate_annotated:
                 raw_steps.append({
-                    "name": "export_csv",
-                    "params": {"output_path": csv_path}
+                    "name": "export_annotated",
+                    "params": {"output_path": f"{path_prefix}_annotated.png"}
                 })
-                raw_steps.append({
-                    "name": "export_summary",
-                    "params": {"output_path": txt_path}
-                })
+            
+            raw_steps.append({
+                "name": "export_csv",
+                "params": {"output_path": f"{path_prefix}_colonies.csv"}
+            })
+            raw_steps.append({
+                "name": "export_summary",
+                "params": {"output_path": f"{path_prefix}_run_summary.txt"}
+            })
 
             for step in raw_steps:
                 if step["name"] in overrides:
@@ -1260,6 +1278,7 @@ with col2:
             
             # Generate batch summary files in the temporary results dir
             generate_batch_summary([d for d, p in st.session_state["batch_runs"]], output_dir)
+            generate_batch_colonies([d for d, p in st.session_state["batch_runs"]], output_dir)
 
             # Stash pipeline for later rendering/saving
             st.session_state["analysis_pipeline"] = pipe
@@ -1304,7 +1323,7 @@ if st.session_state.get("all_results"):
         c_nav1.button(
             "← Previous",
             disabled=(curr_idx == 0),
-            use_container_width=True,
+            width="stretch",
             on_click=go_prev,
         )
 
@@ -1320,7 +1339,7 @@ if st.session_state.get("all_results"):
         c_nav3.button(
             "Next →",
             disabled=(curr_idx == len(stems) - 1),
-            use_container_width=True,
+            width="stretch",
             on_click=go_next,
         )
 
@@ -1358,7 +1377,16 @@ if st.session_state.get("all_results"):
                 width="stretch",
             )
         else:
-            st.warning("Failed to render annotated image.")
+            # Fallback to original image if annotation fails or was skipped
+            display_img = data.image if data.image is not None else data.original_image
+            if display_img is not None:
+                st.image(
+                    display_img,
+                    caption=f"{stem} (Original) — Reviewed Colonies: {data.metadata['colony_count']}",
+                    width="stretch",
+                )
+            else:
+                st.warning("No image available for preview.")
 
         # --- Download Section ---
         c_dl1, c_dl2, c_dl3 = st.columns(3)
@@ -1367,14 +1395,14 @@ if st.session_state.get("all_results"):
             csv_exporter.generate_csv(data),
             file_name=f"{stem}_colonies.csv",
             mime="text/csv",
-            use_container_width=True,
+            width="stretch",
         )
         c_dl2.download_button(
             "Download Summary",
             summarizer.generate_text(data),
             file_name=f"{stem}_run_summary.txt",
             mime="text/plain",
-            use_container_width=True,
+            width="stretch",
         )
         if img is not None:
             import io
@@ -1386,7 +1414,7 @@ if st.session_state.get("all_results"):
                 buf.getvalue(),
                 file_name=f"{stem}_annotated.png",
                 mime="image/png",
-                use_container_width=True,
+                width="stretch",
             )
 
         st.write("Check boxes to mark artifacts. Counts update instantly.")
@@ -1487,85 +1515,30 @@ if st.session_state.get("all_results"):
 
                     st.rerun()
 
-        # Batch Save Button
-        save_dir = (
-            Path(output_folder_input).resolve() if output_folder_input.strip() else output_dir
-        )
-        if st.button(f"Save All results to {save_dir.name}", type="primary", width="stretch"):
+        # Batch Save/Update Button
+        save_dir = Path(output_folder_input).resolve()
+        if st.button(f"Save/Update All results to {save_dir.name}", type="primary", width="stretch", help="Write or update all result files to the specified output folder."):
             save_dir.mkdir(parents=True, exist_ok=True)
             
             # Use the stored batch_runs (main ImageData + Pipeline)
             batch_runs = st.session_state.get("batch_runs", [])
             
             for d, p in batch_runs:
-                stem = d.metadata.get("stem", "unknown")
-                if generate_annotated:
-                    cur_save_dir = save_dir / stem
-                    cur_save_dir.mkdir(parents=True, exist_ok=True)
-                else:
-                    cur_save_dir = save_dir
-                
-                # Update output_dir in metadata so exporters use it
+                # Update output_dir in metadata so exporters use the new destination
                 old_output_dir = d.metadata.get("output_dir")
                 d.metadata["output_dir"] = str(save_dir)
                 
                 for step in p.steps:
-                    # Handle SubPipeline separately to update its inner paths
-                    if step.registry_name == "sub_pipeline":
-                        # Temporarily update inner exporter paths
-                        orig_inner_paths = []
-                        for inner_step in step._inner_pipeline.steps:
-                            if hasattr(inner_step, "export") and hasattr(inner_step.params, "output_path"):
-                                orig_inner_paths.append((inner_step, inner_step.params.output_path))
-                                if old_output_dir:
-                                    try:
-                                        rel = Path(inner_step.params.output_path).relative_to(old_output_dir)
-                                        inner_step.params.output_path = str(Path(save_dir) / rel)
-                                    except ValueError:
-                                        # If path doesn't contain old_output_dir, it might be already flattened
-                                        if not generate_annotated:
-                                            # We need to make sure it's flattened
-                                            p_name = Path(inner_step.params.output_path).name
-                                            inner_step.params.output_path = str(save_dir / f"{stem}_{p_name}")
-
+                    if hasattr(step, "export"):
                         step.export(d)
-                        
-                        # Restore inner paths
-                        for inner_step, orig_path in orig_inner_paths:
-                            inner_step.params.output_path = orig_path
-                    
-                    elif hasattr(step, "export"):
-                        orig_path = getattr(step.params, "output_path", None)
-                        if orig_path:
-                            if old_output_dir:
-                                try:
-                                    rel = Path(orig_path).relative_to(old_output_dir)
-                                    new_path = str(Path(save_dir) / rel)
-                                except ValueError:
-                                    if not generate_annotated:
-                                        p_name = Path(orig_path).name
-                                        new_path = str(save_dir / f"{stem}_{p_name}")
-                                    else:
-                                        new_path = orig_path
-                            else:
-                                filename = Path(orig_path).name
-                                if generate_annotated:
-                                    new_path = str(cur_save_dir / filename)
-                                else:
-                                    new_path = str(save_dir / f"{stem}_{filename}")
-                            
-                            step.params.output_path = new_path
-                            step.export(d)
-                            step.params.output_path = orig_path
-                        else:
-                            step.export(d)
                 
-                # Restore metadata
+                # Restore original metadata
                 if old_output_dir:
                     d.metadata["output_dir"] = old_output_dir
 
-            # Also generate the batch summary in the new save_dir
+            # Also generate the batch summary in the destination dir
             generate_batch_summary([d for d, p in batch_runs], save_dir)
+            generate_batch_colonies([d for d, p in batch_runs], save_dir)
             
             st.success(f"All {len(batch_runs)} image results (including sub-plates) saved to {save_dir}")
 
@@ -1580,6 +1553,6 @@ st.divider()
 st.caption(
     "Blenny GUI v0.2 • YOLO ML Engine • Engine: "
     + subprocess.run(
-        [sys.executable, cli_script, "--version"], capture_output=True, text=True
+        cli_cmd + ["--version"], capture_output=True, text=True
     ).stdout.strip()
 )

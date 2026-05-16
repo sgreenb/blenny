@@ -1,60 +1,49 @@
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
-[project]
+[tool.poetry]
 name = "blenny"
 version = "1.0.0"
 description = "A free, open-source toolkit for analyzing colonies on petri plates."
+authors = ["The Blenny contributors"]
+license = "GPL-3.0-or-later"
 readme = "README.md"
-license = { text = "GPL-3.0-or-later" }
-requires-python = ">=3.11"
-authors = [{ name = "The Blenny contributors" }]
+homepage = "https://github.com/sgreenb/blenny"
+repository = "https://github.com/sgreenb/blenny"
 keywords = ["microscopy", "image-analysis", "colony-counting", "bioimage", "plates"]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
-    "Operating System :: OS Independent",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Image Processing",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
-dependencies = [
-    "numpy>=1.24",
-    "pydantic>=2.5",
-    "pyyaml>=6.0",
-    "pillow>=10",
-    "scikit-image>=0.22",
-    "scipy>=1.10",
-    "typer>=0.12",
-    "streamlit>=1.35",
-    "streamlit-drawable-canvas>=0.9",
-    "pandas>=2.0",
-    "ultralytics>=8.3",
-]
+packages = [{include = "blenny", from = "src"}]
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=7",
-    "pytest-cov>=4",
-    "ruff>=0.5",
-    "mypy>=1.8",
-    "pre-commit>=3.6",
-]
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+numpy = ">=1.24"
+pydantic = ">=2.5"
+pyyaml = ">=6.0"
+pillow = ">=10"
+scikit-image = ">=0.22"
+scipy = ">=1.10"
+typer = ">=0.12"
+streamlit = ">=1.35"
+streamlit-drawable-canvas = ">=0.9"
+pandas = ">=2.0"
+ultralytics = ">=8.3"
+opencv-python = ">=4.8"
 
-[project.scripts]
+[tool.poetry.group.dev.dependencies]
+pytest = ">=7"
+pytest-cov = ">=4"
+ruff = ">=0.5"
+mypy = ">=1.8"
+pre-commit = ">=3.6"
+
+[tool.poetry.scripts]
 blenny = "blenny.cli.main:main"
 
-[project.urls]
-Homepage = "https://github.com/your-org/blenny"
-Issues = "https://github.com/your-org/blenny/issues"
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/blenny"]
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
 
 [tool.ruff]
 line-length = 100
@@ -72,8 +61,6 @@ quote-style = "double"
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
 filterwarnings = [
-    # skimage 0.26 deprecated `min_size` in favor of `max_size` with flipped
-    # semantics, slated for 2.0. Revisit once 2.0 lands.
     "ignore:Parameter `min_size` is deprecated:FutureWarning",
 ]
 

@@ -145,6 +145,13 @@ def run(
             help="Stop on first error vs. log and continue (default: keep going).",
         ),
     ] = False,
+    flat: Annotated[
+        bool,
+        typer.Option(
+            "--flat/--no-flat",
+            help="Save all results directly in the output directory without image-name subfolders.",
+        ),
+    ] = False,
     as_json: Annotated[
         bool,
         typer.Option("--json", help="Emit the batch summary as JSON to stdout."),
@@ -173,17 +180,8 @@ def run(
             if step["name"] == "estimate_multiplicity":
                 step.setdefault("params", {})["enabled"] = False
 
-    if not annotated_images:
-        # 1. Remove export_annotated modules
-        raw_steps = [s for s in raw_steps if s["name"] != "export_annotated"]
-        # Recursively handle sub_pipeline
-        for step in raw_steps:
-            if step["name"] == "sub_pipeline" and "params" in step and "steps" in step["params"]:
-                step["params"]["steps"] = [
-                    s for s in step["params"]["steps"] if s["name"] != "export_annotated"
-                ]
-
-        # 2. Flatten output paths if they follow the /{stem}/ pattern
+    if flat:
+        # Flatten output paths if they follow the /{stem}/ pattern
         def flatten_paths(steps: list[dict[str, Any]]) -> None:
             for s in steps:
                 if "params" in s:
@@ -196,6 +194,31 @@ def run(
                     flatten_paths(s["params"]["steps"])
 
         flatten_paths(raw_steps)
+
+    if not annotated_images:
+        # 1. Remove export_annotated modules
+        raw_steps = [s for s in raw_steps if s["name"] != "export_annotated"]
+        # Recursively handle sub_pipeline
+        for step in raw_steps:
+            if step["name"] == "sub_pipeline" and "params" in step and "steps" in step["params"]:
+                step["params"]["steps"] = [
+                    s for s in step["params"]["steps"] if s["name"] != "export_annotated"
+                ]
+
+        if not flat:  # Only auto-flatten if not already explicitly handled by --flat
+            # 2. Flatten output paths if they follow the /{stem}/ pattern
+            def flatten_paths_compat(steps: list[dict[str, Any]]) -> None:
+                for s in steps:
+                    if "params" in s:
+                        for k, v in s["params"].items():
+                            if isinstance(v, str) and "{output_dir}/{stem}/" in v:
+                                s["params"][k] = v.replace(
+                                    "{output_dir}/{stem}/", "{output_dir}/{stem}_"
+                                )
+                    if s["name"] == "sub_pipeline" and "params" in s and "steps" in s["params"]:
+                        flatten_paths_compat(s["params"]["steps"])
+
+            flatten_paths_compat(raw_steps)
 
     # Pre-detect if we are in multi-plate mode to fix column ordering in summary.csv
     expected_plate_columns: list[str] = []
@@ -262,6 +285,7 @@ def run(
         )
 
     summary_rows: list[dict[str, Any]] = []
+    all_measurements: list[dict[str, Any]] = []
     failures = 0
     t_batch = time.perf_counter()
     first_resolved: list[dict[str, Any]] | None = None
@@ -269,7 +293,7 @@ def run(
     for img in inputs:
         stem = img.stem
         per_image_dir = output_dir / stem
-        if annotated_images:
+        if annotated_images and not flat:
             per_image_dir.mkdir(parents=True, exist_ok=True)
 
         resolved = substitute_paths(raw_steps, input_path=img, output_dir=output_dir)
@@ -299,10 +323,11 @@ def run(
             continue
 
         elapsed = time.perf_counter() - t0
+        all_measurements.extend(data.measurements)
         if write_provenance:
             prov_path = (
                 per_image_dir / "provenance.json"
-                if annotated_images
+                if (annotated_images and not flat)
                 else output_dir / f"{stem}_provenance.json"
             )
             _write_provenance(prov_path, data, img)
@@ -357,6 +382,7 @@ def run(
         _write_summary_csv(
             output_dir / "batch_summary.csv", summary_rows, plate_cols=expected_plate_columns
         )
+        _write_batch_colonies_csv(output_dir / "batch_colonies.csv", all_measurements)
 
     total = time.perf_counter() - t_batch
     succ = len(inputs) - failures
@@ -596,6 +622,46 @@ def _to_jsonable(obj: Any) -> Any:
         return obj.tolist()
     return obj
 
+
+
+def _write_batch_colonies_csv(path: Path, measurements: list[dict[str, Any]]) -> None:
+    import csv
+
+    if not measurements:
+        return
+
+    # Define the exact preferred order from CSVExporter to match its format
+    preferred_order = [
+        "plate_label",
+        "label",
+        "centroid_x",
+        "centroid_y",
+        "centroid_x_global",
+        "centroid_y_global",
+        "area_px",
+        "circularity",
+        "solidity",
+        "eccentricity",
+        "mean_r",
+        "mean_g",
+        "mean_b",
+        "mean_h",
+        "mean_s",
+        "mean_v",
+        "is_artifact",
+        "artifact_reason",
+        "source",
+    ]
+
+    fieldnames = []
+    for p in preferred_order:
+        if any(p in m for m in measurements):
+            fieldnames.append(p)
+
+    with path.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(measurements)
 
 
 def _write_summary_csv(
