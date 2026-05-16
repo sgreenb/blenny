@@ -18,7 +18,7 @@ packages = [{include = "blenny", from = "src"}]
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.14"
-numpy = ">=1.24"
+numpy = ">=1.24,<2.0"
 pydantic = ">=2.5"
 pyyaml = ">=6.0"
 pillow = ">=10"
@@ -29,7 +29,9 @@ streamlit = ">=1.35"
 streamlit-drawable-canvas = ">=0.9"
 pandas = ">=2.0"
 ultralytics = ">=8.3"
-opencv-python = ">=4.8"
+torch = ">=2.0,<2.3"
+torchvision = ">=0.15,<0.18"
+opencv-python = ">=4.8,<4.12"
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=7"
