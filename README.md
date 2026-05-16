@@ -29,14 +29,18 @@ Poetry ensures all dependencies (including specific versions of Torch and NumPy)
    ```bash
    git clone https://github.com/sgreenb/blenny.git
    cd blenny
-   # Force use of Python 3.12 if you have multiple versions
-   poetry env use python3.12 
+   # Download and force use of Python 3.12.10 if you have multiple versions
+   poetry python install 3.12.10
+   poetry env use 3.12.10 
    poetry install
    ```
-
+3. **Running from Poetry**
+   ```bash
+   poetry run python -m blenny [command]
+```
 #### Alternative: Basic Pip installation
 If you prefer standard pip, ensure you are using a compatible Python version:
-```bash
+   ```bash
 python3.12 -m pip install -e .
 ```
 
