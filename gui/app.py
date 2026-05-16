@@ -197,16 +197,18 @@ logo_path = Path(__file__).parent.parent / "screenshots" / "blenny_logo.png"
 if logo_path.exists():
     with open(logo_path, "rb") as f:
         logo_base64 = base64.b64encode(f.read()).decode()
+    
     st.markdown(
         f"""
-        <div style="display: flex; justify-content: center;">
+        <div style="display: flex; align-items: center; justify-content: center; gap: 20px;">
+            <h1 style="margin: 0;">Blenny Plate Reader</h1>
             <img src="data:image/png;base64,{logo_base64}" width="200">
         </div>
         """,
         unsafe_allow_html=True
     )
-
-st.markdown("<h1 style='text-align: center;'>Blenny Plate Reader</h1>", unsafe_allow_html=True)
+else:
+    st.markdown("<h1 style='text-align: center;'>Blenny Plate Reader</h1>", unsafe_allow_html=True)
 
 # Allow the drawable-canvas iframe (and its column) to scroll horizontally
 # instead of clipping the right edge of the plate preview when the browser
@@ -215,6 +217,13 @@ st.markdown("<h1 style='text-align: center;'>Blenny Plate Reader</h1>", unsafe_a
 st.markdown(
     """
     <style>
+    /* Maintain a professional layout even on small windows by preventing 
+       extreme narrowness that causes text and columns to stack vertically. */
+    .main .block-container {
+        min-width: 1000px;
+        padding-top: 2rem !important;
+    }
+
     /* The component iframe itself */
     iframe[title="streamlit_drawable_canvas.st_canvas"] {
         max-width: 100%;
@@ -840,8 +849,8 @@ if input_source:
             bg_image = bg_image.convert("RGB")
 
         # Determine canvas size
-        max_ui_width = 800
-        max_ui_height = 600
+        max_ui_width = 1200
+        max_ui_height = 1000
         scale = min(max_ui_width / bg_image.width, max_ui_height / bg_image.height, 1.0)
         canvas_width = int(bg_image.width * scale)
         canvas_height = int(bg_image.height * scale)
@@ -978,6 +987,7 @@ if input_source:
                     drawing_mode=drawing_mode,
                     display_toolbar=False,
                     key=canvas_key,
+                    use_container_width=True,
                 )
 
                 # Process results from whichever tool is active
