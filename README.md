@@ -1,3 +1,15 @@
+---
+title: Blenny
+emoji: 🐟
+colorFrom: blue
+colorTo: green
+sdk: streamlit
+sdk_version: 1.35.0
+app_file: app.py
+pinned: false
+license: gpl-3.0
+---
+
 <p align="center">
   <img src="screenshots/blenny_logo.png" width="200" alt="Blenny Logo">
 </p>

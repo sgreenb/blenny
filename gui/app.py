@@ -3,9 +3,7 @@ import os
 import shutil
 import subprocess
 import sys
-import tkinter as tk
 from pathlib import Path
-from tkinter import filedialog
 
 import numpy as np
 import streamlit as st
@@ -23,31 +21,26 @@ from blenny.pipeline import Pipeline
 
 # --- Helpers ---
 
+def is_running_on_web():
+    """Check if the app is running in a cloud environment."""
+    return (
+        os.environ.get("STREAMLIT_SERVER_HEADLESS") == "true" or 
+        os.environ.get("SPACE_ID") is not None or
+        os.environ.get("STREAMLIT_CLOUD") == "true"
+    )
 
 def local_folder_picker(title="Select Folder"):
     """
-    Open a native folder picker.
+    Open a native folder picker. Only used in local mode.
     """
-    if sys.platform == "darwin":
-        cmd = f"osascript -e 'POSIX path of (choose folder with prompt \"{title}\")'"
-        try:
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-            if result.returncode == 0:
-                return result.stdout.strip()
-        except Exception as e:
-            print(f"macOS folder picker error: {e}")
-    elif sys.platform == "win32":
-        try:
-            # Use tkinter as a more reliable fallback on Windows
-            root = tk.Tk()
-            root.withdraw()
-            root.attributes("-topmost", True)
-            path = filedialog.askdirectory(title=title)
-            root.destroy()
-            return path if path else None
-        except Exception as e:
-            print(f"Windows folder picker error: {e}")
-    return None
+    if is_running_on_web():
+        return None
+        
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except ImportError:
+        return None
 
 
 # Monkey-patch for streamlit-drawable-canvas compatibility with newer Streamlit versions
@@ -258,32 +251,40 @@ with st.sidebar:
     )
 
     # Input Folder Picker
-    c_f1, c_f2 = st.columns([3, 1])
-    input_folder = c_f1.text_input(
-        "OR Folder Path",
-        value=st.session_state.get("folder_path", ""),
-        help="Path to a directory on your machine.",
-    )
-    c_f2.markdown("<div style='height: 29px;'></div>", unsafe_allow_html=True)
-    if c_f2.button("Browse", key="browse_input", help="Browse for input folder", width="stretch"):
-        selected = local_folder_picker("Select Input Folder")
-        if selected:
-            st.session_state["folder_path"] = selected
-            st.rerun()
+    RUNNING_ON_WEB = is_running_on_web()
+    
+    if not RUNNING_ON_WEB:
+        c_f1, c_f2 = st.columns([3, 1])
+        input_folder = c_f1.text_input(
+            "OR Folder Path",
+            value=st.session_state.get("folder_path", ""),
+            help="Path to a directory on your machine.",
+        )
+        c_f2.markdown("<div style='height: 29px;'></div>", unsafe_allow_html=True)
+        if c_f2.button("Browse", key="browse_input", help="Browse for input folder", width="stretch"):
+            selected = local_folder_picker("Select Input Folder")
+            if selected:
+                st.session_state["folder_path"] = selected
+                st.rerun()
 
     # Output Folder Picker
-    c_o1, c_o2 = st.columns([3, 1])
-    output_folder_input = c_o1.text_input(
-        "Output Folder",
-        value=st.session_state.get("output_folder_path", ""),
-        help="Directory where results will be saved. [Required]",
-    )
-    c_o2.markdown("<div style='height: 29px;'></div>", unsafe_allow_html=True)
-    if c_o2.button("Browse", key="browse_output", help="Browse for output folder", width="stretch"):
-        selected = local_folder_picker("Select Output Folder")
-        if selected:
-            st.session_state["output_folder_path"] = selected
-            st.rerun()
+    if not RUNNING_ON_WEB:
+        c_o1, c_o2 = st.columns([3, 1])
+        output_folder_input = c_o1.text_input(
+            "Output Folder",
+            value=st.session_state.get("output_folder_path", ""),
+            help="Directory where results will be saved. [Required]",
+        )
+        c_o2.markdown("<div style='height: 29px;'></div>", unsafe_allow_html=True)
+        if c_o2.button("Browse", key="browse_output", help="Browse for output folder", width="stretch"):
+            selected = local_folder_picker("Select Output Folder")
+            if selected:
+                st.session_state["output_folder_path"] = selected
+                st.rerun()
+    else:
+        # On web, we use a temporary directory for outputs
+        output_folder_input = "web_results"
+        st.info("Results will be available for preview and download below.")
 
     input_folder = st.session_state.get("folder_path", "")
     output_folder_input = st.session_state.get("output_folder_path", "")
