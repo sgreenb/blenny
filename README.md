@@ -17,7 +17,7 @@ Blenny combines modern deep learning (YOLO) with classical computer vision to pr
 ### 1. Installation
 Blenny requires **Python 3.11, 3.12, or 3.13** (Python 3.12 is recommended). 
 
-> **Important:** Do not use Python 3.14 yet, as many deep learning dependencies are not yet compatible.
+> **Important:** Some deep learning libraries may not be compatible with Python 3.14 yet.
 
 #### Recommended: Installation with Poetry
 Poetry ensures all dependencies (including specific versions of Torch and NumPy) are installed correctly without conflicts.
