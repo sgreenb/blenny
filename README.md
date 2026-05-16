@@ -15,7 +15,8 @@ Blenny combines modern deep learning (YOLO) with classical computer vision to pr
 *High-throughput mode: Automatically detect and analyze multiple plates in a single scan, with custom position-based labeling and individual plate review.*
 
 ---
-
+## Test Blenny on Hugging Face
+[Blenny on Hugging Face](https://huggingface.co/spaces/Pico25/blenny)
 ## Quick Start
 
 ### 1. Installation
