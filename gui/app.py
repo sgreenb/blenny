@@ -290,6 +290,8 @@ with st.sidebar:
     else:
         # On web, we use a temporary directory for outputs
         output_folder_input = "web_results"
+        if not Path(output_folder_input).exists():
+            Path(output_folder_input).mkdir(exist_ok=True)
         st.info("Results will be available for preview and download below.")
 
     input_folder = st.session_state.get("folder_path", "")
@@ -1019,7 +1021,7 @@ else:
 
 with col2:
     if run_btn and input_source:
-        if not output_folder_input.strip():
+        if not RUNNING_ON_WEB and not output_folder_input.strip():
             st.error("Please specify an Output Folder before running analysis.")
             st.stop()
 
