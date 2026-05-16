@@ -12,4 +12,3 @@ ultralytics>=8.3
 torch>=2.0,<2.3
 torchvision>=0.15,<0.18
 opencv-python>=4.8,<4.12
--e .
