@@ -23,6 +23,20 @@ cd blenny
 pip install -e .
 ```
 
+#### Alternative: Robust Installation (Recommended for Researchers)
+If you encounter compatibility issues with different Python versions or package conflicts, we recommend using **pyenv** and **poetry**. These tools ensure you are using the exact environment used to develop and test Blenny.
+
+1. **Setup the environment**:
+   ```bash
+   git clone https://github.com/sgreenb/blenny.git
+   cd blenny
+   poetry install
+   ```
+2. **Run Blenny**:
+   ```bash
+   poetry run blenny gui
+   ```
+
 > **Windows note:** If `blenny` isn't recognized as a command after install, either activate your virtual environment first or use `python -m blenny` (e.g., `python -m blenny gui`).
 
 ### 2. Run your first analysis
