@@ -31,6 +31,10 @@ Poetry ensures all dependencies (including specific versions of Torch and NumPy)
    poetry env use python3.12 
    poetry install
    ```
+3. **Setup Blenny Pipelines**:
+   ```bash
+   poetry run blenny init
+   ```
 3. **Run Blenny**:
    ```bash
    poetry run blenny gui
