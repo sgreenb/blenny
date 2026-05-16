@@ -59,7 +59,7 @@ train_yolo.py
 train_colony_yolo.ipynb
 
 # Models
-models/colony_model.pt
+# models/colony_model.pt (uncommented to track)
 
 # Local planning notes
 TODO.md
