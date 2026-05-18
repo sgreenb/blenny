@@ -58,7 +58,3 @@ steps:
   - name: export_summary
     params:
       output_path: "{output_dir}/{stem}/log.txt"
-
-  - name: export_annotated
-    params:
-      output_path: "{output_dir}/{stem}/annotated.png"
