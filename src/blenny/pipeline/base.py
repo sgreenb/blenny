@@ -63,7 +63,7 @@ class Module(ABC):
         return self.params.model_dump()
 
     @abstractmethod
-    def run(self, data: ImageData) -> ImageData:
+    def run(self, data: ImageData, **kwargs: Any) -> ImageData:
         """Transform `data` and return it. May mutate in place."""
 
     def __repr__(self) -> str:
@@ -89,7 +89,7 @@ class Loader(Module):
     def load(self, source: str) -> Any:
         """Return an image array for the given source identifier."""
 
-    def run(self, data: ImageData) -> ImageData:
+    def run(self, data: ImageData, **kwargs: Any) -> ImageData:
         if data.source is None:
             raise ValueError(f"{self.name}: ImageData.source is not set; a Loader needs a source.")
         image = self.load(data.source)
@@ -106,7 +106,7 @@ class Preprocessor(Module):
     def process(self, image: Any, data: ImageData) -> Any:
         """Return the new image. ``data`` is provided for context (masks, metadata)."""
 
-    def run(self, data: ImageData) -> ImageData:
+    def run(self, data: ImageData, **kwargs: Any) -> ImageData:
         if data.image is None:
             raise ValueError(f"{self.name}: no image to preprocess; did a Loader run?")
         data.image = self.process(data.image, data)
@@ -124,7 +124,7 @@ class Segmenter(Module):
     def segment(self, image: Any, data: ImageData) -> Any:
         """Return a mask array (binary or label) for ``image``."""
 
-    def run(self, data: ImageData) -> ImageData:
+    def run(self, data: ImageData, **kwargs: Any) -> ImageData:
         if data.image is None:
             raise ValueError(f"{self.name}: no image to segment; did a Loader run?")
         mask = self.segment(data.image, data)
@@ -144,7 +144,7 @@ class FeatureExtractor(Module):
     def extract(self, image: Any, mask: Any, data: ImageData) -> list[dict[str, Any]]:
         """Return a list of per-object measurement rows."""
 
-    def run(self, data: ImageData) -> ImageData:
+    def run(self, data: ImageData, **kwargs: Any) -> ImageData:
         mask_key: str = self.params.mask_key  # type: ignore[attr-defined]
         if mask_key not in data.masks:
             raise ValueError(
@@ -165,7 +165,7 @@ class Classifier(Module):
     def classify(self, rows: list[dict[str, Any]], data: ImageData) -> list[dict[str, Any]]:
         """Return updated rows (typically the same list, with new keys added)."""
 
-    def run(self, data: ImageData) -> ImageData:
+    def run(self, data: ImageData, **kwargs: Any) -> ImageData:
         data.measurements = self.classify(data.measurements, data)
         return data
 
@@ -177,6 +177,6 @@ class Exporter(Module):
     def export(self, data: ImageData) -> None:
         """Write outputs (CSVs, annotated images, ...) for ``data``."""
 
-    def run(self, data: ImageData) -> ImageData:
+    def run(self, data: ImageData, **kwargs: Any) -> ImageData:
         self.export(data)
         return data

@@ -513,16 +513,16 @@ def init(
     if template is None and out is None:
         try:
             classic_text = templates.load_text("count-colonies")
-            yolo_text = templates.load_text("count-colonies-yolo")
-            multi_text = templates.load_text("count-colonies-multi")
+            yolo_text = templates.load_text("count-colonies-yolo-facile")
+            multi_text = templates.load_text("count-colonies-yolo-facile-grid")
 
             Path("pipeline_classic.yaml").write_text(classic_text, encoding="utf-8")
             Path("pipeline_yolo.yaml").write_text(yolo_text, encoding="utf-8")
             Path("pipeline_multi.yaml").write_text(multi_text, encoding="utf-8")
 
             typer.echo("Wrote Classic CV template to pipeline_classic.yaml")
-            typer.echo("Wrote YOLO ML template to pipeline_yolo.yaml")
-            typer.echo("Wrote Multi-Plate template to pipeline_multi.yaml")
+            typer.echo("Wrote YOLO ML (Auto) template to pipeline_yolo.yaml")
+            typer.echo("Wrote YOLO ML (Grid) template to pipeline_multi.yaml")
             return
         except KeyError as e:
             typer.echo(f"Error loading default templates: {e}", err=True)

@@ -10,6 +10,7 @@ from blenny.modules.add_manual_colonies import ManualColonyAdder
 from blenny.modules.classify_interior import InteriorColonyClassifier
 from blenny.modules.classify_threshold import ThresholdClassifier
 from blenny.modules.correct_illumination import IlluminationCorrection
+from blenny.modules.detect_facile import FacileDetector
 from blenny.modules.detect_multi_plate import MultiPlateDetector
 from blenny.modules.detect_plate import PlateDetector
 from blenny.modules.estimate_multiplicity import MultiplicityEstimator
@@ -30,6 +31,7 @@ __all__ = [
     "CSVExporter",
     "ColonyMeasurer",
     "ExclusionMasker",
+    "FacileDetector",
     "IDFilter",
     "IdentityPreprocessor",
     "IlluminationCorrection",

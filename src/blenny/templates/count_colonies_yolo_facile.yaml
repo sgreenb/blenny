@@ -1,19 +1,22 @@
-# Pipeline for analyzing multiple Petri plates in a consistent grid arrangement
-# using the 'facile' algorithm for detection and YOLO for counting.
+# Fully Automatic Colony Counting Pipeline (Facile + YOLO)
+#
+# This pipeline automatically detects one or multiple plates. 
+# - If 1 plate is found: It analyzes it normally.
+# - If >1 plates are found: It splits them into ROIs for individual review.
 
 steps:
-  - name: "load_image"
+  - name: load_image
     params:
-      # Native resolution is used so that each cropped plate can be
-      # high-quality when passed to the sub-pipeline.
       max_dimension: null
 
-  - name: "detect_multi_plate"
+  - name: detect_facile
     params:
-      grid: [3, 2]         # Change based on your scanner arrangement
+      # 'null' enables automatic single/multi plate detection.
+      multi_plate: null 
       radius_scale: 1.0
+      crop: false
 
-  - name: "sub_pipeline"
+  - name: sub_pipeline
     params:
       max_subplate_dimension: 3200
       steps:
@@ -21,7 +24,7 @@ steps:
           params:
             mask_path: null
 
-        - name: "yolo_detector"
+        - name: yolo_detector
           params:
             model_path: "models/colony_model.pt"
             conf_threshold: 0.15
@@ -34,8 +37,8 @@ steps:
         - name: add_manual_colonies
           params:
             coordinates: []
-        
-        - name: "measure_colonies"
+
+        - name: measure_colonies
           params:
             mask_key: "objects"
             roi_mask_key: "plate"
@@ -43,19 +46,19 @@ steps:
         - name: filter_by_id
           params:
             exclude_ids: []
-        
-        - name: "export_annotated"
+
+        - name: export_annotated
           params:
             output_path: "{output_dir}/{stem}/{stem}_{plate_label}_annotated.png"
 
-  - name: "export_csv"
+  - name: export_csv
     params:
-      output_path: "{output_dir}/{stem}/{stem}_results.csv"
+      output_path: "{output_dir}/{stem}/colonies.csv"
 
-  - name: "export_summary"
+  - name: export_summary
     params:
-      output_path: "{output_dir}/{stem}/{stem}_run_summary.txt"
+      output_path: "{output_dir}/{stem}/log.txt"
 
-  - name: "export_annotated"
+  - name: export_annotated
     params:
-      output_path: "{output_dir}/{stem}/{stem}_annotated_full.png"
+      output_path: "{output_dir}/{stem}/annotated.png"

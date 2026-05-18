@@ -52,8 +52,8 @@ class ImageFileLoader(Loader):
             arr = np.asarray(im).copy()
         return arr
 
-    def run(self, data):  # type: ignore[override, no-untyped-def]
-        data = super().run(data)
+    def run(self, data, **kwargs: Any):  # type: ignore[override, no-untyped-def]
+        data = super().run(data, **kwargs)
         data.metadata.setdefault("source_path", str(Path(data.source).resolve()))
         data.metadata["image_shape"] = tuple(data.image.shape)
         data.metadata["image_dtype"] = str(data.image.dtype)
