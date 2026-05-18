@@ -281,7 +281,7 @@ class FacileDetector(Preprocessor):
              data.masks[self.params.mask_key] = np.ones((h_orig, w_orig), dtype=bool)
              return image
 
-        if use_roi_mode and (len(circles) > 1 or self.params.multi_plate is True):
+        if use_roi_mode and len(circles) > 0:
             rois = []
             # Sort circles by position (top-to-bottom, then left-to-right) for consistent naming
             circles.sort(key=lambda c: (c[1], c[0]))

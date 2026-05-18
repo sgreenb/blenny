@@ -98,6 +98,7 @@ if not hasattr(st_image, "image_to_url"):
 
 _orig_image_to_url = st_image.image_to_url
 def _compat_image_to_url(image_data, width, *args, **kwargs):
+    if image_data is None: return None
     if isinstance(width, int):
         from dataclasses import dataclass
         @dataclass
@@ -451,17 +452,29 @@ if input_paths:
             summarizer = SummaryExporter(output_path="d.txt")
             csv_exporter = CSVExporter(output_path="d.csv")
             
-            st.image(annotator.render(data), width="stretch")
+            img = annotator.render(data)
+            if img is not None:
+                st.image(img, width="stretch")
+            else:
+                st.warning("Annotation failed. Displaying original/preprocessed image.")
+                display_img = data.image if data.image is not None else data.original_image
+                if display_img is not None:
+                    st.image(display_img, width="stretch")
+                else:
+                    st.error("No image available to display.")
             
             # --- Download Section ---
             c_dl1, c_dl2, c_dl3 = st.columns(3)
             c_dl1.download_button("Download CSV", csv_exporter.generate_csv(data), file_name=f"{stem}_colonies.csv", mime="text/csv", width="stretch")
             c_dl2.download_button("Download Summary", summarizer.generate_text(data), file_name=f"{stem}_run_summary.txt", mime="text/plain", width="stretch")
             
-            import io
-            buf = io.BytesIO()
-            annotator.render(data).save(buf, format="PNG")
-            c_dl3.download_button("Download Image", buf.getvalue(), file_name=f"{stem}_annotated.png", mime="image/png", width="stretch")
+            if img is not None:
+                import io
+                buf = io.BytesIO()
+                img.save(buf, format="PNG")
+                c_dl3.download_button("Download Image", buf.getvalue(), file_name=f"{stem}_annotated.png", mime="image/png", width="stretch")
+            else:
+                c_dl3.button("Download Image", disabled=True, width="stretch")
 
             df = pd.DataFrame(data.measurements)
             
