@@ -3,6 +3,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog
@@ -402,6 +403,7 @@ if input_paths:
                         if s["name"] == "sub_pipeline": apply_overrides(s["params"].get("steps", []))
                 apply_overrides(raw_steps)
 
+                t_batch_start = time.perf_counter()
                 with st.status("Analyzing...", expanded=True) as status:
                     # Clear log area for a fresh run
                     st.session_state["gui_analysis_log"] = ""
@@ -414,11 +416,16 @@ if input_paths:
                         
                         def gui_progress(current, total, name):
                             # Append to persistent session log
-                            st.session_state["gui_analysis_log"] += f"&nbsp;&nbsp;[{current}/{total}] `{name}`...\n"
+                            st.session_state["gui_analysis_log"] += f"&nbsp;&nbsp;[{current}/{total}] `{name}`  \n"
                             log_container.markdown(st.session_state["gui_analysis_log"])
                         
+                        t_p_start = time.perf_counter()
                         res = substitute_paths(raw_steps, input_path=p, output_dir=output_dir)
                         data = Pipeline.from_config(res).run(p, output_dir=output_dir, progress_callback=gui_progress)
+                        t_p_elapsed = time.perf_counter() - t_p_start
+                        st.session_state["gui_analysis_log"] += f"&nbsp;&nbsp;**Plate analysis complete in {t_p_elapsed:.2f}s**  \n\n"
+                        log_container.markdown(st.session_state["gui_analysis_log"])
+
                         st.session_state["batch_runs"].append((data, Pipeline.from_config(res)))
                         if enable_interactive:
                             if "multi_plate_results" in data.metadata:
@@ -432,7 +439,8 @@ if input_paths:
                             else:
                                 st.session_state["all_results"][p.stem] = data; st.session_state["result_stems"].append(p.stem)
                     generate_batch_summary([d for d, _ in st.session_state["batch_runs"]], output_dir)
-                    status.update(label="Complete!", state="complete", expanded=True)
+                    t_batch_elapsed = time.perf_counter() - t_batch_start
+                    status.update(label=f"Complete! ({t_batch_elapsed:.2f}s)", state="complete", expanded=True)
             except Exception as e: st.error(f"Error: {e}")
 
         # --- Interactive Review ---
