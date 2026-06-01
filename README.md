@@ -159,4 +159,4 @@ print(f"Found {result.metadata['colony_count']} colonies.")
 
 ## License
 
-GPL-3.0-or-later. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
