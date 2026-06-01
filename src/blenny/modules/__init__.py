@@ -18,6 +18,7 @@ from blenny.modules.export_annotated import AnnotatedImageExporter
 from blenny.modules.export_csv import CSVExporter
 from blenny.modules.export_summary import SummaryExporter
 from blenny.modules.filter_by_id import IDFilter
+from blenny.modules.filter_by_properties import PropertyFilter
 from blenny.modules.identity import IdentityPreprocessor
 from blenny.modules.load_image import ImageFileLoader
 from blenny.modules.mask_exclusion import ExclusionMasker
@@ -33,6 +34,7 @@ __all__ = [
     "ExclusionMasker",
     "FacileDetector",
     "IDFilter",
+    "PropertyFilter",
     "IdentityPreprocessor",
     "IlluminationCorrection",
     "ImageFileLoader",

@@ -15,7 +15,7 @@ steps:
 
   - name: "sub_pipeline"
     params:
-      max_subplate_dimension: 3200
+      max_subplate_dimension: null
       steps:
         - name: apply_exclusion_mask
           params:
@@ -39,6 +39,8 @@ steps:
           params:
             mask_key: "objects"
             roi_mask_key: "plate"
+
+        - name: filter_by_properties
 
         - name: filter_by_id
           params:

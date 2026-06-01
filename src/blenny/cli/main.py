@@ -262,13 +262,18 @@ def run(
                     except ValueError:
                         parsed_val = value
 
-                # Find the module in the steps and update it
-                found = False
-                for step in raw_steps:
-                    if step["name"] == mod_name:
-                        step.setdefault("params", {})[param_name] = parsed_val
-                        found = True
-                if not found:
+                # Find the module in the steps and update it (recurse into sub_pipelines)
+                def _apply_override(steps: list[dict[str, Any]]) -> bool:
+                    for step in steps:
+                        if step["name"] == mod_name:
+                            step.setdefault("params", {})[param_name] = parsed_val
+                            return True
+                        if step["name"] == "sub_pipeline" and "params" in step and "steps" in step["params"]:
+                            if _apply_override(step["params"]["steps"]):
+                                return True
+                    return False
+
+                if not _apply_override(raw_steps):
                     typer.echo(f"Warning: Module '{mod_name}' not found in pipeline.", err=True)
             except ValueError as e:
                 typer.echo(f"Error: Invalid override format '{item}'. Use mod.param=val", err=True)

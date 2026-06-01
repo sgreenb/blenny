@@ -40,10 +40,10 @@ steps:
       method: otsu
       roi_mask_key: plate
       split_touching: true
-      # Shape filters drop rim arcs (low circularity) and pen scribbles
-      # (low solidity). Set either to 0 to disable.
-      min_circularity: 0.75
-      min_solidity: 0.90
+      # Shape filters — prefer filter_by_properties (below) for these.
+      # Set to values above 0 only if you need segmentation-level filtering.
+      min_circularity: 0.0
+      min_solidity: 0.0
 
   - name: add_manual_colonies
     # Used for manual researcher-in-the-loop interventions in the GUI.
@@ -53,6 +53,8 @@ steps:
       coordinates: []
 
   - name: measure_colonies
+
+  - name: filter_by_properties
 
   - name: estimate_multiplicity
     # Tag detections that look like fused / bilobed colonies (high solidity

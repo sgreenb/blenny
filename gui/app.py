@@ -24,8 +24,9 @@ from blenny.pipeline import Pipeline
 
 # --- Globals & Defaults ---
 radius_scale_default = 1.0
-min_area_ppm_default = 5
-min_circ_default = 0.0
+min_area_ppm_default = 0
+min_circ_default = 0.8
+min_solidity_default = 0.7
 interior_radius_default = 1.0
 fallback_ecc_default = 1.0
 max_dimension_default = 3200
@@ -304,6 +305,7 @@ with st.sidebar:
 
     min_area_ppm = compact_control("Min Size (ppm)", "min_area_ppm", 0, 1000, min_area_ppm_default, 1, "Min area.")
     min_circ = compact_control("Min Circularity", "min_circ", 0.0, 1.0, min_circ_default, 0.05, "Min roundness.")
+    min_solidity = compact_control("Min Solidity", "min_solidity", 0.0, 1.0, min_solidity_default, 0.05, "Min solidity (area / convex hull area).")
     interior_radius = compact_control("Interior Radius", "int_r", 0.1, 1.0, interior_radius_default, 0.05, "Interior zone.")
     fallback_ecc = compact_control("Max Eccentricity", "f_ecc", 0.1, 1.0, fallback_ecc_default, 0.05, "Max elongation.")
     enable_debug = st.checkbox("Save debug images", value=False)
@@ -329,6 +331,10 @@ if input_names != st.session_state["last_input_paths"]:
     # Clear Masks
     for p in [PLATE_MASK_PATH, EXCLUSION_MASK_PATH]:
         if p.exists(): p.unlink()
+    # Clear temp run output
+    run_tmp = GUI_TEMP_DIR / "run_output"
+    if run_tmp.exists():
+        shutil.rmtree(run_tmp)
     # Clear Results
     for key in ["all_results", "result_stems", "batch_runs", "current_view_idx", "gui_analysis_log"]:
         st.session_state.pop(key, None)
@@ -375,8 +381,14 @@ if input_paths:
 
     with col2:
         if run_btn:
-            if not output_folder_input.strip(): st.error("Specify output folder."); st.stop()
-            output_dir = Path(output_folder_input); output_dir.mkdir(parents=True, exist_ok=True)
+            if output_folder_input.strip():
+                output_dir = Path(output_folder_input)
+            else:
+                run_tmp = GUI_TEMP_DIR / "run_output"
+                if run_tmp.exists():
+                    shutil.rmtree(run_tmp)
+                output_dir = run_tmp
+            output_dir.mkdir(parents=True, exist_ok=True)
             st.session_state.update({"all_results": {}, "result_stems": [], "batch_runs": [], "current_view_idx": 0})
             
             from blenny.config import extract_steps, load_yaml, substitute_paths
@@ -387,7 +399,8 @@ if input_paths:
                     "detect_plate": {"radius_scale": radius_scale, "crop": False},
                     "detect_facile": {"radius_scale": radius_scale, "crop": False},
                     "detect_multi_plate": {"radius_scale": radius_scale, "grid": [grid_rows, grid_cols], "labels": st.session_state.get("grid_labels")},
-                    "threshold_segment": {"min_area_ppm": min_area_ppm, "min_circularity": min_circ},
+                    "threshold_segment": {"min_area_ppm": min_area_ppm},
+                    "filter_by_properties": {"min_area_ppm": min_area_ppm, "min_circularity": min_circ, "min_solidity": min_solidity},
                     "classify_by_interior": {"interior_radius_frac": interior_radius, "strict_fallback_max_eccentricity": fallback_ecc},
                     "sub_pipeline": {"max_subplate_dimension": int(max_sub_dimension) if resize_sub_enabled else None}
                 }
@@ -537,18 +550,22 @@ if input_paths:
                     st.rerun()
 
             # Batch Save/Update Button
-            save_dir = Path(output_folder_input).resolve()
-            if st.button(f"Save/Update All results to {save_dir.name}", type="primary", width="stretch"):
-                save_dir.mkdir(parents=True, exist_ok=True)
-                for d, p in st.session_state.get("batch_runs", []):
-                    old_out = d.metadata.get("output_dir")
-                    d.metadata["output_dir"] = str(save_dir)
-                    for step in p.steps:
-                        if hasattr(step, "export"): step.export(d)
-                    if old_out: d.metadata["output_dir"] = old_out
-                generate_batch_summary([d for d, _ in st.session_state["batch_runs"]], save_dir)
-                generate_batch_colonies([d for d, _ in st.session_state["batch_runs"]], save_dir)
-                st.success(f"Saved results to {save_dir}")
+            save_label = f"Save/Update All results to {Path(output_folder_input).resolve().name}" if output_folder_input.strip() else "Save/Update All results"
+            if st.button(save_label, type="primary", width="stretch"):
+                if not output_folder_input.strip():
+                    st.error("Please specify an output folder to save results.")
+                else:
+                    save_dir = Path(output_folder_input).resolve()
+                    save_dir.mkdir(parents=True, exist_ok=True)
+                    for d, p in st.session_state.get("batch_runs", []):
+                        old_out = d.metadata.get("output_dir")
+                        d.metadata["output_dir"] = str(save_dir)
+                        for step in p.steps:
+                            if hasattr(step, "export"): step.export(d)
+                        if old_out: d.metadata["output_dir"] = old_out
+                    generate_batch_summary([d for d, _ in st.session_state["batch_runs"]], save_dir)
+                    generate_batch_colonies([d for d, _ in st.session_state["batch_runs"]], save_dir)
+                    st.success(f"Saved results to {save_dir}")
 else:
     st.info("Upload images to begin.")
 
