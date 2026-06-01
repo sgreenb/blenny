@@ -448,6 +448,7 @@ if input_paths:
                                 st.session_state["all_results"][p.stem] = data; st.session_state["result_stems"].append(p.stem)
                     batch_stem = input_paths[0].stem if input_paths else "batch"
                     generate_batch_summary([d for d, _ in st.session_state["batch_runs"]], output_dir, stem=batch_stem)
+                    generate_batch_colonies([d for d, _ in st.session_state["batch_runs"]], output_dir, stem=batch_stem)
                     t_batch_elapsed = time.perf_counter() - t_batch_start
                     status.update(label=f"Complete! ({t_batch_elapsed:.2f}s)", state="complete", expanded=True)
             except Exception as e: st.error(f"Error: {e}")
