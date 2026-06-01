@@ -63,7 +63,7 @@ Results land in `results/<image_name>/`:
   - **Morphology**: Circularity, Solidity, Eccentricity.
   - **Color**: Mean RGB and HSV values.
   - **Audit**: Artifact status, classification reason, and image source.
-- **`image_name_run_summary.txt`**: A human-readable report with count statistics and quality flags.
+- **`image_name_log.txt`**: A human-readable report with count statistics and quality flags.
 
 ---
 

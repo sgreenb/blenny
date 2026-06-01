@@ -110,10 +110,10 @@ st_image.image_to_url = _compat_image_to_url
 
 from streamlit_drawable_canvas import st_canvas
 
-def generate_batch_summary(batch_data, output_dir):
+def generate_batch_summary(batch_data, output_dir, stem="batch"):
     import csv
     if len(batch_data) <= 1: return
-    summary_path = Path(output_dir) / "batch_summary.csv"
+    summary_path = Path(output_dir) / f"{stem}_batch_summary.csv"
     rows = []
     expected_plate_cols = set()
     for data in batch_data:
@@ -143,13 +143,13 @@ def generate_batch_summary(batch_data, output_dir):
         writer.writeheader()
         writer.writerows(rows)
 
-def generate_batch_colonies(batch_data, output_dir):
+def generate_batch_colonies(batch_data, output_dir, stem="batch"):
     import csv
     if not batch_data: return
     all_measurements = []
     for data in batch_data: all_measurements.extend(data.measurements)
     if not all_measurements: return
-    path = Path(output_dir) / "batch_colonies.csv"
+    path = Path(output_dir) / f"{stem}_batch_colonies.csv"
     preferred_order = ["plate_label", "label", "centroid_x", "centroid_y", "centroid_x_global", "centroid_y_global", 
                        "area_px", "circularity", "solidity", "eccentricity", "mean_r", "mean_g", "mean_b", 
                        "is_artifact", "artifact_reason", "source"]
@@ -446,7 +446,8 @@ if input_paths:
                                     st.session_state["all_results"][n] = sr; st.session_state["result_stems"].append(n)
                             else:
                                 st.session_state["all_results"][p.stem] = data; st.session_state["result_stems"].append(p.stem)
-                    generate_batch_summary([d for d, _ in st.session_state["batch_runs"]], output_dir)
+                    batch_stem = input_paths[0].stem if input_paths else "batch"
+                    generate_batch_summary([d for d, _ in st.session_state["batch_runs"]], output_dir, stem=batch_stem)
                     t_batch_elapsed = time.perf_counter() - t_batch_start
                     status.update(label=f"Complete! ({t_batch_elapsed:.2f}s)", state="complete", expanded=True)
             except Exception as e: st.error(f"Error: {e}")
@@ -558,8 +559,9 @@ if input_paths:
                         for step in p.steps:
                             if hasattr(step, "export"): step.export(d)
                         if old_out: d.metadata["output_dir"] = old_out
-                    generate_batch_summary([d for d, _ in st.session_state["batch_runs"]], save_dir)
-                    generate_batch_colonies([d for d, _ in st.session_state["batch_runs"]], save_dir)
+                    batch_stem = st.session_state["batch_runs"][0][0].metadata.get("stem", "batch") if st.session_state.get("batch_runs") else "batch"
+                    generate_batch_summary([d for d, _ in st.session_state["batch_runs"]], save_dir, stem=batch_stem)
+                    generate_batch_colonies([d for d, _ in st.session_state["batch_runs"]], save_dir, stem=batch_stem)
                     st.success(f"Saved results to {save_dir}")
 else:
     st.info("Upload images to begin.")

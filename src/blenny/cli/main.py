@@ -36,8 +36,8 @@ app = typer.Typer(
     "  1. Run the analysis:       blenny run pipeline_yolo_facile.yaml -i plate.jpg -o results/\n"
     "  2. Multi-plate analysis:   blenny run pipeline_yolo_facile_grid.yaml -i scan.jpg -o out/ -v detect_multi_plate.grid=[2,3]\n"
     "  3. Launch the GUI:         blenny gui\n\n"
-    "Standard outputs: image_name_annotated.png, image_name_colonies.csv, image_name_run_summary.txt\n"
-    "Batch outputs:    batch_summary.csv (includes per-plate counts)\n"
+    "Standard outputs: image_name_annotated.png, image_name_colonies.csv, image_name_log.txt\n"
+    "Batch outputs:    {stem}_batch_summary.csv (includes per-plate counts)\n"
     "Optional:         --provenance (provenance.json)  --debug-dir (step images)",
     no_args_is_help=True,
     add_completion=False,
@@ -72,8 +72,8 @@ def _root(
 
 @app.command(
     help="Run a YAML pipeline on one image or a batch.\n\n"
-    "Standard outputs: image_name_annotated.png, image_name_colonies.csv, image_name_run_summary.txt\n"
-    "Batch outputs:    batch_summary.csv (includes per-plate counts)\n"
+    "Standard outputs: image_name_annotated.png, image_name_colonies.csv, image_name_log.txt\n"
+    "Batch outputs:    {stem}_batch_summary.csv (includes per-plate counts)\n"
     "Optional:         --provenance for provenance.json, --debug-dir for step images"
 )
 def run(
@@ -120,7 +120,7 @@ def run(
         bool | None,
         typer.Option(
             "--summary/--no-summary",
-            help="Save batch batch_summary.csv. Defaults to True if multiple images are processed.",
+            help="Save batch {stem}_batch_summary.csv. Defaults to True if multiple images are processed.",
         ),
     ] = None,
     multiplicity: Annotated[
@@ -383,10 +383,11 @@ def run(
     # Only write batch summary files if requested OR if there are multiple images
     # and the user hasn't explicitly disabled them.
     if write_summary is True or (write_summary is None and len(inputs) > 1):
+        batch_stem = inputs[0].stem
         _write_summary_csv(
-            output_dir / "batch_summary.csv", summary_rows, plate_cols=expected_plate_columns
+            output_dir / f"{batch_stem}_batch_summary.csv", summary_rows, plate_cols=expected_plate_columns
         )
-        _write_batch_colonies_csv(output_dir / "batch_colonies.csv", all_measurements)
+        _write_batch_colonies_csv(output_dir / f"{batch_stem}_batch_colonies.csv", all_measurements)
 
     total = time.perf_counter() - t_batch
     succ = len(inputs) - failures

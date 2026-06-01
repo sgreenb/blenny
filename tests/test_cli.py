@@ -65,13 +65,13 @@ steps:
   - name: measure_colonies
   - name: export_csv
     params:
-      output_path: "{output_dir}/{stem}/colonies.csv"
+      output_path: "{output_dir}/{stem}/{stem}_colonies.csv"
   - name: export_summary
     params:
-      output_path: "{output_dir}/{stem}/log.txt"
+      output_path: "{output_dir}/{stem}/{stem}_log.txt"
   - name: export_annotated
     params:
-      output_path: "{output_dir}/{stem}/annotated.png"
+      output_path: "{output_dir}/{stem}/{stem}_annotated.png"
 """
 
 
@@ -94,9 +94,9 @@ def test_run_single_image_with_template(tmp_path: Path) -> None:
     )
     assert result.exit_code == 0, result.stdout
     # Per-image outputs landed where expected.
-    assert (out_dir / "plate" / "colonies.csv").exists()
-    assert (out_dir / "plate" / "annotated.png").exists()
-    assert (out_dir / "plate" / "log.txt").exists()
+    assert (out_dir / "plate" / "plate_colonies.csv").exists()
+    assert (out_dir / "plate" / "plate_annotated.png").exists()
+    assert (out_dir / "plate" / "plate_log.txt").exists()
     # provenance.json is opt-in; should NOT be present by default.
     assert not (out_dir / "plate" / "provenance.json").exists()
     # Resolved config at the root; summary.csv only for batches.
@@ -131,9 +131,9 @@ def test_run_batch_with_glob(tmp_path: Path) -> None:
     )
     assert result.exit_code == 0, result.stdout
     for p in paths:
-        assert (out_dir / p.stem / "colonies.csv").exists()
-        assert (out_dir / p.stem / "annotated.png").exists()
-        assert (out_dir / p.stem / "log.txt").exists()
+        assert (out_dir / p.stem / f"{p.stem}_colonies.csv").exists()
+        assert (out_dir / p.stem / f"{p.stem}_annotated.png").exists()
+        assert (out_dir / p.stem / f"{p.stem}_log.txt").exists()
         # provenance.json is opt-in; should NOT be present by default.
         assert not (out_dir / p.stem / "provenance.json").exists()
     # summary.csv is auto-generated for batch runs.
@@ -181,6 +181,6 @@ def test_run_keeps_going_after_per_image_failure(tmp_path: Path) -> None:
     )
     # Returns nonzero because there was a failure, but the good image still ran.
     assert result.exit_code != 0
-    assert (out_dir / img_good.stem / "colonies.csv").exists()
+    assert (out_dir / img_good.stem / f"{img_good.stem}_colonies.csv").exists()
     summary_csv = (out_dir / "summary.csv").read_text()
     assert "failed" in summary_csv

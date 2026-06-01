@@ -52,8 +52,8 @@ steps:
 
   - name: "export_csv"
     params:
-      output_path: "{output_dir}/{stem}/{stem}_results.csv"
+      output_path: "{output_dir}/{stem}/{stem}_colonies.csv"
 
   - name: "export_summary"
     params:
-      output_path: "{output_dir}/{stem}/{stem}_run_summary.txt"
+      output_path: "{output_dir}/{stem}/{stem}_log.txt"
