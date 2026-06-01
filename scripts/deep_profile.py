@@ -88,7 +88,7 @@ def profile_pipeline(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--pipeline", default="pipeline_multi.yaml")
+    parser.add_argument("--pipeline", default="pipeline_yolo_facile_grid.yaml")
     parser.add_argument("--image", default="ml_training/datasets/multiplate_data/C_1-5_005.jpg")
     parser.add_argument("--grid", type=int, nargs=2)
     args = parser.parse_args()

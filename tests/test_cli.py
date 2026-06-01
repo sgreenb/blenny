@@ -1,4 +1,4 @@
-"""CLI tests (run, modules, init, version)."""
+"""CLI tests (run, modules, version)."""
 
 from __future__ import annotations
 
@@ -46,47 +46,33 @@ def test_modules_command_json_output() -> None:
     assert {"load_image", "detect_plate", "export_csv"} <= names
 
 
-# --- init --------------------------------------------------------------------
-
-
-def test_init_writes_to_default_file(tmp_path: Path) -> None:
-    import os
-
-    orig_cwd = os.getcwd()
-    os.chdir(tmp_path)
-    try:
-        result = runner.invoke(app, ["init"])
-        assert result.exit_code == 0
-        assert "Wrote Classic CV template to pipeline_classic.yaml" in result.stdout
-        assert "Wrote YOLO ML template to pipeline_yolo.yaml" in result.stdout
-        assert Path("pipeline_classic.yaml").exists()
-        assert Path("pipeline_yolo.yaml").exists()
-        assert "steps:" in Path("pipeline_classic.yaml").read_text()
-    finally:
-        os.chdir(orig_cwd)
-
-
-def test_init_writes_to_file(tmp_path: Path) -> None:
-    out = tmp_path / "pipe.yaml"
-    result = runner.invoke(app, ["init", "count-colonies", "--out", str(out)])
-    assert result.exit_code == 0
-    assert out.exists()
-    text = out.read_text()
-    assert "load_image" in text
-
-
-def test_init_unknown_template_errors() -> None:
-    result = runner.invoke(app, ["init", "nope-not-a-template"])
-    assert result.exit_code != 0
-
-
-def test_init_list_templates() -> None:
-    result = runner.invoke(app, ["init", "--list"])
-    assert result.exit_code == 0
-    assert "count_colonies" in result.stdout or "count-colonies" in result.stdout
-
-
 # --- run end-to-end ----------------------------------------------------------
+
+
+_MINIMAL_PIPELINE = """
+steps:
+  - name: load_image
+    params:
+      max_dimension: null
+  - name: detect_plate
+    params:
+      radius_scale: 1.0
+      crop: false
+  - name: threshold_segment
+    params:
+      method: otsu
+      roi_mask_key: plate
+  - name: measure_colonies
+  - name: export_csv
+    params:
+      output_path: "{output_dir}/{stem}/colonies.csv"
+  - name: export_summary
+    params:
+      output_path: "{output_dir}/{stem}/log.txt"
+  - name: export_annotated
+    params:
+      output_path: "{output_dir}/{stem}/annotated.png"
+"""
 
 
 def _save_synthetic(tmp_path: Path, *, n: int = 25, seed: int = 0) -> Path:
@@ -99,7 +85,7 @@ def _save_synthetic(tmp_path: Path, *, n: int = 25, seed: int = 0) -> Path:
 def test_run_single_image_with_template(tmp_path: Path) -> None:
     img = _save_synthetic(tmp_path)
     pipe_yaml = tmp_path / "pipe.yaml"
-    runner.invoke(app, ["init", "count-colonies", "--out", str(pipe_yaml)])
+    pipe_yaml.write_text(_MINIMAL_PIPELINE)
 
     out_dir = tmp_path / "out"
     result = runner.invoke(
@@ -129,7 +115,7 @@ def test_run_batch_with_glob(tmp_path: Path) -> None:
         paths.append(p)
 
     pipe_yaml = tmp_path / "pipe.yaml"
-    runner.invoke(app, ["init", "--out", str(pipe_yaml)])
+    pipe_yaml.write_text(_MINIMAL_PIPELINE)
 
     out_dir = tmp_path / "out"
     result = runner.invoke(
@@ -150,15 +136,14 @@ def test_run_batch_with_glob(tmp_path: Path) -> None:
         assert (out_dir / p.stem / "log.txt").exists()
         # provenance.json is opt-in; should NOT be present by default.
         assert not (out_dir / p.stem / "provenance.json").exists()
-    # summary.csv and batch_log.txt are auto-generated for batch runs.
+    # summary.csv is auto-generated for batch runs.
     summary_csv = (out_dir / "summary.csv").read_text()
     assert summary_csv.count("\n") >= 4  # header + 3 data rows
-    assert (out_dir / "batch_log.txt").exists()
 
 
 def test_run_no_match_exits_with_error(tmp_path: Path) -> None:
     pipe_yaml = tmp_path / "pipe.yaml"
-    runner.invoke(app, ["init", "--out", str(pipe_yaml)])
+    pipe_yaml.write_text(_MINIMAL_PIPELINE)
     result = runner.invoke(
         app,
         [
@@ -180,7 +165,7 @@ def test_run_keeps_going_after_per_image_failure(tmp_path: Path) -> None:
     img_bad.write_bytes(b"not-a-png")
 
     pipe_yaml = tmp_path / "pipe.yaml"
-    runner.invoke(app, ["init", "--out", str(pipe_yaml)])
+    pipe_yaml.write_text(_MINIMAL_PIPELINE)
 
     out_dir = tmp_path / "out"
     result = runner.invoke(

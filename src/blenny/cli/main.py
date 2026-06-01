@@ -3,7 +3,7 @@
 Subcommands:
     blenny run PIPELINE.yaml --input INPUT --output OUTPUT_DIR
     blenny modules [--json]
-    blenny init [TEMPLATE] [--out PATH]
+    blenny gui
     blenny --version
 
 The ``run`` subcommand is the workhorse: it accepts a single file or a glob
@@ -33,10 +33,9 @@ app = typer.Typer(
     help="Blenny: A toolkit for analyzing colonies on petri plates.\n\n"
     "Documentation: https://github.com/sgreenb/blenny\n\n"
     "CORE WORKFLOW:\n"
-    "  1. Initialize pipelines:   blenny init\n"
-    "  2. Run the analysis:       blenny run pipeline_yolo.yaml -i plate.jpg -o results/\n"
-    "  3. Multi-plate analysis:   blenny run pipeline_multi.yaml -i scan.jpg -o out/ -v detect_multi_plate.grid=[2,3]\n"
-    "  4. Launch the GUI:         blenny gui\n\n"
+    "  1. Run the analysis:       blenny run pipeline_yolo_facile.yaml -i plate.jpg -o results/\n"
+    "  2. Multi-plate analysis:   blenny run pipeline_yolo_facile_grid.yaml -i scan.jpg -o out/ -v detect_multi_plate.grid=[2,3]\n"
+    "  3. Launch the GUI:         blenny gui\n\n"
     "Standard outputs: image_name_annotated.png, image_name_colonies.csv, image_name_run_summary.txt\n"
     "Batch outputs:    batch_summary.csv (includes per-plate counts)\n"
     "Optional:         --provenance (provenance.json)  --debug-dir (step images)",
@@ -483,69 +482,6 @@ def modules(
                 default = pinfo.get("default", "<required>")
                 typer.echo(f"    - {pname}: {pinfo.get('type', '?')} = {default!r}")
         typer.echo("")
-
-
-# --- init --------------------------------------------------------------------
-
-
-@app.command(help="Write starter pipeline YAML configs (Classic and YOLO).")
-def init(
-    template: Annotated[
-        str | None,
-        typer.Argument(help="Template name (run `blenny init --list` to see options)."),
-    ] = None,
-    out: Annotated[
-        Path | None,
-        typer.Option(
-            "--out",
-            "-o",
-            help="Where to write the YAML.",
-        ),
-    ] = None,
-    list_templates: Annotated[
-        bool,
-        typer.Option("--list", help="List the available templates and exit."),
-    ] = False,
-) -> None:
-    from blenny import templates
-
-    if list_templates:
-        for name in templates.available():
-            typer.echo(name)
-        return
-
-    # Default behavior: Write core templates to their standard filenames
-    if template is None and out is None:
-        try:
-            classic_text = templates.load_text("count-colonies")
-            yolo_text = templates.load_text("count-colonies-yolo-facile")
-            multi_text = templates.load_text("count-colonies-yolo-facile-grid")
-
-            Path("pipeline_classic.yaml").write_text(classic_text, encoding="utf-8")
-            Path("pipeline_yolo.yaml").write_text(yolo_text, encoding="utf-8")
-            Path("pipeline_multi.yaml").write_text(multi_text, encoding="utf-8")
-
-            typer.echo("Wrote Classic CV template to pipeline_classic.yaml")
-            typer.echo("Wrote YOLO ML (Auto) template to pipeline_yolo.yaml")
-            typer.echo("Wrote YOLO ML (Grid) template to pipeline_multi.yaml")
-            return
-        except KeyError as e:
-            typer.echo(f"Error loading default templates: {e}", err=True)
-            raise typer.Exit(code=1) from None
-
-    # Specific template or output path requested
-    template_name = template or "count-colonies"
-    out_path = out or Path("pipeline_classic.yaml")
-
-    try:
-        text = templates.load_text(template_name)
-    except KeyError as e:
-        typer.echo(str(e), err=True)
-        raise typer.Exit(code=1) from None
-
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(text, encoding="utf-8")
-    typer.echo(f"Wrote {template_name} template to {out_path}")
 
 
 # --- helpers -----------------------------------------------------------------

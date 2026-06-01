@@ -15,7 +15,6 @@ from PIL import Image, ImageOps, ImageFile
 # Allow loading of slightly truncated images (common in some scanner/camera outputs)
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
-from blenny import templates
 from blenny.modules.classify_interior import InteriorColonyClassifier
 from blenny.modules.export_annotated import AnnotatedImageExporter
 from blenny.modules.export_csv import CSVExporter
@@ -209,11 +208,9 @@ with st.sidebar:
         mode = st.session_state["manual_plate_mode"]
         if mode == "Auto":
             p = "pipeline_yolo_facile.yaml"
-            if not Path(p).exists(): p = "pipeline_yolo.yaml"
             st.session_state["pipeline_path"] = p
         elif mode == "Multi-Plate Grid":
             p = "pipeline_yolo_facile_grid.yaml"
-            if not Path(p).exists(): p = "pipeline_multi.yaml"
             st.session_state["pipeline_path"] = p
         st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
 
@@ -223,10 +220,8 @@ with st.sidebar:
     # Determine suggested pipeline based on mode
     if plate_mode == "Auto":
         suggested = "pipeline_yolo_facile.yaml"
-        if not Path(suggested).exists(): suggested = "pipeline_yolo.yaml"
     elif plate_mode == "Multi-Plate Grid":
         suggested = "pipeline_yolo_facile_grid.yaml"
-        if not Path(suggested).exists(): suggested = "pipeline_multi.yaml"
     else:
         suggested = "pipeline_yolo_facile.yaml"
 
