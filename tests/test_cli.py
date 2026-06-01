@@ -136,8 +136,9 @@ def test_run_batch_with_glob(tmp_path: Path) -> None:
         assert (out_dir / p.stem / f"{p.stem}_log.txt").exists()
         # provenance.json is opt-in; should NOT be present by default.
         assert not (out_dir / p.stem / "provenance.json").exists()
-    # summary.csv is auto-generated for batch runs.
-    summary_csv = (out_dir / "summary.csv").read_text()
+    # {stem}_batch_summary.csv is auto-generated for batch runs.
+    batch_summary = out_dir / f"{paths[0].stem}_batch_summary.csv"
+    summary_csv = batch_summary.read_text()
     assert summary_csv.count("\n") >= 4  # header + 3 data rows
 
 
@@ -182,5 +183,8 @@ def test_run_keeps_going_after_per_image_failure(tmp_path: Path) -> None:
     # Returns nonzero because there was a failure, but the good image still ran.
     assert result.exit_code != 0
     assert (out_dir / img_good.stem / f"{img_good.stem}_colonies.csv").exists()
-    summary_csv = (out_dir / "summary.csv").read_text()
+    # Batch stem is the alphabetically first input file
+    first_stem = sorted([img_good.stem, img_bad.stem])[0]
+    batch_summary = out_dir / f"{first_stem}_batch_summary.csv"
+    summary_csv = batch_summary.read_text()
     assert "failed" in summary_csv
