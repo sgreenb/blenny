@@ -37,6 +37,7 @@ coverage.xml
 .ipynb_checkpoints/
 
 # Blenny outputs
+test_plates/
 debug_output/
 results/
 results_test/
