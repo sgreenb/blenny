@@ -496,16 +496,16 @@ if input_paths:
             df = pd.DataFrame(data.measurements)
             
             # Ensure required columns exist for display and editing
-            for col in ["plate_label", "label", "is_artifact", "centroid_x", "centroid_y", "area_px", "colony_count_estimate", "circularity", "solidity"]:
+            for col in ["plate_label", "label", "is_artifact", "centroid_x", "centroid_y", "area_px", "colony_count_estimate", "circularity", "solidity", "eccentricity"]:
                 if col not in df.columns:
-                    df[col] = 0 if any(k in col for k in ["centroid", "area", "circ", "solid"]) else (False if col == "is_artifact" else 1 if col == "colony_count_estimate" else "N/A")
+                    df[col] = 0 if any(k in col for k in ["centroid", "area", "circ", "solid", "ecc"]) else (False if col == "is_artifact" else 1 if col == "colony_count_estimate" else "N/A")
 
             if "Type" not in df.columns:
                 df["Type"] = df.apply(lambda r: f"Merged(x{int(r.get('colony_count_estimate', 1))})" if int(r.get('colony_count_estimate', 1)) > 1 else "Colony", axis=1)
                 df.loc[df['is_artifact'] == True, 'Type'] = "Artifact"
 
             # Filter to final display set
-            display_cols = ["plate_label", "label", "is_artifact", "Type", "centroid_x", "centroid_y", "area_px", "circularity", "solidity"]
+            display_cols = ["plate_label", "label", "is_artifact", "Type", "centroid_x", "centroid_y", "area_px", "circularity", "solidity", "eccentricity"]
             cols = [c for c in display_cols if c in df.columns]
             
             edited = st.data_editor(df[cols], key=f"ed_{stem}", hide_index=True, width="stretch",
@@ -518,6 +518,7 @@ if input_paths:
                                         "area_px": st.column_config.NumberColumn("Area", disabled=True),
                                         "circularity": st.column_config.NumberColumn("Circ", disabled=True, format="%.2f"),
                                         "solidity": st.column_config.NumberColumn("Solid", disabled=True, format="%.2f"),
+                                        "eccentricity": st.column_config.NumberColumn("Ecc", disabled=True, format="%.2f"),
                                     })
             
             if st.session_state.get(f"ed_{stem}"):
