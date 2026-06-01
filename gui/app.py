@@ -24,7 +24,7 @@ from blenny.pipeline import Pipeline
 # --- Globals & Defaults ---
 radius_scale_default = 1.0
 min_area_ppm_default = 0
-min_circ_default = 0.8
+min_circ_default = 0.7
 min_solidity_default = 0.7
 interior_radius_default = 1.0
 fallback_ecc_default = 1.0

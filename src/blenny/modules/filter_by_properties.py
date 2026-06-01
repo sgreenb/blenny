@@ -24,7 +24,7 @@ class PropertyFilter(Classifier):
     """
 
     class Params(BlennyParams):
-        min_circularity: float = 0.8
+        min_circularity: float = 0.7
         """Drop regions whose circularity (4π·area / perimeter²) falls below
         this. A perfect disk has circularity 1.0. Set to ``0`` to disable."""
 
