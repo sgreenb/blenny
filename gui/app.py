@@ -3,7 +3,10 @@ import os
 import shutil
 import subprocess
 import sys
+import time
+import tkinter as tk
 from pathlib import Path
+from tkinter import filedialog
 
 # Add the 'src' directory to sys.path so 'blenny' can be imported
 # when running on Hugging Face or other environments.
@@ -18,7 +21,6 @@ from PIL import Image, ImageOps, ImageFile
 # Allow loading of slightly truncated images (common in some scanner/camera outputs)
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
-from blenny import templates
 from blenny.modules.classify_interior import InteriorColonyClassifier
 from blenny.modules.export_annotated import AnnotatedImageExporter
 from blenny.modules.export_csv import CSVExporter
@@ -36,17 +38,28 @@ def is_running_on_web():
     )
 
 def local_folder_picker(title="Select Folder"):
-    """
-    Open a native folder picker. Only used in local mode.
-    """
+    """Open a native folder picker."""
     if is_running_on_web():
         return None
-        
-    try:
-        import tkinter as tk
-        from tkinter import filedialog
-    except ImportError:
-        return None
+    if sys.platform == "darwin":
+        cmd = f"osascript -e 'POSIX path of (choose folder with prompt \"{title}\")'"
+        try:
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            if result.returncode == 0:
+                return result.stdout.strip()
+        except Exception:
+            pass
+    elif sys.platform == "win32":
+        try:
+            root = tk.Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+            path = filedialog.askdirectory(title=title)
+            root.destroy()
+            return path if path else None
+        except Exception:
+            pass
+    return None
 
 
 # Monkey-patch for streamlit-drawable-canvas compatibility with newer Streamlit versions
@@ -82,14 +95,14 @@ st_image.image_to_url = _compat_image_to_url
 
 from streamlit_drawable_canvas import st_canvas  # noqa: E402
 
-def generate_batch_summary(batch_data, output_dir):
+def generate_batch_summary(batch_data, output_dir, stem="batch"):
     """Generate batch-level batch_summary.csv."""
     import csv
 
     if len(batch_data) <= 1:
         return
 
-    summary_path = Path(output_dir) / "batch_summary.csv"
+    summary_path = Path(output_dir) / f"{stem}_batch_summary.csv"
 
     rows = []
     expected_plate_cols = set()
@@ -135,7 +148,7 @@ def generate_batch_summary(batch_data, output_dir):
         writer.writerows(rows)
 
 
-def generate_batch_colonies(batch_data, output_dir):
+def generate_batch_colonies(batch_data, output_dir, stem="batch"):
     """Generate batch-level batch_colonies.csv."""
     import csv
 
@@ -149,7 +162,7 @@ def generate_batch_colonies(batch_data, output_dir):
     if not all_measurements:
         return
 
-    path = Path(output_dir) / "batch_colonies.csv"
+    path = Path(output_dir) / f"{stem}_batch_colonies.csv"
 
     # Define the exact preferred order from CSVExporter to match its format
     preferred_order = [
@@ -345,16 +358,19 @@ with st.sidebar:
     )
 
     # Defaults
-    radius_scale_default, min_ppm_default, min_circ_default = 1.0, 15, 0.7
-    interior_radius_default = 0.85
-    fallback_ecc_default = 0.55
-    max_dimension_default = 2000
+    radius_scale_default = 1.0
+    min_area_ppm_default = 0
+    min_circ_default = 0.7
+    min_solidity_default = 0.7
+    interior_radius_default = 1.0
+    fallback_ecc_default = 1.0
+    max_dimension_default = 3200
     resize_default = False
 
     if pipeline_mode == "YOLO ML":
-        min_ppm_default = 5
         min_circ_default = 0.0
-        max_dimension_default = 1280
+        min_solidity_default = 0.0
+        max_dimension_default = 3200
         resize_default = False
         radius_scale_default = 1.0
 
@@ -366,13 +382,14 @@ with st.sidebar:
             st.success("Config loaded. Settings applied below.")
             steps = {s["name"]: s.get("params", {}) for s in repro_data.get("steps", [])}
             radius_scale_default = float(steps.get("detect_plate", {}).get("radius_scale", 1.0))
-            min_ppm_default = int(steps.get("threshold_segment", {}).get("min_area_ppm", 15))
-            min_circ_default = float(steps.get("threshold_segment", {}).get("min_circularity", 0.7))
+            min_area_ppm_default = int(steps.get("filter_by_properties", {}).get("min_area_ppm", 0))
+            min_circ_default = float(steps.get("filter_by_properties", {}).get("min_circularity", 0.7))
+            min_solidity_default = float(steps.get("filter_by_properties", {}).get("min_solidity", 0.7))
             interior_radius_default = float(
-                steps.get("classify_by_interior", {}).get("interior_radius_frac", 0.85)
+                steps.get("classify_by_interior", {}).get("interior_radius_frac", 1.0)
             )
             fallback_ecc_default = float(
-                steps.get("classify_by_interior", {}).get("strict_fallback_max_eccentricity", 0.55)
+                steps.get("classify_by_interior", {}).get("strict_fallback_max_eccentricity", 1.0)
             )
             loaded_max_dim = steps.get("load_image", {}).get("max_dimension")
             if loaded_max_dim is not None:
@@ -381,26 +398,22 @@ with st.sidebar:
         except Exception as e:
             st.error(f"Error loading config: {e}")
 
-    if (
-        not Path("pipeline_classic.yaml").exists()
-        and not Path("pipeline_yolo.yaml").exists()
-        and st.button("Generate Default Pipelines")
-    ):
-        subprocess.run(cli_cmd + ["init"])
-        st.success("Created pipeline_classic.yaml, pipeline_yolo.yaml, and pipeline_multi.yaml")
-
+    # Default pipeline selection based on mode
     if pipeline_mode == "YOLO ML":
-        default_pipeline = "pipeline_yolo.yaml"
+        default_pipeline = "pipeline_yolo_facile.yaml"
     else:
         default_pipeline = "pipeline_classic.yaml"
 
-    if not Path(default_pipeline).exists():
-        # Try finding it relative to the app root if it doesn't exist in CWD
-        root_pipeline = Path(__file__).parent.parent / default_pipeline
+    # Look for pipeline relative to app root if not in CWD
+    resolved_pipeline = default_pipeline
+    if not Path(resolved_pipeline).exists():
+        root_pipeline = Path(__file__).parent.parent / resolved_pipeline
         if root_pipeline.exists():
-            default_pipeline = str(root_pipeline.resolve())
+            resolved_pipeline = str(root_pipeline.resolve())
+    elif Path("pipeline_yolo_facile.yaml").exists() and pipeline_mode == "YOLO ML":
+        resolved_pipeline = "pipeline_yolo_facile.yaml"
 
-    pipeline_path = st.text_input("Pipeline Path", value=default_pipeline)
+    pipeline_path = st.text_input("Pipeline Path", value=resolved_pipeline)
 
     st.divider()
 
@@ -412,57 +425,32 @@ with st.sidebar:
         if key not in st.session_state:
             st.session_state[key] = default_val
 
-        # Label Row - Attach help here so it's always visible next to the title
         st.markdown(f"**{label}**", help=help_text)
-
-        # Control Row: [Input] [Slider] [Reset]
         c1, c2, c3 = st.columns([1.2, 3, 0.8])
 
-        # Use on_change to sync the two widgets without lag
         def sync_num():
-            new_val = st.session_state[f"num_{key}"]
-            st.session_state[key] = new_val
-            st.session_state[f"slide_{key}"] = new_val
+            st.session_state[key] = st.session_state[f"num_{key}"]
+            st.session_state[f"slide_{key}"] = st.session_state[key]
 
         def sync_slide():
-            new_val = st.session_state[f"slide_{key}"]
-            st.session_state[key] = new_val
-            st.session_state[f"num_{key}"] = new_val
+            st.session_state[key] = st.session_state[f"slide_{key}"]
+            st.session_state[f"num_{key}"] = st.session_state[key]
 
-        # Handle individual reset BEFORE widgets are instantiated
-        if c3.button("Reset", key=f"reset_{key}", help=f"Reset {label}"):
+        if c3.button("Reset", key=f"reset_{key}"):
             st.session_state[key] = default_val
             st.session_state[f"num_{key}"] = default_val
             st.session_state[f"slide_{key}"] = default_val
             st.rerun()
 
-        # Ensure sub-keys are initialized
         if f"num_{key}" not in st.session_state:
             st.session_state[f"num_{key}"] = st.session_state[key]
         if f"slide_{key}" not in st.session_state:
             st.session_state[f"slide_{key}"] = st.session_state[key]
 
-        c1.number_input(
-            label,
-            min_value=float(min_val) if isinstance(step, float) else int(min_val),
-            max_value=float(max_val) if isinstance(step, float) else int(max_val),
-            step=step,
-            key=f"num_{key}",
-            label_visibility="collapsed",
-            on_change=sync_num,
-        )
-
-        c2.slider(
-            label,
-            min_value=float(min_val) if isinstance(step, float) else int(min_val),
-            max_value=float(max_val) if isinstance(step, float) else int(max_val),
-            step=step,
-            key=f"slide_{key}",
-            label_visibility="collapsed",
-            help=help_text,
-            on_change=sync_slide,
-        )
-
+        c1.number_input(label, min_value=float(min_val), max_value=float(max_val), step=float(step),
+                        key=f"num_{key}", label_visibility="collapsed", on_change=sync_num)
+        c2.slider(label, min_value=float(min_val), max_value=float(max_val), step=float(step),
+                  key=f"slide_{key}", label_visibility="collapsed", on_change=sync_slide)
         return st.session_state[key]
 
     # Tool labels for the radio button
@@ -713,13 +701,12 @@ with st.sidebar:
 
     if pipeline_mode == "Classic CV":
         if st.button("Reset All Tuning Defaults"):
-            # Reset main keys and their synced widget counterparts
             for k, default in [
-                ("margin", 0.04),
-                ("min_area_ppm", 15),
+                ("min_area_ppm", 0),
                 ("min_circ", 0.7),
-                ("interior_radius", 0.85),
-                ("fallback_ecc", 0.55),
+                ("min_solidity", 0.7),
+                ("interior_radius", 1.0),
+                ("fallback_ecc", 1.0),
             ]:
                 st.session_state[k] = default
                 st.session_state[f"num_{k}"] = default
@@ -738,10 +725,9 @@ with st.sidebar:
             "min_area_ppm",
             0,
             1000,
-            min_ppm_default,
+            min_area_ppm_default,
             1,
-            "Minimum area a colony must occupy, expressed in parts-per-million of the plate area. "
-            "100 ppm is ~0.6mm2 on a 90mm plate.",
+            "Minimum area in parts-per-million of the plate area. 100 ppm is ~0.6mm2 on a 90mm plate.",
         )
         min_circ = compact_control(
             "Min Circularity",
@@ -750,7 +736,16 @@ with st.sidebar:
             1.0,
             min_circ_default,
             0.05,
-            "Filter objects by roundness (1.0 is a perfect circle). Low values catch rim artifacts.",
+            "Filter by roundness (1.0 = perfect circle). Low values catch rim artifacts.",
+        )
+        min_solidity = compact_control(
+            "Min Solidity",
+            "min_solidity",
+            0.0,
+            1.0,
+            min_solidity_default,
+            0.05,
+            "Filter by solidity (area / convex hull area). Compact colonies score near 1.0.",
         )
         interior_radius = compact_control(
             "Interior Radius Frac",
@@ -768,21 +763,19 @@ with st.sidebar:
             1.0,
             fallback_ecc_default,
             0.05,
-            "Strict eccentricity (elongation) limit used when the plate is too sparse to build a reference profile.",
+            "Strict eccentricity (elongation) limit used when the plate is too sparse.",
         )
 
         enable_multiplicity = st.checkbox(
             "Enable multiplicity estimation",
             value=True,
             key="enable_multiplicity",
-            help="When enabled, detections that look like fused colonies (large area, low "
-            "circularity, high solidity) are scored as multiple colonies. Uncheck to "
-            "count every detection as exactly one colony.",
+            help="When enabled, detections that look like fused colonies (large area, low circularity, high solidity) are scored as multiple colonies.",
         )
     else:
-        # Defaults for YOLO logic
         min_area_ppm = 0
         min_circ = 0.0
+        min_solidity = 0.0
         interior_radius = 1.0
         fallback_ecc = 1.0
         enable_multiplicity = False
@@ -1113,62 +1106,27 @@ with col2:
             from blenny.config import extract_steps, load_yaml, substitute_paths
 
             try:
-                if pipeline_mode == "YOLO ML":
-                    # Priority: 1. User specified path (if it exists and looks like yolo)
-                    #           2. pipeline_yolo.yaml in CWD
-                    #           3. Built-in template
-                    if Path(pipeline_path).exists() and "yolo" in pipeline_path:
-                        raw_config = load_yaml(pipeline_path)
-                    elif Path("pipeline_yolo.yaml").exists():
-                        raw_config = load_yaml("pipeline_yolo.yaml")
-                    else:
-                        import yaml
-
-                        raw_config = yaml.safe_load(templates.load_text("count-colonies-yolo"))
-                else:
-                    # Classic mode priority: 1. pipeline_path
-                    #                        2. pipeline_classic.yaml
-                    #                        3. Built-in template
-                    if Path(pipeline_path).exists():
-                        raw_config = load_yaml(pipeline_path)
-                    elif Path("pipeline_classic.yaml").exists():
-                        raw_config = load_yaml("pipeline_classic.yaml")
-                    else:
-                        import yaml
-
-                        raw_config = yaml.safe_load(templates.load_text("count-colonies"))
-
+                raw_config = load_yaml(pipeline_path)
                 raw_steps = extract_steps(raw_config)
             except Exception as e:
                 st.error(f"Failed to load pipeline: {e}")
                 status_box.update(label="Analysis Failed", state="error")
                 st.stop()
 
-            # If YOLO, we want to replace threshold_segment with yolo_detector
-            # and remove classify_by_interior
-            if pipeline_mode == "YOLO ML" and not any(
-                s["name"] == "yolo_detector" for s in raw_steps
-            ):
-                # if not (e.g. user loaded a classic config), we inject it
-                new_steps = []
-                for step in raw_steps:
-                    if step["name"] == "threshold_segment":
-                        new_steps.append(
-                            {"name": "yolo_detector", "params": {"output_key": "objects"}}
-                        )
-                    elif step["name"] == "classify_by_interior":
-                        continue
-                    else:
-                        new_steps.append(step)
-                raw_steps = new_steps
-
             overrides = {
                 "load_image": {"max_dimension": int(max_dimension) if resize_enabled else None},
                 "detect_plate": {"radius_scale": radius_scale, "crop": False},
+                "detect_facile": {"radius_scale": radius_scale, "crop": False},
                 "threshold_segment": {
                     "min_area": None,
                     "min_area_ppm": min_area_ppm,
+                    "min_circularity": 0.0,
+                    "min_solidity": 0.0,
+                },
+                "filter_by_properties": {
+                    "min_area_ppm": min_area_ppm,
                     "min_circularity": min_circ,
+                    "min_solidity": min_solidity,
                 },
                 "yolo_detector": {"output_key": "objects"},
                 "classify_by_interior": {
@@ -1178,18 +1136,20 @@ with col2:
                 "estimate_multiplicity": {"enabled": enable_multiplicity},
             }
             if plate_mode == "Manual Circle":
-                overrides["detect_plate"].update(
-                    {
-                        "crop": False,
-                        "force_cy": manual_cy,
-                        "force_cx": manual_cx,
-                        "force_r": manual_r,
-                    }
-                )
+                for k in ("detect_plate", "detect_facile"):
+                    overrides[k].update(
+                        {
+                            "crop": False,
+                            "force_cy": manual_cy,
+                            "force_cx": manual_cx,
+                            "force_r": manual_r,
+                        }
+                    )
             if plate_mode == "Manual Shape" and manual_shape_path:
-                overrides["detect_plate"].update(
-                    {"crop": False, "force_mask_path": str(manual_shape_path)}
-                )
+                for k in ("detect_plate", "detect_facile"):
+                    overrides[k].update(
+                        {"crop": False, "force_mask_path": str(manual_shape_path)}
+                    )
 
             # --- Handle Multi-Plate Mode Injection ---
             if plate_mode == "Multi-Plate Grid":
@@ -1304,7 +1264,7 @@ with col2:
 
             # Process every image in the batch
             for i, img_path in enumerate(input_imgs):
-                log_message(f"Processing ({i + 1}/{len(input_imgs)}): {img_path.name}")
+                log_message(f"### {img_path.name}")
 
                 resolved = substitute_paths(raw_steps, input_path=img_path, output_dir=output_dir)
                 pipe = Pipeline.from_config(resolved)
@@ -1312,9 +1272,12 @@ with col2:
                 img_debug_dir = debug_dir / img_path.stem if debug_dir else None
 
                 def gui_progress(current, total, name):
-                    log_message(f"  [{current}/{total}] {name}...")
+                    log_message(f"  [{current}/{total}] `{name}`")
 
+                t_p_start = time.perf_counter()
                 data = pipe.run(img_path, output_dir=output_dir, debug_dir=img_debug_dir, progress_callback=gui_progress)
+                t_p_elapsed = time.perf_counter() - t_p_start
+                log_message(f"  **Plate analysis complete in {t_p_elapsed:.2f}s**")
                 st.session_state["batch_runs"].append((data, pipe))
 
                 if enable_interactive:
@@ -1342,8 +1305,9 @@ with col2:
             log_message(f"Batch complete: {len(input_imgs)} images in {total_time:.2f}s.")
             
             # Generate batch summary files in the temporary results dir
-            generate_batch_summary([d for d, p in st.session_state["batch_runs"]], output_dir)
-            generate_batch_colonies([d for d, p in st.session_state["batch_runs"]], output_dir)
+            batch_stem = input_imgs[0].stem if input_imgs else "batch"
+            generate_batch_summary([d for d, p in st.session_state["batch_runs"]], output_dir, stem=batch_stem)
+            generate_batch_colonies([d for d, p in st.session_state["batch_runs"]], output_dir, stem=batch_stem)
 
             # Stash pipeline for later rendering/saving
             st.session_state["analysis_pipeline"] = pipe
@@ -1526,13 +1490,13 @@ if st.session_state.get("all_results"):
             "label",
             "is_artifact",
             "is_manual_review",
+            "Type",
             "centroid_x",
             "centroid_y",
-            "centroid_x_global",
-            "centroid_y_global",
             "area_px",
-            "area_ppm",
-            "Type",
+            "circularity",
+            "solidity",
+            "eccentricity",
         ]
 
         if "is_manual_review" not in df.columns:
@@ -1565,14 +1529,16 @@ if st.session_state.get("all_results"):
                 "label": st.column_config.TextColumn("ID", disabled=True),
                 "is_manual_review": st.column_config.CheckboxColumn("Manual?", disabled=True),
                 "Type": st.column_config.TextColumn("Class", disabled=True),
+                "centroid_x": st.column_config.NumberColumn("X", disabled=True, format="%.0f"),
+                "centroid_y": st.column_config.NumberColumn("Y", disabled=True, format="%.0f"),
+                "area_px": st.column_config.NumberColumn("Area", disabled=True),
+                "circularity": st.column_config.NumberColumn("Circ", disabled=True, format="%.2f"),
+                "solidity": st.column_config.NumberColumn("Solid", disabled=True, format="%.2f"),
+                "eccentricity": st.column_config.NumberColumn("Ecc", disabled=True, format="%.2f"),
             },
             disabled=[
                 "label",
                 "is_manual_review",
-                "centroid_x",
-                "centroid_y",
-                "area_px",
-                "area_ppm",
                 "Type",
             ],
             hide_index=True,
@@ -1641,8 +1607,9 @@ if st.session_state.get("all_results"):
                         d.metadata["output_dir"] = old_output_dir
 
                 # Also generate the batch summary in the destination dir
-                generate_batch_summary([d for d, p in batch_runs], save_dir)
-                generate_batch_colonies([d for d, p in batch_runs], save_dir)
+                batch_stem = batch_runs[0][0].metadata.get("stem", "batch") if batch_runs else "batch"
+                generate_batch_summary([d for d, p in batch_runs], save_dir, stem=batch_stem)
+                generate_batch_colonies([d for d, p in batch_runs], save_dir, stem=batch_stem)
                 
                 st.success(f"All {len(batch_runs)} image results (including sub-plates) saved to {save_dir}")
 

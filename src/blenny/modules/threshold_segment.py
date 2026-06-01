@@ -36,7 +36,7 @@ class ThresholdSegmenter(Segmenter):
         If ``None``, ``min_area_ppm`` is used instead.
         """
 
-        min_area_ppm: int = 15
+        min_area_ppm: int = 0
         """Drop regions smaller than this many parts-per-million of the ROI area.
         Only used if ``min_area`` is ``None``. A standard 90mm plate is ~6300mm2;
         100ppm is ~0.6mm2 (a small but clear colony).
@@ -45,21 +45,29 @@ class ThresholdSegmenter(Segmenter):
         max_area_frac: float = 0.25
         """Drop regions covering more than this fraction of the ROI (likely artefacts)."""
 
-        min_circularity: float = 0.75
+        min_circularity: float = 0.0
         """Drop regions whose 4π·area / perimeter² falls below this.
 
         A perfect disk has circularity 1.0. The plate-rim arcs and pen scribbles
         that plague real plate photos are long-and-thin and score well below 0.5.
         Set to ``0`` to disable the filter (e.g. when measuring elongated yeast
         cells or filaments).
+
+        Note: Post-measurement filtering via ``filter_by_properties`` is the
+        preferred way to enforce circularity/solidity thresholds across all
+        pipelines.
         """
 
-        min_solidity: float = 0.90
+        min_solidity: float = 0.0
         """Drop regions whose area / convex-hull-area falls below this.
 
         Compact, round colonies have solidity near 1.0. Irregular pen marks,
         scratches, and merged colony chains have lower solidity. Set to ``0``
         to disable.
+
+        Note: Post-measurement filtering via ``filter_by_properties`` is the
+        preferred way to enforce circularity/solidity thresholds across all
+        pipelines.
         """
 
         split_touching: bool = True

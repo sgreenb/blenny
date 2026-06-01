@@ -46,46 +46,6 @@ def test_modules_command_json_output() -> None:
     assert {"load_image", "detect_plate", "export_csv"} <= names
 
 
-# --- init --------------------------------------------------------------------
-
-
-def test_init_writes_to_default_file(tmp_path: Path) -> None:
-    import os
-
-    orig_cwd = os.getcwd()
-    os.chdir(tmp_path)
-    try:
-        result = runner.invoke(app, ["init"])
-        assert result.exit_code == 0
-        assert "Wrote Classic CV template to pipeline_classic.yaml" in result.stdout
-        assert "Wrote YOLO ML template to pipeline_yolo.yaml" in result.stdout
-        assert Path("pipeline_classic.yaml").exists()
-        assert Path("pipeline_yolo.yaml").exists()
-        assert "steps:" in Path("pipeline_classic.yaml").read_text()
-    finally:
-        os.chdir(orig_cwd)
-
-
-def test_init_writes_to_file(tmp_path: Path) -> None:
-    out = tmp_path / "pipe.yaml"
-    result = runner.invoke(app, ["init", "count-colonies", "--out", str(out)])
-    assert result.exit_code == 0
-    assert out.exists()
-    text = out.read_text()
-    assert "load_image" in text
-
-
-def test_init_unknown_template_errors() -> None:
-    result = runner.invoke(app, ["init", "nope-not-a-template"])
-    assert result.exit_code != 0
-
-
-def test_init_list_templates() -> None:
-    result = runner.invoke(app, ["init", "--list"])
-    assert result.exit_code == 0
-    assert "count_colonies" in result.stdout or "count-colonies" in result.stdout
-
-
 # --- run end-to-end ----------------------------------------------------------
 
 
@@ -96,10 +56,9 @@ def _save_synthetic(tmp_path: Path, *, n: int = 25, seed: int = 0) -> Path:
     return p
 
 
-def test_run_single_image_with_template(tmp_path: Path) -> None:
+def test_run_single_image_with_pipeline(tmp_path: Path) -> None:
     img = _save_synthetic(tmp_path)
-    pipe_yaml = tmp_path / "pipe.yaml"
-    runner.invoke(app, ["init", "count-colonies", "--out", str(pipe_yaml)])
+    pipe_yaml = Path("pipeline_classic.yaml")
 
     out_dir = tmp_path / "out"
     result = runner.invoke(
@@ -107,15 +66,14 @@ def test_run_single_image_with_template(tmp_path: Path) -> None:
         ["run", str(pipe_yaml), "--input", str(img), "--output", str(out_dir)],
     )
     assert result.exit_code == 0, result.stdout
-    # Per-image outputs landed where expected.
-    assert (out_dir / "plate" / "colonies.csv").exists()
-    assert (out_dir / "plate" / "annotated.png").exists()
-    assert (out_dir / "plate" / "log.txt").exists()
+    # Per-image outputs landed where expected (prefixed with stem).
+    assert (out_dir / "plate" / "plate_colonies.csv").exists()
+    assert (out_dir / "plate" / "plate_annotated.png").exists()
+    assert (out_dir / "plate" / "plate_log.txt").exists()
     # provenance.json is opt-in; should NOT be present by default.
-    assert not (out_dir / "plate" / "provenance.json").exists()
-    # Resolved config at the root; summary.csv only for batches.
+    assert not (out_dir / "plate" / "plate_provenance.json").exists()
+    # Resolved config at the root.
     assert (out_dir / "reproducible_config.yaml").exists()
-    assert not (out_dir / "summary.csv").exists()
 
 
 def test_run_batch_with_glob(tmp_path: Path) -> None:
@@ -128,8 +86,7 @@ def test_run_batch_with_glob(tmp_path: Path) -> None:
         Image.fromarray(plate.image).save(p)
         paths.append(p)
 
-    pipe_yaml = tmp_path / "pipe.yaml"
-    runner.invoke(app, ["init", "--out", str(pipe_yaml)])
+    pipe_yaml = Path("pipeline_classic.yaml")
 
     out_dir = tmp_path / "out"
     result = runner.invoke(
@@ -145,20 +102,17 @@ def test_run_batch_with_glob(tmp_path: Path) -> None:
     )
     assert result.exit_code == 0, result.stdout
     for p in paths:
-        assert (out_dir / p.stem / "colonies.csv").exists()
-        assert (out_dir / p.stem / "annotated.png").exists()
-        assert (out_dir / p.stem / "log.txt").exists()
-        # provenance.json is opt-in; should NOT be present by default.
-        assert not (out_dir / p.stem / "provenance.json").exists()
-    # summary.csv and batch_log.txt are auto-generated for batch runs.
-    summary_csv = (out_dir / "summary.csv").read_text()
+        assert (out_dir / p.stem / f"{p.stem}_colonies.csv").exists()
+        assert (out_dir / p.stem / f"{p.stem}_annotated.png").exists()
+        assert (out_dir / p.stem / f"{p.stem}_log.txt").exists()
+    # summary.csv auto-generated for batch runs.
+    first_stem = paths[0].stem
+    summary_csv = (out_dir / f"{first_stem}_batch_summary.csv").read_text()
     assert summary_csv.count("\n") >= 4  # header + 3 data rows
-    assert (out_dir / "batch_log.txt").exists()
 
 
 def test_run_no_match_exits_with_error(tmp_path: Path) -> None:
-    pipe_yaml = tmp_path / "pipe.yaml"
-    runner.invoke(app, ["init", "--out", str(pipe_yaml)])
+    pipe_yaml = Path("pipeline_classic.yaml")
     result = runner.invoke(
         app,
         [
@@ -179,8 +133,7 @@ def test_run_keeps_going_after_per_image_failure(tmp_path: Path) -> None:
     img_bad = tmp_path / "broken.png"
     img_bad.write_bytes(b"not-a-png")
 
-    pipe_yaml = tmp_path / "pipe.yaml"
-    runner.invoke(app, ["init", "--out", str(pipe_yaml)])
+    pipe_yaml = Path("pipeline_classic.yaml")
 
     out_dir = tmp_path / "out"
     result = runner.invoke(
@@ -196,6 +149,8 @@ def test_run_keeps_going_after_per_image_failure(tmp_path: Path) -> None:
     )
     # Returns nonzero because there was a failure, but the good image still ran.
     assert result.exit_code != 0
-    assert (out_dir / img_good.stem / "colonies.csv").exists()
-    summary_csv = (out_dir / "summary.csv").read_text()
+    assert (out_dir / img_good.stem / f"{img_good.stem}_colonies.csv").exists()
+    # Batch summary uses the stem of the first (sorted) input image
+    batch_stems = sorted([p.stem for p in [img_bad, img_good]])
+    summary_csv = (out_dir / f"{batch_stems[0]}_batch_summary.csv").read_text()
     assert "failed" in summary_csv

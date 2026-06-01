@@ -30,11 +30,12 @@ class SubPipeline(Module):
         # Pre-build the inner pipeline
         self._inner_pipeline = Pipeline.from_config(self.params.steps)
 
-    def run(self, data: ImageData) -> ImageData:
+    def run(self, data: ImageData, **kwargs: Any) -> ImageData:
         rois = data.metadata.get(self.params.roi_metadata_key, [])
         if not rois:
             return data
 
+        progress_callback = kwargs.get("progress_callback")
         all_measurements = []
         all_sub_results = []
 
@@ -125,7 +126,12 @@ class SubPipeline(Module):
             sub_data.metadata["plate_bbox"] = (y0_hr, x0_hr, y1_hr, x1_hr)
 
             # 2. Run inner pipeline
-            sub_data = self._inner_pipeline.run(sub_data)
+            sub_data = self._inner_pipeline.run(
+                sub_data, 
+                progress_callback=progress_callback,
+                output_dir=kwargs.get("output_dir"),
+                debug_dir=kwargs.get("debug_dir")
+            )
             all_sub_results.append(sub_data)
 
             # Map sub-labels into the global mask if present

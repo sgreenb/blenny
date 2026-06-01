@@ -3,7 +3,7 @@
 Subcommands:
     blenny run PIPELINE.yaml --input INPUT --output OUTPUT_DIR
     blenny modules [--json]
-    blenny init [TEMPLATE] [--out PATH]
+    blenny gui
     blenny --version
 
 The ``run`` subcommand is the workhorse: it accepts a single file or a glob
@@ -33,12 +33,11 @@ app = typer.Typer(
     help="Blenny: A toolkit for analyzing colonies on petri plates.\n\n"
     "Documentation: https://github.com/sgreenb/blenny\n\n"
     "CORE WORKFLOW:\n"
-    "  1. Initialize pipelines:   blenny init\n"
-    "  2. Run the analysis:       blenny run pipeline_yolo.yaml -i plate.jpg -o results/\n"
-    "  3. Multi-plate analysis:   blenny run pipeline_multi.yaml -i scan.jpg -o out/ -v detect_multi_plate.grid=[2,3]\n"
-    "  4. Launch the GUI:         blenny gui\n\n"
-    "Standard outputs: image_name_annotated.png, image_name_colonies.csv, image_name_run_summary.txt\n"
-    "Batch outputs:    batch_summary.csv (includes per-plate counts)\n"
+    "  1. Run the analysis:       blenny run pipeline_yolo_facile.yaml -i plate.jpg -o results/\n"
+    "  2. Multi-plate analysis:   blenny run pipeline_yolo_facile_grid.yaml -i scan.jpg -o out/ -v detect_multi_plate.grid=[2,3]\n"
+    "  3. Launch the GUI:         blenny gui\n\n"
+    "Standard outputs: image_name_annotated.png, image_name_colonies.csv, image_name_log.txt\n"
+    "Batch outputs:    {stem}_batch_summary.csv (includes per-plate counts)\n"
     "Optional:         --provenance (provenance.json)  --debug-dir (step images)",
     no_args_is_help=True,
     add_completion=False,
@@ -73,8 +72,8 @@ def _root(
 
 @app.command(
     help="Run a YAML pipeline on one image or a batch.\n\n"
-    "Standard outputs: image_name_annotated.png, image_name_colonies.csv, image_name_run_summary.txt\n"
-    "Batch outputs:    batch_summary.csv (includes per-plate counts)\n"
+    "Standard outputs: image_name_annotated.png, image_name_colonies.csv, image_name_log.txt\n"
+    "Batch outputs:    {stem}_batch_summary.csv (includes per-plate counts)\n"
     "Optional:         --provenance for provenance.json, --debug-dir for step images"
 )
 def run(
@@ -121,7 +120,7 @@ def run(
         bool | None,
         typer.Option(
             "--summary/--no-summary",
-            help="Save batch batch_summary.csv. Defaults to True if multiple images are processed.",
+            help="Save batch {stem}_batch_summary.csv. Defaults to True if multiple images are processed.",
         ),
     ] = None,
     multiplicity: Annotated[
@@ -262,13 +261,18 @@ def run(
                     except ValueError:
                         parsed_val = value
 
-                # Find the module in the steps and update it
-                found = False
-                for step in raw_steps:
-                    if step["name"] == mod_name:
-                        step.setdefault("params", {})[param_name] = parsed_val
-                        found = True
-                if not found:
+                # Find the module in the steps and update it (recurse into sub_pipelines)
+                def _apply_override(steps: list[dict[str, Any]]) -> bool:
+                    for step in steps:
+                        if step["name"] == mod_name:
+                            step.setdefault("params", {})[param_name] = parsed_val
+                            return True
+                        if step["name"] == "sub_pipeline" and "params" in step and "steps" in step["params"]:
+                            if _apply_override(step["params"]["steps"]):
+                                return True
+                    return False
+
+                if not _apply_override(raw_steps):
                     typer.echo(f"Warning: Module '{mod_name}' not found in pipeline.", err=True)
             except ValueError as e:
                 typer.echo(f"Error: Invalid override format '{item}'. Use mod.param=val", err=True)
@@ -379,10 +383,11 @@ def run(
     # Only write batch summary files if requested OR if there are multiple images
     # and the user hasn't explicitly disabled them.
     if write_summary is True or (write_summary is None and len(inputs) > 1):
+        batch_stem = inputs[0].stem
         _write_summary_csv(
-            output_dir / "batch_summary.csv", summary_rows, plate_cols=expected_plate_columns
+            output_dir / f"{batch_stem}_batch_summary.csv", summary_rows, plate_cols=expected_plate_columns
         )
-        _write_batch_colonies_csv(output_dir / "batch_colonies.csv", all_measurements)
+        _write_batch_colonies_csv(output_dir / f"{batch_stem}_batch_colonies.csv", all_measurements)
 
     total = time.perf_counter() - t_batch
     succ = len(inputs) - failures
@@ -478,69 +483,6 @@ def modules(
                 default = pinfo.get("default", "<required>")
                 typer.echo(f"    - {pname}: {pinfo.get('type', '?')} = {default!r}")
         typer.echo("")
-
-
-# --- init --------------------------------------------------------------------
-
-
-@app.command(help="Write starter pipeline YAML configs (Classic and YOLO).")
-def init(
-    template: Annotated[
-        str | None,
-        typer.Argument(help="Template name (run `blenny init --list` to see options)."),
-    ] = None,
-    out: Annotated[
-        Path | None,
-        typer.Option(
-            "--out",
-            "-o",
-            help="Where to write the YAML.",
-        ),
-    ] = None,
-    list_templates: Annotated[
-        bool,
-        typer.Option("--list", help="List the available templates and exit."),
-    ] = False,
-) -> None:
-    from blenny import templates
-
-    if list_templates:
-        for name in templates.available():
-            typer.echo(name)
-        return
-
-    # Default behavior: Write core templates to their standard filenames
-    if template is None and out is None:
-        try:
-            classic_text = templates.load_text("count-colonies")
-            yolo_text = templates.load_text("count-colonies-yolo")
-            multi_text = templates.load_text("count-colonies-multi")
-
-            Path("pipeline_classic.yaml").write_text(classic_text, encoding="utf-8")
-            Path("pipeline_yolo.yaml").write_text(yolo_text, encoding="utf-8")
-            Path("pipeline_multi.yaml").write_text(multi_text, encoding="utf-8")
-
-            typer.echo("Wrote Classic CV template to pipeline_classic.yaml")
-            typer.echo("Wrote YOLO ML template to pipeline_yolo.yaml")
-            typer.echo("Wrote Multi-Plate template to pipeline_multi.yaml")
-            return
-        except KeyError as e:
-            typer.echo(f"Error loading default templates: {e}", err=True)
-            raise typer.Exit(code=1) from None
-
-    # Specific template or output path requested
-    template_name = template or "count-colonies"
-    out_path = out or Path("pipeline_classic.yaml")
-
-    try:
-        text = templates.load_text(template_name)
-    except KeyError as e:
-        typer.echo(str(e), err=True)
-        raise typer.Exit(code=1) from None
-
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(text, encoding="utf-8")
-    typer.echo(f"Wrote {template_name} template to {out_path}")
 
 
 # --- helpers -----------------------------------------------------------------

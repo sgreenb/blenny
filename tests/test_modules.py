@@ -176,7 +176,7 @@ def test_circularity_filter_drops_elongated_shapes() -> None:
     # 14x14 square; circularity ~0.85 -> passes 0.7 threshold.
     img[20:34, 20:34] = 1.0
     data = ImageData(source="x", image=img)
-    out = ThresholdSegmenter(roi_mask_key=None, split_touching=False).run(data)
+    out = ThresholdSegmenter(roi_mask_key=None, split_touching=False, min_circularity=0.75, min_solidity=0.0).run(data)
     labels = out.masks["objects"]
     # Strip should be dropped, square should remain.
     assert int(labels.max()) == 1
@@ -198,7 +198,7 @@ def test_solidity_filter_drops_irregular_shapes() -> None:
     img[45:75, 45:75] = 0.0
     img[55:65, 60:80] = 1.0  # connect to the right side via a thin bridge
     data = ImageData(source="x", image=img)
-    out = ThresholdSegmenter(roi_mask_key=None, split_touching=False, min_circularity=0.0).run(data)
+    out = ThresholdSegmenter(roi_mask_key=None, split_touching=False, min_circularity=0.0, min_solidity=0.90).run(data)
     # Square remains; C-shape dropped.
     assert int(out.masks["objects"].max()) == 1
 
