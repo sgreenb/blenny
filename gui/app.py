@@ -428,8 +428,9 @@ if input_paths:
                             log_container.markdown(st.session_state["gui_analysis_log"])
                         
                         t_p_start = time.perf_counter()
+                        img_debug_dir = output_dir / "debug" / p.stem if enable_debug else None
                         res = substitute_paths(raw_steps, input_path=p, output_dir=output_dir)
-                        data = Pipeline.from_config(res).run(p, output_dir=output_dir, progress_callback=gui_progress)
+                        data = Pipeline.from_config(res).run(p, output_dir=output_dir, debug_dir=img_debug_dir, progress_callback=gui_progress)
                         t_p_elapsed = time.perf_counter() - t_p_start
                         st.session_state["gui_analysis_log"] += f"&nbsp;&nbsp;**Plate analysis complete in {t_p_elapsed:.2f}s**  \n\n"
                         log_container.markdown(st.session_state["gui_analysis_log"])
