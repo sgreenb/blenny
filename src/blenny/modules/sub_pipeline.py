@@ -126,9 +126,12 @@ class SubPipeline(Module):
             sub_data.metadata["plate_bbox"] = (y0_hr, x0_hr, y1_hr, x1_hr)
 
             # 2. Run inner pipeline
+            inner_cb = None
+            if progress_callback:
+                inner_cb = lambda c, t, n: progress_callback(c, t, f"  {n}")
             sub_data = self._inner_pipeline.run(
-                sub_data, 
-                progress_callback=progress_callback,
+                sub_data,
+                progress_callback=inner_cb,
                 output_dir=kwargs.get("output_dir"),
                 debug_dir=kwargs.get("debug_dir")
             )
