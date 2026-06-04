@@ -19,7 +19,7 @@ from blenny.modules.classify_interior import InteriorColonyClassifier
 from blenny.modules.export_annotated import AnnotatedImageExporter
 from blenny.modules.export_csv import CSVExporter
 from blenny.modules.export_summary import SummaryExporter
-from blenny.pipeline import Pipeline
+from blenny.pipeline import MODULES, Pipeline
 
 # --- Globals & Defaults ---
 radius_scale_default = 1.0
@@ -30,6 +30,7 @@ interior_radius_default = 1.0
 fallback_ecc_default = 1.0
 max_dimension_default = 3200
 resize_default = False
+conf_threshold_default = 0.15
 
 # Paths for temporary GUI files
 GUI_TEMP_DIR = Path("gui_uploads")
@@ -38,6 +39,34 @@ PLATE_MASK_PATH = GUI_TEMP_DIR / "gui_plate_batch_mask.png"
 EXCLUSION_MASK_PATH = GUI_TEMP_DIR / "gui_mask_batch_exclusion.png"
 
 # --- Helpers ---
+
+def _find_conf_threshold_module(pipeline_path):
+    """Scan the pipeline (including nested sub_pipelines) for a module with a
+    ``conf_threshold`` parameter. Returns ``(has_conf, module_registry_name)``."""
+    from blenny.config import extract_steps, load_yaml
+
+    try:
+        config = load_yaml(pipeline_path)
+        steps = extract_steps(config)
+    except Exception:
+        return False, None
+
+    def _scan(step_list):
+        for s in step_list:
+            name = s.get("name", "")
+            if name and name in MODULES:
+                cls = MODULES.get(name)
+                schema = cls.Params.model_json_schema()
+                if "conf_threshold" in schema.get("properties", {}):
+                    return True, name
+            if name == "sub_pipeline" and "params" in s and "steps" in s["params"]:
+                found, mod_name = _scan(s["params"]["steps"])
+                if found:
+                    return True, mod_name
+        return False, None
+
+    return _scan(steps)
+
 
 def local_folder_picker(title="Select Folder"):
     """Open a native folder picker."""
@@ -59,7 +88,7 @@ def local_folder_picker(title="Select Folder"):
         except Exception: pass
     return None
 
-def compact_control(label, key, min_val, max_val, default_val, step, help_text):
+def compact_control(label, key, min_val, max_val, default_val, step, help_text, disabled=False):
     if key not in st.session_state:
         st.session_state[key] = default_val
 
@@ -74,7 +103,7 @@ def compact_control(label, key, min_val, max_val, default_val, step, help_text):
         st.session_state[key] = st.session_state[f"slide_{key}"]
         st.session_state[f"num_{key}"] = st.session_state[key]
 
-    if c3.button("Reset", key=f"reset_{key}"):
+    if c3.button("Reset", key=f"reset_{key}", disabled=disabled):
         st.session_state[key] = default_val
         st.session_state[f"num_{key}"] = default_val
         st.session_state[f"slide_{key}"] = default_val
@@ -84,9 +113,9 @@ def compact_control(label, key, min_val, max_val, default_val, step, help_text):
     if f"slide_{key}" not in st.session_state: st.session_state[f"slide_{key}"] = st.session_state[key]
 
     c1.number_input(label, min_value=float(min_val), max_value=float(max_val), step=float(step),
-                    key=f"num_{key}", label_visibility="collapsed", on_change=sync_num)
+                    key=f"num_{key}", label_visibility="collapsed", on_change=sync_num, disabled=disabled)
     c2.slider(label, min_value=float(min_val), max_value=float(max_val), step=float(step),
-              key=f"slide_{key}", label_visibility="collapsed", on_change=sync_slide)
+              key=f"slide_{key}", label_visibility="collapsed", on_change=sync_slide, disabled=disabled)
     return st.session_state[key]
 
 # Monkey-patch for streamlit-drawable-canvas compatibility
@@ -303,6 +332,15 @@ with st.sidebar:
     min_solidity = compact_control("Min Solidity", "min_solidity", 0.0, 1.0, min_solidity_default, 0.05, "Min solidity (area / convex hull area).")
     interior_radius = compact_control("Interior Radius", "int_r", 0.1, 1.0, interior_radius_default, 0.05, "Interior zone.")
     fallback_ecc = compact_control("Max Eccentricity", "f_ecc", 0.1, 1.0, fallback_ecc_default, 0.05, "Max elongation.")
+
+    # Confidence threshold slider — only enabled if pipeline has a detector with conf_threshold
+    has_conf, conf_module_name = _find_conf_threshold_module(pipeline_path)
+    conf_threshold = compact_control(
+        "Confidence Threshold", "conf_threshold", 0.01, 1.0, conf_threshold_default, 0.01,
+        "Detection confidence threshold for the ML detector. Lower = more detections (but more false positives).",
+        disabled=not has_conf,
+    )
+
     enable_debug = st.checkbox("Save debug images", value=False)
     generate_annotated = st.checkbox("Generate annotated images", value=True, key="gen_ann_check")
     save_subfolders = st.checkbox("Save as Subfolders", value=True)
@@ -404,6 +442,8 @@ if input_paths:
                 if plate_mode == "Manual Shape" and PLATE_MASK_PATH.exists():
                     for k in ["detect_plate", "detect_facile"]: overrides[k].update({"force_mask_path": str(PLATE_MASK_PATH)})
                 if EXCLUSION_MASK_PATH.exists(): overrides["apply_exclusion_mask"] = {"mask_path": str(EXCLUSION_MASK_PATH)}
+                if has_conf and conf_module_name:
+                    overrides.setdefault(conf_module_name, {}).update({"conf_threshold": conf_threshold})
 
                 def apply_overrides(steps):
                     for s in steps:
