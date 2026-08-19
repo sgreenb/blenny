@@ -43,6 +43,11 @@ steps:
             mask_key: "objects"
             roi_mask_key: "plate"
 
+        - name: classify_by_interior
+          # Reject edge-zone detections that don't match the interior colony
+          # profile (rim arcs, cracks, pen marks). Tune with the GUI sliders
+          # 'Interior Radius' and 'Max Eccentricity'.
+
         - name: filter_by_id
           params:
             exclude_ids: []

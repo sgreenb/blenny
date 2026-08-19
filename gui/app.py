@@ -295,6 +295,28 @@ with st.sidebar:
 
     st.divider()
     st.header("4. Tuning")
+
+    # Which tuning-relevant steps does the active pipeline actually contain?
+    # Sliders are only shown when they will have an effect (the GUI only
+    # ships YOLO pipelines, whose sub_pipeline contains classify_by_interior
+    # but not threshold_segment).
+    from blenny.config import extract_steps as _extract_steps
+    from blenny.config import load_yaml as _load_yaml
+
+    pipeline_step_names: set[str] = set()
+    try:
+        def _collect_step_names(steps):
+            for s in steps:
+                pipeline_step_names.add(s.get("name", ""))
+                if s.get("name") == "sub_pipeline":
+                    _collect_step_names(s.get("params", {}).get("steps", []))
+
+        _collect_step_names(_extract_steps(_load_yaml(pipeline_path)))
+    except Exception:
+        pass  # unreadable pipeline -> assume nothing is tunable
+    has_threshold = "threshold_segment" in pipeline_step_names
+    has_interior = "classify_by_interior" in pipeline_step_names
+
     resize_enabled = st.checkbox("Resize scan for detection", key="resize_enabled")
     max_dimension = st.number_input("Max scan dimension (px)", 100, 10000, 3200, key="max_dimension", disabled=not resize_enabled)
     
@@ -310,10 +332,18 @@ with st.sidebar:
         "detections. Only used by pipelines with a yolo_detector step.",
     )
 
-    min_area_ppm = compact_control("Min Size (ppm)", "min_area_ppm", 0, 1000, min_area_ppm_default, 1, "Smallest colony kept by segmentation, in parts-per-million (ppm) of the plate area — 1 ppm = one millionth of the plate. On a 90 mm plate, 15 ppm ≈ 0.1 mm². Raise to ignore fine debris.")
-    min_circ = compact_control("Min Circularity", "min_circ", 0.0, 1.0, min_circ_default, 0.05, "Roundness filter (1.0 = perfect circle). Detections below this are rejected as artefacts — rim arcs and smudges score <0.5. Set to 0 to disable.")
-    interior_radius = compact_control("Interior Radius", "int_r", 0.1, 1.0, interior_radius_default, 0.05, "Fraction of the plate radius treated as the trusted 'interior' reference for artifact rejection. Edge-zone detections are scored against interior colonies; raise toward 1.0 to keep more edge colonies, lower to reject more.")
-    fallback_ecc = compact_control("Max Eccentricity", "f_ecc", 0.1, 1.0, fallback_ecc_default, 0.05, "Elongation cap for the strict fallback filter used when too few interior colonies exist to build a reference. Detections more elongated than this are marked as artefacts; 0.55 is a typical value, 1.0 disables the filter.")
+    if has_threshold:
+        min_area_ppm = compact_control("Min Size (ppm)", "min_area_ppm", 0, 1000, min_area_ppm_default, 1, "Smallest colony kept by segmentation, in parts-per-million (ppm) of the plate area — 1 ppm = one millionth of the plate. On a 90 mm plate, 15 ppm ≈ 0.1 mm². Raise to ignore fine debris.")
+        min_circ = compact_control("Min Circularity", "min_circ", 0.0, 1.0, min_circ_default, 0.05, "Roundness filter (1.0 = perfect circle). Detections below this are rejected as artefacts — rim arcs and smudges score <0.5. Set to 0 to disable.")
+    else:
+        min_area_ppm, min_circ = min_area_ppm_default, min_circ_default
+
+    if has_interior:
+        interior_radius = compact_control("Interior Radius", "int_r", 0.1, 1.0, interior_radius_default, 0.05, "Fraction of the plate radius treated as the trusted 'interior' reference for artifact rejection. Edge-zone detections are scored against interior colonies; raise toward 1.0 to keep more edge colonies, lower to reject more.")
+        fallback_ecc = compact_control("Max Eccentricity", "f_ecc", 0.1, 1.0, fallback_ecc_default, 0.05, "Elongation cap for the strict fallback filter used when too few interior colonies exist to build a reference. Detections more elongated than this are marked as artefacts; 0.55 is a typical value, 1.0 disables the filter.")
+    else:
+        interior_radius, fallback_ecc = interior_radius_default, fallback_ecc_default
+
     enable_debug = st.checkbox("Save debug images", value=False)
     generate_annotated = st.checkbox("Generate annotated images", value=True, key="gen_ann_check")
     save_subfolders = st.checkbox("Save as Subfolders", value=True)

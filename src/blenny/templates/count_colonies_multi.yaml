@@ -21,7 +21,12 @@ steps:
             conf_threshold: 0.15
         
         - name: "measure_colonies"
-        
+
+        - name: classify_by_interior
+          # Reject edge-zone detections that don't match the interior colony
+          # profile (rim arcs, cracks, pen marks). Tune with the GUI sliders
+          # 'Interior Radius' and 'Max Eccentricity'.
+
         # Plate-level exports
         - name: "export_annotated"
           params:

@@ -85,7 +85,7 @@ Severity guide:
   nothing is dropped. Verified: classic pipeline run now writes all 30 columns (was 16),
   including `colony_count_estimate`, `segment_label`, `classification`, and bbox columns.
 
-### 4. GUI tuning sliders "Min Size (ppm)", "Min Circularity", "Interior Radius", "Max Eccentricity" have no effect
+### 4. GUI tuning sliders "Min Size (ppm)", "Min Circularity", "Interior Radius", "Max Eccentricity" have no effect  ✅ FIXED
 - **File:** `gui/app.py:306-316` (controls) vs `gui/app.py:395-402` (overrides dict)
   vs `pipeline_yolo_facile.yaml` (template).
 - **What happens:** the GUI maps these sliders to `threshold_segment` and
@@ -97,6 +97,15 @@ Severity guide:
   (conf_threshold). Users adjusting those four sliders see zero change in results.
 - **Fix direction:** either add the corresponding steps to the shipped YOLO pipelines, or
   hide/disable the sliders when the active pipeline lacks the target module.
+
+  **Status: FIXED** — both. `classify_by_interior` was added to every YOLO template and
+  root pipeline (`count_colonies_yolo_facile[_grid]`, `count_colonies_multi`, and the
+  corresponding root YAMLs), so the Interior Radius / Max Eccentricity sliders now apply.
+  The GUI now inspects the active pipeline and only renders sliders whose target module
+  exists (`threshold_segment` → Min Size / Min Circularity; `classify_by_interior` →
+  Interior Radius / Max Eccentricity), so no slider can silently do nothing.
+  NOTE: this adds active artifact rejection to CLI YOLO runs (previously YOLO mode had
+  none) — intended per the README's core-feature list.
 
 ### 5. GUI checkboxes "Save debug images", "Generate annotated images", "Save as Subfolders" do nothing
 - **File:** `gui/app.py:317-319`
