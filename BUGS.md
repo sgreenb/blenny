@@ -14,7 +14,7 @@ Severity guide:
 
 ## HIGH
 
-### 1. GUI "Manual Circle" and "Manual Shape" modes crash with the default pipeline
+### 1. GUI "Manual Circle" and "Manual Shape" modes crash with the default pipeline  ✅ FIXED
 - **File:** `gui/app.py:404-406`
 - **What happens:** In Manual Circle / Manual Shape mode the GUI injects
   `force_cy/force_cx/force_r` / `force_mask_path` into **both** `detect_plate` and
@@ -28,6 +28,14 @@ Severity guide:
   → `ValidationError: force_cy … Extra inputs are not permitted`. Same for `force_mask_path`.
 - **Fix direction:** either add the force-* params to `FacileDetector.Params`, or only apply
   manual overrides to steps that actually accept them.
+
+  **Status: FIXED** — added `force_cy/force_cx/force_r/force_mask_path` to
+  `FacileDetector.Params` with a `_apply_forced` path that bypasses detection and builds a
+  single ROI (plus a plate mask) in the same shape the auto-detection ROI branch produces,
+  so `sub_pipeline` and the GUI review flow work unchanged. Manual coordinates are scaled by
+  `resize_scale` when the image was downscaled at load. Verified by running both GUI
+  override paths end-to-end on a synthetic plate and with new tests in
+  `tests/test_detect_facile.py`.
 
 ### 2. YOLO detector feeds the model RGB data that ultralytics treats as BGR (channel swap)
 - **File:** `src/blenny/modules/yolo_detector.py:76-80`

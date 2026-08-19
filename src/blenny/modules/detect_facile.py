@@ -217,10 +217,38 @@ class FacileDetector(Preprocessor):
         """Maximum allowed standard deviation for circle fitting.
         If None, automatically scaled based on radius."""
 
+        force_cy: int | None = None
+        """Force the plate center Y coordinate (bypasses detection)."""
+
+        force_cx: int | None = None
+        """Force the plate center X coordinate (bypasses detection)."""
+
+        force_r: int | None = None
+        """Force the plate radius (bypasses detection)."""
+
+        force_mask_path: str | None = None
+        """Path to a binary mask file to use as the plate ROI (bypasses detection)."""
+
     def process(self, image: Any, data: ImageData) -> Any:
+        h_orig, w_orig = image.shape[:2]
+
+        # --- Manual override mode (forced circle / forced mask) -----------
+        # The GUI's "Manual Circle" and "Manual Shape" modes inject these
+        # params. Bypass detection and build a single ROI from the supplied
+        # geometry so downstream sub_pipeline steps work unchanged.
+        force_mask_path: str | None = self.params.force_mask_path
+        force_cy: int | None = self.params.force_cy
+        force_cx: int | None = self.params.force_cx
+        force_r: int | None = self.params.force_r
+        if force_mask_path is not None or (
+            force_cy is not None and force_cx is not None and force_r is not None
+        ):
+            return self._apply_forced(
+                image, data, h_orig, w_orig, force_mask_path, force_cy, force_cx, force_r
+            )
+
         # facile works best on images around 1000-2000px.
         # If the image is very large, we downsample it for detection.
-        h_orig, w_orig = image.shape[:2]
         det_dim = 1500
         if max(h_orig, w_orig) > det_dim:
             det_scale = det_dim / max(h_orig, w_orig)
@@ -333,3 +361,76 @@ class FacileDetector(Preprocessor):
 
             data.masks[self.params.mask_key] = mask
             return image
+
+    def _apply_forced(
+        self,
+        image: Any,
+        data: ImageData,
+        h_orig: int,
+        w_orig: int,
+        mask_path: str | None,
+        fcy: int | None,
+        fcx: int | None,
+        fr: int | None,
+    ) -> Any:
+        """Handle Manual Circle / Manual Shape overrides.
+
+        Produces a single ROI (same shape as the normal ROI branch) plus a
+        plate mask, so ``sub_pipeline`` and the GUI review flow work exactly
+        as in auto-detection mode.
+        """
+        mask = None
+        if mask_path is not None:
+            from PIL import Image
+
+            mask_im = Image.open(mask_path).convert("L")
+            mask = np.asarray(mask_im) > 127
+            if mask.shape != (h_orig, w_orig):
+                from skimage.transform import resize
+
+                mask = resize(mask, (h_orig, w_orig), order=0, anti_aliasing=False) > 0.5
+            ys, xs = np.where(mask)
+            if len(ys) == 0:
+                data.add_flag(
+                    "plate_not_found",
+                    "FacileDetector: the forced plate mask is empty; "
+                    "downstream steps will run on the full image.",
+                    severity="warning",
+                )
+                data.masks[self.params.mask_key] = np.ones((h_orig, w_orig), dtype=bool)
+                return image
+            cy, cx = int(ys.mean()), int(xs.mean())
+            r_raw = int(math.sqrt(mask.sum() / math.pi))
+        else:
+            # The GUI draws coordinates on the full-resolution image; scale
+            # them if the working image was downscaled at load time.
+            load_scale = data.metadata.get("resize_scale", 1.0)
+            cy = round(fcy * load_scale)
+            cx = round(fcx * load_scale)
+            r_raw = round(fr * load_scale)
+
+        r_eff = max(1, round(r_raw * self.params.radius_scale))
+        r = max(r_raw, r_eff)
+
+        buffer = int(r * 0.05) + 20
+        y0, y1 = max(0, int(cy - r - buffer)), min(h_orig, int(cy + r + buffer + 1))
+        x0, x1 = max(0, int(cx - r - buffer)), min(w_orig, int(cx + r + buffer + 1))
+        data.metadata["rois"] = [
+            {
+                "label": "1",
+                "bbox": (y0, x0, y1, x1),
+                "center_local": (int(cy - y0), int(cx - x0)),
+                "radius": int(r),
+                "radius_eff": int(r_eff),
+            }
+        ]
+        data.metadata["multi_plate_mode"] = True
+        data.metadata["plate_center"] = (cy, cx)
+        data.metadata["plate_radius"] = int(r)
+
+        if mask is None:
+            mask = np.zeros((h_orig, w_orig), dtype=bool)
+            rr, cc = disk((cy, cx), r_eff, shape=(h_orig, w_orig))
+            mask[rr, cc] = True
+        data.masks[self.params.mask_key] = mask
+        return image
