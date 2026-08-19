@@ -124,7 +124,7 @@ Severity guide:
   `debug_dir` to the pipeline runner. Verified by replicating the strip/flatten logic on the
   template and checking the run call wiring.
 
-### 6. GUI "Save/Update All results" writes multi-plate annotated images to the *old* output directory
+### 6. GUI "Save/Update All results" writes multi-plate annotated images to the *old* output directory  ✅ FIXED
 - **File:** `src/blenny/modules/sub_pipeline.py:120` (copies `output_dir` into each
   sub-result at analysis time) + `sub_pipeline.py:274-283` (`export()` uses the stale
   sub-result path).
@@ -138,6 +138,10 @@ Severity guide:
   `B` and called `sub.export()`; annotated image existed under `A/...` and not `B/...`.
 - **Fix direction:** re-stamp `output_dir` on sub-results before re-exporting (e.g. in
   `SubPipeline.export`), or resolve paths from the parent context.
+
+  **Status: FIXED** — `SubPipeline.export` now re-stamps the parent's current `output_dir`
+  onto every sub-result before re-exporting. Verified: after swapping the parent
+  `output_dir` from A to B, the per-plate annotated image now lands in B (previously only A).
 
 ---
 

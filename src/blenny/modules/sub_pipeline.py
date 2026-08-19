@@ -272,9 +272,18 @@ class SubPipeline(Module):
         return data
 
     def export(self, data: ImageData) -> None:
-        """Re-run exporters in the inner pipeline for all sub-results."""
+        """Re-run exporters in the inner pipeline for all sub-results.
+
+        The GUI's "Save/Update All results" button swaps the parent's
+        ``output_dir`` before calling this; re-stamp it onto every sub-result
+        so per-plate exports land in the requested folder rather than the
+        original analysis folder.
+        """
         all_sub_results = data.metadata.get("multi_plate_results", [])
+        parent_out = data.metadata.get("output_dir")
         for sub_data in all_sub_results:
+            if parent_out is not None:
+                sub_data.metadata["output_dir"] = parent_out
             for step in self._inner_pipeline.steps:
                 if isinstance(step, Exporter):
                     step.export(sub_data)
