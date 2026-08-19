@@ -77,6 +77,13 @@ def test_small_edge_objects_marked_as_artifacts() -> None:
     assert all(not r["is_artifact"] for r in interior_result)
     assert all(r["is_artifact"] for r in artifact_result)
     assert all(r["artifact_reason"] for r in artifact_result)
+    # Every row carries zone + normalized distance metadata, and the
+    # rejection raised the expected info flag.
+    for r in result:
+        assert r["zone"] in ("interior", "edge")
+        assert r["normalized_dist"] is not None
+        assert r["normalized_dist"] >= 0.0
+    assert "artifacts_removed" in [f.code for f in data.quality_flags]
 
 
 def test_matching_edge_objects_are_accepted() -> None:
@@ -86,6 +93,7 @@ def test_matching_edge_objects_are_accepted() -> None:
     result = InteriorColonyClassifier().classify(rows, data)
     edge_result = result[len(_INTERIOR) :]
     assert all(not r["is_artifact"] for r in edge_result)
+    assert "artifacts_removed" not in [f.code for f in data.quality_flags]
 
 
 def test_interior_colonies_are_never_rejected() -> None:
@@ -102,32 +110,6 @@ def test_colony_count_updated_to_exclude_artifacts() -> None:
     InteriorColonyClassifier().classify(rows, data)
     assert data.metadata["colony_count"] == len(_INTERIOR)
     assert data.metadata["artifact_count"] == len(_ARTIFACTS)
-
-
-def test_zone_and_normalised_dist_set_on_all_rows() -> None:
-    data = _data_with_geometry()
-    rows = _INTERIOR + _ARTIFACTS
-    result = InteriorColonyClassifier().classify(rows, data)
-    for r in result:
-        assert r["zone"] in ("interior", "edge")
-        assert r["normalized_dist"] is not None
-        assert r["normalized_dist"] >= 0.0
-
-
-def test_artifacts_flag_raised_when_rejections_occur() -> None:
-    data = _data_with_geometry()
-    rows = _INTERIOR + _ARTIFACTS
-    InteriorColonyClassifier().classify(rows, data)
-    codes = [f.code for f in data.quality_flags]
-    assert "artifacts_removed" in codes
-
-
-def test_no_flag_when_all_edge_rows_accepted() -> None:
-    data = _data_with_geometry()
-    rows = _INTERIOR + _REAL_EDGE
-    InteriorColonyClassifier().classify(rows, data)
-    codes = [f.code for f in data.quality_flags]
-    assert "artifacts_removed" not in codes
 
 
 # ---------------------------------------------------------------------------
@@ -212,12 +194,6 @@ def test_falls_back_to_plate_mask_for_geometry() -> None:
     assert all(not r["is_artifact"] for r in interior_result)
 
 
-def test_handles_empty_measurements() -> None:
-    data = _data_with_geometry()
-    result = InteriorColonyClassifier().classify([], data)
-    assert result == []
-
-
 # ---------------------------------------------------------------------------
 # IQR edge cases
 # ---------------------------------------------------------------------------
@@ -246,8 +222,8 @@ def test_iqr_multiplier_controls_strictness() -> None:
     # Edge row with area slightly outside the normal IQR range.
     # Note: fresh dict copies per run — the two runs must not share rows,
     # because classify() resets is_artifact on every row at the start.
-    rows_strict = _INTERIOR + [dict(_row(20, 190.0, 100.0, area=200.0))]
-    rows_lenient = _INTERIOR + [dict(_row(20, 190.0, 100.0, area=200.0))]
+    rows_strict = [*_INTERIOR, dict(_row(20, 190.0, 100.0, area=200.0))]
+    rows_lenient = [*_INTERIOR, dict(_row(20, 190.0, 100.0, area=200.0))]
 
     InteriorColonyClassifier(iqr_multiplier=0.5).classify(rows_strict, data_strict)
     InteriorColonyClassifier(iqr_multiplier=5.0).classify(rows_lenient, data_lenient)

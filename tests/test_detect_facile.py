@@ -28,6 +28,13 @@ def test_forced_circle_params_bypass_detection() -> None:
     assert out.masks["plate"][128, 128]
     assert not out.masks["plate"][0, 0]
 
+    # Manual coordinates are scaled when the working image was resized at load.
+    data_scaled = _data()
+    data_scaled.metadata["resize_scale"] = 0.5
+    out_scaled = FacileDetector(force_cy=200, force_cx=100, force_r=80).run(data_scaled)
+    assert out_scaled.metadata["plate_center"] == (100, 50)
+    assert out_scaled.metadata["plate_radius"] == 40
+
 
 def test_forced_mask_path_bypasses_detection(tmp_path) -> None:
     mask = np.zeros((256, 256), dtype=np.uint8)
@@ -46,25 +53,9 @@ def test_forced_mask_path_bypasses_detection(tmp_path) -> None:
     assert not out.masks["plate"][10, 10]
 
 
-def test_forced_geometry_scales_with_resized_image() -> None:
-    data = _data()
-    data.metadata["resize_scale"] = 0.5
-    out = FacileDetector(force_cy=200, force_cx=100, force_r=80).run(data)
-    cy, cx = out.metadata["plate_center"]
-    assert (cy, cx) == (100, 50)  # scaled by 0.5
-    assert out.metadata["plate_radius"] == 40
-
-
-def test_forced_empty_mask_raises_flag() -> None:
-    mask = np.zeros((256, 256), dtype=np.uint8)
-    p = "/nonexistent/empty.png"
-    # Write an empty mask to a real temp file via tmp_path-like path:
-    import tempfile
-    from pathlib import Path
-
-    d = Path(tempfile.mkdtemp())
-    p = d / "empty.png"
-    Image.fromarray(mask).save(p)
+def test_forced_empty_mask_raises_flag(tmp_path) -> None:
+    p = tmp_path / "empty.png"
+    Image.fromarray(np.zeros((256, 256), dtype=np.uint8)).save(p)
 
     data = _data()
     out = FacileDetector(force_mask_path=str(p)).run(data)

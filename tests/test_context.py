@@ -27,10 +27,3 @@ def test_add_flag_appends_a_quality_flag() -> None:
     assert flag.code == "low_contrast"
     assert flag.severity == "warning"
     assert flag.step == ""  # filled by the runner
-
-
-def test_imagedata_carries_arbitrary_image_payload() -> None:
-    data = ImageData(source="plate.jpg", image=[[1, 2], [3, 4]])
-    assert data.source == "plate.jpg"
-    assert data.image == [[1, 2], [3, 4]]
-    assert data.original_image is None

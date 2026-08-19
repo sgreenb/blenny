@@ -37,25 +37,21 @@ def _data(roi_area: float = 100_000.0) -> ImageData:
     return data
 
 
-def test_no_params_is_noop() -> None:
-    rows = [_row(1, area=10), _row(2, area=5000)]
-    out = ColonyFilter().classify(rows, _data())
-    assert all(not r["is_artifact"] for r in out)
-    assert len(out) == 2
+def test_area_filter_disabled_by_default_or_zero() -> None:
+    """No params, or min_area_ppm=0 (the GUI default), means no filtering."""
+    for kwargs in ({}, {"min_area_ppm": 0}):
+        rows = [_row(1, area=1), _row(2, area=500)]
+        out = ColonyFilter(**kwargs).classify(rows, _data())
+        assert all(not r["is_artifact"] for r in out)
 
 
-def test_min_area_ppm_zero_disables_filter() -> None:
-    """0 (the GUI default) means no minimum, i.e. no area filtering."""
-    rows = [_row(1, area=1), _row(2, area=500)]
-    out = ColonyFilter(min_area_ppm=0).classify(rows, _data())
-    assert all(not r["is_artifact"] for r in out)
-
-
-def test_min_area_px_drops_small_rows() -> None:
+def test_min_area_filters_small_rows() -> None:
+    """Both min_area_px and min_area_ppm drop small detections."""
+    # Pixel-based threshold.
     data = _data()
     rows = [_row(1, area=50), _row(2, area=2000)]
     out = ColonyFilter(min_area_px=100).classify(rows, data)
-    small = next(r for r in out if r["centroid_x"] == 100.0 and r["area_px"] == 50)
+    small = next(r for r in out if r["area_px"] == 50)
     big = next(r for r in out if r["area_px"] == 2000)
     assert small["is_artifact"]
     assert "filter_colonies" in small["artifact_reason"]
@@ -65,16 +61,19 @@ def test_min_area_px_drops_small_rows() -> None:
     assert data.metadata["artifact_count"] == 1
     assert any(f.code == "colonies_filtered" for f in data.quality_flags)
 
-
-def test_min_area_ppm_uses_roi_area() -> None:
-    # ROI = 100_000 px; 100 ppm -> min area 10 px.
-    data = _data(roi_area=100_000.0)
+    # PPM-based threshold against the ROI area (100 ppm of 100_000 px = 10 px).
     rows = [_row(1, area=5), _row(2, area=500)]
-    out = ColonyFilter(min_area_ppm=100).classify(rows, data)
-    small = next(r for r in out if r["area_px"] == 5)
-    big = next(r for r in out if r["area_px"] == 500)
-    assert small["is_artifact"]
-    assert not big["is_artifact"]
+    out = ColonyFilter(min_area_ppm=100).classify(rows, _data(roi_area=100_000.0))
+    assert next(r for r in out if r["area_px"] == 5)["is_artifact"]
+    assert not next(r for r in out if r["area_px"] == 500)["is_artifact"]
+
+    # And ppm falls back to the image area when no plate mask exists.
+    data_img = ImageData(source="t.jpg")
+    data_img.image = np.zeros((200, 200, 3), dtype=np.uint8)  # 40_000 px
+    rows = [_row(1, area=1), _row(2, area=500)]
+    out = ColonyFilter(min_area_ppm=100).classify(rows, data_img)  # 100 ppm -> 4 px
+    assert next(r for r in out if r["area_px"] == 1)["is_artifact"]
+    assert not next(r for r in out if r["area_px"] == 500)["is_artifact"]
 
 
 def test_min_circularity_drops_elongated_rows() -> None:
@@ -94,30 +93,16 @@ def test_merged_colonies_exempt_from_shape_filters() -> None:
     assert not out[0]["is_artifact"]
 
 
-def test_already_artifact_rows_untouched() -> None:
-    rows = [_row(1, area=50, is_artifact=True), _row(2, area=500)]
-    out = ColonyFilter(min_area_px=100).classify(rows, _data())
-    pre_artifact = next(r for r in out if r["area_px"] == 50)
-    assert pre_artifact["is_artifact"]  # still artifact, reason untouched
-    assert "filter_colonies" not in pre_artifact.get("artifact_reason", "")
-
-
-def test_labels_renumbered_colonies_first() -> None:
+def test_artifacts_respected_and_labels_renumbered() -> None:
+    """Pre-existing artifacts are untouched; surviving colonies are renumbered first."""
     data = _data()
-    rows = [_row(1, area=50), _row(2, area=500)]
+    rows = [_row(1, area=50, is_artifact=True), _row(2, area=500)]
     out = ColonyFilter(min_area_px=100).classify(rows, data)
-    # Surviving colony gets label 1, artifact gets label 2.
+    # The pre-existing artifact keeps its artifact status and reason.
+    pre_artifact = next(r for r in out if r["area_px"] == 50)
+    assert pre_artifact["is_artifact"]
+    assert "filter_colonies" not in pre_artifact.get("artifact_reason", "")
+    # Colony gets label 1, artifact gets label 2.
     colony = next(r for r in out if not r["is_artifact"])
-    artifact = next(r for r in out if r["is_artifact"])
     assert colony["label"] == 1
-    assert artifact["label"] == 2
-
-
-def test_roi_fallback_to_image_area() -> None:
-    data = ImageData(source="t.jpg")
-    data.image = np.zeros((200, 200, 3), dtype=np.uint8)  # 40_000 px
-    rows = [_row(1, area=1), _row(2, area=500)]
-    # 100 ppm of 40_000 px -> 4 px minimum; row 1 dropped.
-    out = ColonyFilter(min_area_ppm=100).classify(rows, data)
-    assert next(r for r in out if r["area_px"] == 1)["is_artifact"]
-    assert not next(r for r in out if r["area_px"] == 500)["is_artifact"]
+    assert pre_artifact["label"] == 2

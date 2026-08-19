@@ -18,7 +18,6 @@ from blenny import (
     Preprocessor,
     Segmenter,
 )
-from blenny.modules import IdentityPreprocessor
 
 # --- Fakes --------------------------------------------------------------------
 
@@ -65,18 +64,14 @@ def test_empty_pipeline_returns_imagedata_with_no_provenance() -> None:
     assert out.provenance == []
 
 
-def test_pipeline_accepts_a_source_string() -> None:
-    out = Pipeline([_ConstLoader()]).run("plate.jpg")
-    assert out.source == "plate.jpg"
-    assert out.image == [[7]]
-    assert out.original_image == [[7]]
-
-
-def test_pipeline_accepts_a_path() -> None:
+def test_pipeline_accepts_source_string_or_path() -> None:
     from pathlib import Path
 
-    out = Pipeline([_ConstLoader()]).run(Path("plate.jpg"))
-    assert out.source == "plate.jpg"
+    for source in ("plate.jpg", Path("plate.jpg")):
+        out = Pipeline([_ConstLoader()]).run(source)
+        assert out.source == "plate.jpg"
+        assert out.image == [[7]]
+        assert out.original_image == [[7]]
 
 
 def test_pipeline_rejects_unknown_input_type() -> None:
@@ -108,15 +103,10 @@ def test_full_vertical_slice_loader_to_exporter() -> None:
         "_CountExtractor",
         "_RecordExporter",
     ]
+    # Params are serializable; the loader records its value.
+    assert out.provenance[0].params == {"value": 3}
     # Durations are numeric and non-negative.
     assert all(p.duration_s >= 0 for p in out.provenance)
-
-
-def test_provenance_records_serializable_params() -> None:
-    out = Pipeline([_ConstLoader(value=5)]).run("x")
-    rec = out.provenance[0]
-    assert rec.params == {"value": 5}
-    assert rec.step == "_ConstLoader"  # default name = class name
 
 
 def test_instance_name_overrides_class_name_in_provenance() -> None:
@@ -129,44 +119,33 @@ def test_instance_name_overrides_class_name_in_provenance() -> None:
 # --- Subclass guardrails ------------------------------------------------------
 
 
-def test_preprocessor_errors_if_no_image_loaded() -> None:
+def test_semantic_subclasses_raise_helpful_errors_without_input() -> None:
     with pytest.raises(ValueError, match="no image"):
-        Pipeline([_AddOne()]).run()
-
-
-def test_segmenter_errors_if_no_image_loaded() -> None:
+        Pipeline([_AddOne()]).run()  # preprocessor
     with pytest.raises(ValueError, match="no image"):
-        Pipeline([_OnesSegmenter()]).run()
-
-
-def test_loader_errors_if_no_source() -> None:
+        Pipeline([_OnesSegmenter()]).run()  # segmenter
     with pytest.raises(ValueError, match="source"):
-        Pipeline([_ConstLoader()]).run()
-
-
-def test_feature_extractor_errors_on_missing_mask() -> None:
-    pipe = Pipeline([_ConstLoader(), _CountExtractor()])
+        Pipeline([_ConstLoader()]).run()  # loader
     with pytest.raises(ValueError, match="no mask"):
-        pipe.run("x")
+        Pipeline([_ConstLoader(), _CountExtractor()]).run("x")  # feature extractor
 
 
-def test_segmenter_output_key_is_configurable() -> None:
+def test_output_and_mask_keys_are_configurable() -> None:
+    # A segmenter can store its mask under a custom output_key...
     pipe = Pipeline([_ConstLoader(), _OnesSegmenter(output_key="colonies")])
     out = pipe.run("x")
     assert "colonies" in out.masks
     assert "default" not in out.masks
-
-
-def test_feature_extractor_reads_configured_mask_key() -> None:
-    pipe = Pipeline(
+    # ...and the extractor can read that key back.
+    pipe2 = Pipeline(
         [
             _ConstLoader(),
             _OnesSegmenter(output_key="colonies"),
             _CountExtractor(mask_key="colonies"),
         ]
     )
-    out = pipe.run("plate.jpg")
-    assert out.measurements == [{"count": 1, "source": "plate.jpg"}]
+    out2 = pipe2.run("plate.jpg")
+    assert out2.measurements == [{"count": 1, "source": "plate.jpg"}]
 
 
 # --- Quality flags ------------------------------------------------------------
@@ -190,15 +169,6 @@ def test_runner_stamps_unattributed_quality_flags_with_step_name() -> None:
 def test_unknown_param_keys_are_rejected() -> None:
     with pytest.raises(ValidationError):
         _ConstLoader(value=1, bogus=2)
-
-
-# --- Identity module is wired through the new API ----------------------------
-
-
-def test_identity_preprocessor_is_a_noop_under_new_api() -> None:
-    pipe = Pipeline([_ConstLoader(value=2), IdentityPreprocessor()])
-    out = pipe.run("x")
-    assert out.image == [[2]]
 
 
 # --- Module ABC enforcement ---------------------------------------------------

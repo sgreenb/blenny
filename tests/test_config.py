@@ -58,9 +58,8 @@ def test_substitute_paths_fills_placeholders(tmp_path: Path) -> None:
     # Original is untouched (deep copy semantics).
     assert steps[0]["params"]["output_path"] == "{output_dir}/{stem}/x.csv"
 
-
-def test_substitute_paths_recurses_into_nested_structures() -> None:
-    steps = [
+    # Substitution also recurses into nested lists and mappings.
+    steps2 = [
         {
             "name": "weird",
             "params": {
@@ -69,9 +68,9 @@ def test_substitute_paths_recurses_into_nested_structures() -> None:
             },
         }
     ]
-    out = substitute_paths(steps, input_path=Path("a/b/plate.jpg"), output_dir="out")
-    assert out[0]["params"]["list"] == ["plate.csv", "fixed"]
-    assert out[0]["params"]["nested"] == {"file": "out/x"}
+    out2 = substitute_paths(steps2, input_path=Path("a/b/plate.jpg"), output_dir="out")
+    assert out2[0]["params"]["list"] == ["plate.csv", "fixed"]
+    assert out2[0]["params"]["nested"] == {"file": "out/x"}
 
 
 def test_substitute_paths_unknown_placeholder_raises() -> None:

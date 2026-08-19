@@ -58,10 +58,20 @@ def test_image_file_loader_missing_file_raises(tmp_path: Path) -> None:
 def test_image_file_loader_loads_at_native_resolution_by_default(tmp_path: Path) -> None:
     _, p = _save_synthetic(tmp_path, n_colonies=5, image_size=(3000, 2000), seed=0)
     data = ImageFileLoader().run(ImageData(source=str(p)))
-    # Default max_dimension=None means native resolution is kept.
+    # Default max_dimension=None means native resolution is kept (and small
+    # images are never upscaled — with max_dimension=None the resize branch
+    # is never entered at all).
     assert data.image.shape[:2] == (3000, 2000)
     assert "resized" not in data.metadata
     assert all(f.code != "image_resized" for f in data.quality_flags)
+
+    small_p = tmp_path / "small.png"
+    Image.fromarray(make_synthetic_plate(n_colonies=3, image_size=(256, 256), seed=0).image).save(
+        small_p
+    )
+    small = ImageFileLoader().run(ImageData(source=str(small_p)))
+    assert small.image.shape[:2] == (256, 256)
+    assert "resized" not in small.metadata
 
 
 def test_image_file_loader_downscales_when_max_dimension_set(tmp_path: Path) -> None:
@@ -72,21 +82,6 @@ def test_image_file_loader_downscales_when_max_dimension_set(tmp_path: Path) -> 
     assert data.metadata["resized"] is True
     assert data.metadata["original_size_wh"] == (2000, 3000)  # PIL is (W, H)
     assert any(f.code == "image_resized" and f.severity == "info" for f in data.quality_flags)
-
-
-def test_image_file_loader_max_dimension_none_keeps_native_resolution(tmp_path: Path) -> None:
-    _, p = _save_synthetic(tmp_path, n_colonies=5, image_size=(3000, 2000), seed=0)
-    data = ImageFileLoader(max_dimension=None).run(ImageData(source=str(p)))
-    assert data.image.shape[:2] == (3000, 2000)
-    assert "resized" not in data.metadata
-    assert all(f.code != "image_resized" for f in data.quality_flags)
-
-
-def test_image_file_loader_does_not_upscale_small_images(tmp_path: Path) -> None:
-    _, p = _save_synthetic(tmp_path, n_colonies=3, image_size=(256, 256), seed=0)
-    data = ImageFileLoader().run(ImageData(source=str(p)))  # default max_dimension=None
-    assert data.image.shape[:2] == (256, 256)
-    assert "resized" not in data.metadata
 
 
 # --- PlateDetector ------------------------------------------------------------
@@ -235,35 +230,22 @@ def test_colony_measurer_handles_empty_mask() -> None:
     assert any(f.code == "no_objects" for f in out.quality_flags)
 
 
-def test_colony_measurer_flags_suspect_high_count_absolute() -> None:
-    """More detections than max_plausible_count should raise suspect_high_count."""
+def test_colony_measurer_flags_suspect_high_count() -> None:
+    """suspect_high_count fires when the count or coverage thresholds are hit."""
     plate = make_synthetic_plate(n_colonies=10, image_size=(256, 256), seed=0)
-    data = ImageData(source="x", image=plate.image)
-    IlluminationCorrection(radius=20).run(data)
-    ThresholdSegmenter(roi_mask_key=None).run(data)
-    # Set the threshold below the actual count to force a flag.
-    out = ColonyMeasurer(max_plausible_count=2).run(data)
-    assert any(f.code == "suspect_high_count" for f in out.quality_flags)
 
+    def _run(max_count: int, max_cov: float = 0.50):
+        data = ImageData(source="x", image=plate.image)
+        IlluminationCorrection(radius=20).run(data)
+        ThresholdSegmenter(roi_mask_key=None).run(data)
+        return ColonyMeasurer(max_plausible_count=max_count, max_coverage_frac=max_cov).run(data)
 
-def test_colony_measurer_no_flag_when_count_is_normal() -> None:
-    """A reasonable count should produce no suspect_high_count flag."""
-    plate = make_synthetic_plate(n_colonies=10, image_size=(256, 256), seed=0)
-    data = ImageData(source="x", image=plate.image)
-    IlluminationCorrection(radius=20).run(data)
-    ThresholdSegmenter(roi_mask_key=None).run(data)
-    out = ColonyMeasurer(max_plausible_count=600).run(data)
-    assert not any(f.code == "suspect_high_count" for f in out.quality_flags)
-
-
-def test_colony_measurer_flags_suspect_high_coverage() -> None:
-    """Colonies covering >max_coverage_frac of the image should be flagged."""
-    plate = make_synthetic_plate(n_colonies=10, image_size=(256, 256), seed=0)
-    data = ImageData(source="x", image=plate.image)
-    IlluminationCorrection(radius=20).run(data)
-    ThresholdSegmenter(roi_mask_key=None).run(data)
-    # Set an absurdly low threshold so any coverage triggers it.
-    out = ColonyMeasurer(max_plausible_count=0, max_coverage_frac=0.0001).run(data)
+    # Threshold below the actual count -> flagged.
+    assert any(f.code == "suspect_high_count" for f in _run(max_count=2).quality_flags)
+    # Generous threshold -> not flagged.
+    assert not any(f.code == "suspect_high_count" for f in _run(max_count=600).quality_flags)
+    # Absurdly low coverage threshold -> flagged via coverage.
+    out = _run(max_count=0, max_cov=0.0001)
     assert any(f.code == "suspect_high_count" for f in out.quality_flags)
 
 

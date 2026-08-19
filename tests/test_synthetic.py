@@ -14,16 +14,13 @@ def test_generator_is_deterministic_with_seed() -> None:
     assert a.colony_centers == b.colony_centers
 
 
-def test_generator_returns_uint8_rgb() -> None:
-    plate = make_synthetic_plate(n_colonies=5, image_size=(256, 256), seed=0)
-    assert plate.image.dtype == np.uint8
-    assert plate.image.shape == (256, 256, 3)
-
-
 def test_generator_places_requested_colonies_when_room_allows() -> None:
     plate = make_synthetic_plate(n_colonies=15, image_size=(512, 512), seed=0)
     assert plate.n_colonies == 15
     assert len(plate.colony_radii) == 15
+    # Output format sanity: uint8 RGB image of the requested size.
+    assert plate.image.dtype == np.uint8
+    assert plate.image.shape == (512, 512, 3)
 
 
 def test_generator_reports_actual_count_when_crowding_limits_placement() -> None:

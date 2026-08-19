@@ -10,13 +10,10 @@ from blenny import MODULES, BlennyParams, ImageData, Pipeline, Preprocessor, reg
 from blenny.pipeline.registry import ModuleRegistry
 
 
-def test_identity_module_is_registered() -> None:
+def test_identity_module_is_registered_and_creatable() -> None:
     assert "identity" in MODULES
     cls = MODULES.get("identity")
     assert cls.registry_name == "identity"
-
-
-def test_registry_create_instantiates_with_params() -> None:
     instance = MODULES.create("identity")
     assert instance.name == "identity"  # registry name becomes default instance name
 

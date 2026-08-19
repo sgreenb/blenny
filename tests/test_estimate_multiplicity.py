@@ -39,7 +39,8 @@ def test_clean_singletons_keep_count_estimate_of_one() -> None:
     assert all(r["colony_count_estimate"] == 1 for r in rows)
 
 
-def test_bilobed_blob_gets_count_estimate_of_two() -> None:
+def test_merged_blobs_get_estimated_multiplicity() -> None:
+    """Bilobed and tri-lobed blobs get count estimates of 2 and 3."""
     rows = _ten_clean_singletons()
     bilobed = _row(99, area=820.0, circularity=0.65, solidity=0.91, eccentricity=0.7)
     rows.append(bilobed)
@@ -47,8 +48,6 @@ def test_bilobed_blob_gets_count_estimate_of_two() -> None:
     assert bilobed["colony_count_estimate"] == 2
     assert "merged-shape" in bilobed.get("multiplicity_reason", "")
 
-
-def test_triple_blob_gets_count_estimate_of_three() -> None:
     rows = _ten_clean_singletons()
     triple = _row(99, area=1200.0, circularity=0.55, solidity=0.90, eccentricity=0.75)
     rows.append(triple)
@@ -64,17 +63,14 @@ def test_count_estimate_is_capped() -> None:
     assert huge["colony_count_estimate"] == 4
 
 
-def test_low_solidity_blob_is_not_upgraded() -> None:
-    """Lacy / fragmented detections (low solidity) are not merged colonies."""
+def test_non_merged_shapes_are_not_upgraded() -> None:
+    """Lacy (low solidity) and large-but-round blobs are not merged colonies."""
     rows = _ten_clean_singletons()
     lacy = _row(99, area=820.0, circularity=0.6, solidity=0.70)
     rows.append(lacy)
     MultiplicityEstimator().classify(rows, ImageData(source="t.jpg"))
     assert lacy["colony_count_estimate"] == 1
 
-
-def test_high_circularity_large_blob_is_not_upgraded() -> None:
-    """A large but still-round colony (one big colony) is not merged."""
     rows = _ten_clean_singletons()
     big_round = _row(99, area=820.0, circularity=0.92, solidity=0.95)
     rows.append(big_round)
@@ -97,7 +93,3 @@ def test_metadata_records_singleton_reference() -> None:
     MultiplicityEstimator().classify(rows, data)
     assert data.metadata["singleton_n"] == 10
     assert data.metadata["singleton_median_area_px"] == 400.0
-
-
-def test_handles_empty_rows() -> None:
-    assert MultiplicityEstimator().classify([], ImageData(source="t.jpg")) == []

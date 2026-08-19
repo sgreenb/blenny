@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from PIL import Image
 from typer.testing import CliRunner
 
@@ -237,7 +238,17 @@ def _write_nested_yolo_pipeline(path: Path) -> None:
     )
 
 
-def test_run_confidence_flag_overrides_nested_yolo_step(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "args,expected",
+    [
+        (["--confidence", "0.5"], 0.5),  # dedicated flag
+        (["-v", "yolo_detector.conf_threshold=0.7"], 0.7),  # generic override
+    ],
+)
+def test_nested_yolo_conf_is_overridable(
+    tmp_path: Path, args: list[str], expected: float
+) -> None:
+    """Both --confidence and -v reach a yolo_detector inside sub_pipeline."""
     img = _save_synthetic(tmp_path)
     pipe_yaml = tmp_path / "pipe.yaml"
     _write_nested_yolo_pipeline(pipe_yaml)
@@ -246,47 +257,11 @@ def test_run_confidence_flag_overrides_nested_yolo_step(tmp_path: Path) -> None:
     with patch("blenny.cli.main.Pipeline", _FakePipeline):
         result = runner.invoke(
             app,
-            [
-                "run",
-                str(pipe_yaml),
-                "--input",
-                str(img),
-                "--output",
-                str(out_dir),
-                "--confidence",
-                "0.5",
-            ],
+            ["run", str(pipe_yaml), "--input", str(img), "--output", str(out_dir), *args],
         )
     assert result.exit_code == 0, result.stdout
 
     config = load_yaml(out_dir / "reproducible_config.yaml")
     inner_steps = config["steps"][1]["params"]["steps"]
     assert inner_steps[0]["name"] == "yolo_detector"
-    assert inner_steps[0]["params"]["conf_threshold"] == 0.5
-
-
-def test_run_override_applies_to_nested_sub_pipeline_step(tmp_path: Path) -> None:
-    img = _save_synthetic(tmp_path)
-    pipe_yaml = tmp_path / "pipe.yaml"
-    _write_nested_yolo_pipeline(pipe_yaml)
-
-    out_dir = tmp_path / "out"
-    with patch("blenny.cli.main.Pipeline", _FakePipeline):
-        result = runner.invoke(
-            app,
-            [
-                "run",
-                str(pipe_yaml),
-                "--input",
-                str(img),
-                "--output",
-                str(out_dir),
-                "-v",
-                "yolo_detector.conf_threshold=0.7",
-            ],
-        )
-    assert result.exit_code == 0, result.stdout
-
-    config = load_yaml(out_dir / "reproducible_config.yaml")
-    inner_steps = config["steps"][1]["params"]["steps"]
-    assert inner_steps[0]["params"]["conf_threshold"] == 0.7
+    assert inner_steps[0]["params"]["conf_threshold"] == expected
