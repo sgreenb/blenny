@@ -86,6 +86,13 @@ Launch the interactive interface with:
 blenny gui
 ```
 
+**Windows shortcut:** double-click the **Blenny GUI** desktop icon to launch without
+the command line. The shortcut points at `scripts/launch_gui.bat` and uses
+`screenshots/blenny_icon.ico`. Recreate it on any machine with:
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\create_shortcut.ps1
+```
+
 The GUI provides point-and-click analysis with **Interactive Review**:
 - **Engine Selection**: Toggle between **YOLO ML** and **Classic CV**.
 - **Live Editing**: Check or uncheck the **"Artifact?"** box on any colony to flip its classification—the count updates instantly.
