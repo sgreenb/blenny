@@ -222,11 +222,17 @@ Severity guide:
   template `count_colonies_multi.yaml` was made byte-identical to it. Verified: `blenny
   init` now writes a `pipeline_multi.yaml` identical to the committed one.
 
-### 12. `scripts/evaluate_labeled.py` references a directory that doesn't exist
+### 12. `scripts/evaluate_labeled.py` references a directory that doesn't exist  ✅ FIXED
 - **File:** `scripts/evaluate_labeled.py:28-30` → `example_plates/labels.csv`
 - **What happens:** the script hard-codes `REPO / "example_plates"`, which is not in the
   repository; the script fails immediately out of the box.
 - **Fix direction:** point at an existing dataset dir or document the required layout.
+
+  **Status: FIXED** — the script now accepts `--data-dir <dir>` and `--labels <file>` (in
+  addition to `--force`), with a clear error message when the default `example_plates/`
+  isn't present. Verified: graceful failure with the missing default, and a full
+  evaluation run against a temp dataset produces `REPORT.md` / `results.csv` with correct
+  counts.
 
 ---
 

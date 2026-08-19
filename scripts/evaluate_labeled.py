@@ -1,15 +1,17 @@
 """Quantitative evaluation of the Blenny pipeline against manually labeled plates.
 
-Reads ``example_plates/labels.csv``, runs the default pipeline on every image
-(caching results in ``example_plates/output/``), then compares detected colony
-counts against manual ground-truth counts and writes:
+Reads ``labels.csv`` (default: ``example_plates/labels.csv``), runs the default
+pipeline on every image (caching results in ``<data-dir>/output/``), then
+compares detected colony counts against manual ground-truth counts and writes:
 
-    example_plates/output/REPORT.md   — human-readable results and breakdowns
-    example_plates/output/results.csv — per-image numbers for further analysis
+    <data-dir>/output/REPORT.md   — human-readable results and breakdowns
+    <data-dir>/output/results.csv — per-image numbers for further analysis
 
 Usage:
-    python scripts/evaluate_labeled.py            # use cached runs
-    python scripts/evaluate_labeled.py --force    # re-run everything
+    python scripts/evaluate_labeled.py                 # use cached runs
+    python scripts/evaluate_labeled.py --force         # re-run everything
+    python scripts/evaluate_labeled.py --data-dir DIR  # custom dataset dir
+    python scripts/evaluate_labeled.py --labels FILE   # custom labels file
 """
 
 from __future__ import annotations
@@ -25,11 +27,7 @@ import numpy as np
 # Paths
 # ---------------------------------------------------------------------------
 REPO = Path(__file__).resolve().parent.parent
-IN_DIR = REPO / "example_plates"
-OUT_DIR = IN_DIR / "output"
-LABELS = IN_DIR / "labels.csv"
-REPORT = OUT_DIR / "REPORT.md"
-RESULTS = OUT_DIR / "results.csv"
+DEFAULT_DATA_DIR = REPO / "example_plates"
 
 # ---------------------------------------------------------------------------
 # Pipeline config (mirrors the shipped count_colonies template).
@@ -192,6 +190,34 @@ ISSUE_FLAGS = [
     "poor_focus",
 ]
 
+
+def _parse_args() -> tuple[bool, Path, Path]:
+    """Parse --force / --data-dir / --labels from sys.argv."""
+    force = False
+    data_dir = DEFAULT_DATA_DIR
+    labels = data_dir / "labels.csv"
+    args = sys.argv[1:]
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--force":
+            force = True
+        elif a in ("--data-dir", "--labels"):
+            i += 1
+            if i >= len(args):
+                print(f"{a} requires a value", file=sys.stderr)
+                sys.exit(2)
+            if a == "--data-dir":
+                data_dir = Path(args[i])
+                labels = data_dir / "labels.csv"
+            else:
+                labels = Path(args[i])
+        else:
+            print(f"Unknown argument: {a}", file=sys.stderr)
+            sys.exit(2)
+        i += 1
+    return force, data_dir, labels
+
 ISSUE_LABELS = {
     "has_pen_text": "Pen text on plate/lid",
     "has_shadow": "Shadow across plate",
@@ -208,18 +234,26 @@ def main() -> int:
     # ------------------------------------------------------------------
     import csv
 
-    force = "--force" in sys.argv
+    force, data_dir, labels_path = _parse_args()
 
-    if not LABELS.exists():
-        print(f"Labels file not found: {LABELS}", file=sys.stderr)
+    if not labels_path.exists():
+        print(f"Labels file not found: {labels_path}", file=sys.stderr)
+        print(
+            "Put labels.csv in example_plates/ or pass "
+            "--data-dir <dir> (containing labels.csv) / --labels <file>.",
+            file=sys.stderr,
+        )
         return 1
 
-    OUT_DIR.mkdir(exist_ok=True)
+    out_dir = data_dir / "output"
+    out_dir.mkdir(exist_ok=True)
+    results_csv = out_dir / "results.csv"
+    report = out_dir / "REPORT.md"
 
     # ------------------------------------------------------------------
     # 1. Read labels
     # ------------------------------------------------------------------
-    with LABELS.open(newline="", encoding="utf-8") as fh:
+    with labels_path.open(newline="", encoding="utf-8") as fh:
         rows = list(csv.DictReader(fh))
 
     if not rows:
@@ -233,12 +267,12 @@ def main() -> int:
 
     for row in rows:
         fname = row["filename"].strip()
-        img = IN_DIR / fname
+        img = data_dir / fname
         stem = Path(fname).stem
-        sub = OUT_DIR / stem
+        sub = out_dir / stem
 
         if not img.exists():
-            print(f"  [SKIP] {fname}: file not found in example_plates/")
+            print(f"  [SKIP] {fname}: file not found in {data_dir}/")
             results.append(
                 {
                     **row,
@@ -291,7 +325,7 @@ def main() -> int:
         "quality_flags",
         "status",
     ]
-    with RESULTS.open("w", newline="", encoding="utf-8") as fh:
+    with results_csv.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
         for r in results:
@@ -424,7 +458,7 @@ def main() -> int:
             stem = Path(fname).stem
             ann = (
                 f"[view]({stem}/annotated.png)"
-                if (OUT_DIR / stem / "annotated.png").exists()
+                if (out_dir / stem / "annotated.png").exists()
                 else ""
             )
             md.append(f"- `{fname}`: detected **{d}** colonies {ann}")
@@ -487,9 +521,9 @@ def main() -> int:
         "Re-run with `--force` to refresh all pipeline results.*",
     ]
 
-    REPORT.write_text("\n".join(md), encoding="utf-8")
-    print(f"\nWrote {REPORT}")
-    print(f"Wrote {RESULTS}")
+    report.write_text("\n".join(md), encoding="utf-8")
+    print(f"\nWrote {report}")
+    print(f"Wrote {results_csv}")
     return 0
 
 
