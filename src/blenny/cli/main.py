@@ -701,6 +701,15 @@ def _write_batch_colonies_csv(path: Path, measurements: list[dict[str, Any]]) ->
         if any(p in m for m in measurements):
             fieldnames.append(p)
 
+    # Append any remaining columns produced by modules so the batch CSV
+    # matches the per-image CSVExporter format (no silent column drops).
+    seen = set(fieldnames)
+    for m in measurements:
+        for key in m:
+            if key not in seen:
+                fieldnames.append(key)
+                seen.add(key)
+
     with path.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()

@@ -58,7 +58,7 @@ Severity guide:
   Verified with a mock capturing the array passed to `predict` (pure-red RGB pixel arrives
   as BGR `[0,0,255]`); regression test added in `tests/test_yolo_detector.py`.
 
-### 3. CSV exporter silently drops 14 measurement columns (incl. multiplicity, classification, bbox)
+### 3. CSV exporter silently drops 14 measurement columns (incl. multiplicity, classification, bbox)  ✅ FIXED
 - **File:** `src/blenny/modules/export_csv.py:52-97` (`preferred_order` whitelist +
   `extrasaction="ignore"`); same list duplicated in `src/blenny/cli/main.py` for
   `batch_colonies.csv`.
@@ -79,6 +79,11 @@ Severity guide:
   measurement rows carry 30 keys. 14 keys missing from header.
 - **Fix direction:** include all keys present in rows (or a richer explicit order), at least
   `colony_count_estimate` and `segment_label`.
+
+  **Status: FIXED** — both `CSVExporter` and the CLI's `_write_batch_colonies_csv` now
+  append every remaining row key (after the preferred order) by first appearance, so
+  nothing is dropped. Verified: classic pipeline run now writes all 30 columns (was 16),
+  including `colony_count_estimate`, `segment_label`, `classification`, and bbox columns.
 
 ### 4. GUI tuning sliders "Min Size (ppm)", "Min Circularity", "Interior Radius", "Max Eccentricity" have no effect
 - **File:** `gui/app.py:306-316` (controls) vs `gui/app.py:395-402` (overrides dict)

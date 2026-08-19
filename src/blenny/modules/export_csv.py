@@ -77,8 +77,15 @@ class CSVExporter(Exporter):
             if any(p in r for r in rows):
                 fieldnames.append(p)
 
-        # 2. In default export, we only keep the minimal set requested by the user.
-        # We don't add "any other columns" here.
+        # 2. Append any remaining columns produced by modules (multiplicity,
+        # classification, segment_label, bounding boxes, ...) so no data is
+        # silently dropped. Order follows first appearance across rows.
+        seen = set(fieldnames)
+        for row in rows:
+            for key in row:
+                if key not in seen:
+                    fieldnames.append(key)
+                    seen.add(key)
 
         if self.params.include_provenance:  # type: ignore[attr-defined]
             steps = " -> ".join(p.step for p in data.provenance)
