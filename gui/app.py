@@ -263,7 +263,7 @@ with st.sidebar:
     if selected_tool_label == "Polygon Plate Area" and plate_mode != "Manual Shape":
         st.session_state["manual_plate_mode"] = "Manual Shape"; st.rerun()
 
-    radius_scale = compact_control("Plate Radius Scale", "radius_scale", 0.5, 2.0, radius_scale_default, 0.01, "Radius multiplier.") if plate_mode in ("Auto", "Multi-Plate Grid") else 1.0
+    radius_scale = compact_control("Plate Radius Scale", "radius_scale", 0.5, 2.0, radius_scale_default, 0.01, "Multiplier applied to the detected plate radius. <1 shrinks the analysis area (margin around the rim), >1 expands it — useful for tilted or off-centre plates.") if plate_mode in ("Auto", "Multi-Plate Grid") else 1.0
 
     grid_rows, grid_cols = 1, 1
     if plate_mode == "Multi-Plate Grid":
@@ -280,9 +280,9 @@ with st.sidebar:
 
     manual_cy, manual_cx, manual_r = None, None, None
     if plate_mode == "Manual Circle":
-        manual_cy = compact_control("Center Y", "m_cy", 0, 4000, 1000, 1, "Y center")
-        manual_cx = compact_control("Center X", "m_cx", 0, 4000, 1000, 1, "X center")
-        manual_r = compact_control("Radius", "m_r", 0, 2000, 800, 1, "Radius")
+        manual_cy = compact_control("Center Y", "m_cy", 0, 4000, 1000, 1, "Pixel Y (vertical) coordinate of the plate centre in the uploaded image, for Manual Circle mode.")
+        manual_cx = compact_control("Center X", "m_cx", 0, 4000, 1000, 1, "Pixel X (horizontal) coordinate of the plate centre in the uploaded image, for Manual Circle mode.")
+        manual_r = compact_control("Radius", "m_r", 0, 2000, 800, 1, "Plate radius in pixels for Manual Circle mode. Pick a value just inside the plate rim.")
 
     brush_size = st.slider("Brush Size", 1, 100, 20, key="mask_brush_size")
     c_cl1, c_cl2 = st.columns(2)
@@ -304,16 +304,16 @@ with st.sidebar:
         max_sub_dimension = st.number_input("Max sub-plate dimension (px)", 100, 4000, 1280, key="max_sub_dimension", disabled=not resize_sub_enabled)
 
     yolo_conf = compact_control(
-        "YOLO Confidence", "yolo_conf", 0.0, 1.0, yolo_conf_default, 0.05,
-        "Minimum confidence for YOLO colony detections. Lower = more colonies "
+        "YOLO Confidence", "yolo_conf", 0.0, 1.0, yolo_conf_default, 0.01,
+        "Minimum confidence for YOLO colony detections (0-1). Lower = more colonies "
         "detected but more false positives; higher = fewer, higher-confidence "
         "detections. Only used by pipelines with a yolo_detector step.",
     )
 
-    min_area_ppm = compact_control("Min Size (ppm)", "min_area_ppm", 0, 1000, min_area_ppm_default, 1, "Min area.")
-    min_circ = compact_control("Min Circularity", "min_circ", 0.0, 1.0, min_circ_default, 0.05, "Min roundness.")
-    interior_radius = compact_control("Interior Radius", "int_r", 0.1, 1.0, interior_radius_default, 0.05, "Interior zone.")
-    fallback_ecc = compact_control("Max Eccentricity", "f_ecc", 0.1, 1.0, fallback_ecc_default, 0.05, "Max elongation.")
+    min_area_ppm = compact_control("Min Size (ppm)", "min_area_ppm", 0, 1000, min_area_ppm_default, 1, "Smallest colony kept by segmentation, in parts-per-million (ppm) of the plate area — 1 ppm = one millionth of the plate. On a 90 mm plate, 15 ppm ≈ 0.1 mm². Raise to ignore fine debris.")
+    min_circ = compact_control("Min Circularity", "min_circ", 0.0, 1.0, min_circ_default, 0.05, "Roundness filter (1.0 = perfect circle). Detections below this are rejected as artefacts — rim arcs and smudges score <0.5. Set to 0 to disable.")
+    interior_radius = compact_control("Interior Radius", "int_r", 0.1, 1.0, interior_radius_default, 0.05, "Fraction of the plate radius treated as the trusted 'interior' reference for artifact rejection. Edge-zone detections are scored against interior colonies; raise toward 1.0 to keep more edge colonies, lower to reject more.")
+    fallback_ecc = compact_control("Max Eccentricity", "f_ecc", 0.1, 1.0, fallback_ecc_default, 0.05, "Elongation cap for the strict fallback filter used when too few interior colonies exist to build a reference. Detections more elongated than this are marked as artefacts; 0.55 is a typical value, 1.0 disables the filter.")
     enable_debug = st.checkbox("Save debug images", value=False)
     generate_annotated = st.checkbox("Generate annotated images", value=True, key="gen_ann_check")
     save_subfolders = st.checkbox("Save as Subfolders", value=True)
