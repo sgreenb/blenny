@@ -157,16 +157,7 @@ Severity guide:
   pipeline file.
 - **Fix direction:** reconcile the template and the root YAML (pick one as canonical).
 
-### 12. Training data YAMLs contain machine-specific absolute paths
-- **Files:** `ml_training/colony_data.yaml`, `ml_training/colony_data_single.yaml`,
-  `ml_training/tiled_colony_data.yaml`, `ml_training/master_colony_data.yaml`,
-  `ml_training/allie_finetune.yaml`
-- **What happens:** e.g. `colony_data.yaml` has
-  `path: C:/Users/samgr/Github/blenny/ml_training/datasets/colony_data` — absolute to one
-  machine; training will fail on any other machine/CI.
-- **Fix direction:** use relative paths (YOLO resolves them relative to the yaml).
-
-### 13. `scripts/evaluate_labeled.py` references a directory that doesn't exist
+### 12. `scripts/evaluate_labeled.py` references a directory that doesn't exist
 - **File:** `scripts/evaluate_labeled.py:28-30` → `example_plates/labels.csv`
 - **What happens:** the script hard-codes `REPO / "example_plates"`, which is not in the
   repository; the script fails immediately out of the box.
@@ -176,46 +167,48 @@ Severity guide:
 
 ## LOW
 
-### 14. GUI dead code / unused constants
+### 13. GUI dead code / unused constants
 - `gui/app.py:33` `resize_default` and `gui/app.py:32` `max_dimension_default` are unused
   (the widgets hard-code 3200 etc.).
 - `gui/app.py:322` `manual_exclude_ids` is initialised in session state but never used
   (the "filter_by_id" GUI path is unimplemented).
 
-### 15. `detect_facile` all-outliers path produces no quality flag
+### 14. `detect_facile` all-outliers path produces no quality flag
 - `src/blenny/modules/detect_facile.py` — after the size-consistency filter removes every
   circle, the code writes an all-True plate mask and returns without raising any flag, so
   the user gets no warning that detection collapsed.
 
-### 16. `batch_colonies.csv` silently skipped when no measurements
+### 15. `batch_colonies.csv` silently skipped when no measurements
 - `src/blenny/cli/main.py:_write_batch_colonies_csv` returns early on an empty list without
   writing the file; failed/all-empty batches produce no `batch_colonies.csv` at all.
 
-### 17. Debug output collisions in multi-plate mode
+### 16. Debug output collisions in multi-plate mode
 - `src/blenny/pipeline/debug.py` — sub-plates reuse the same step names and the writer's
   counter resets per sub-pipeline run, so debug images/masks from plate 2 overwrite plate 1's.
 
-### 18. Weak test assertion
+### 17. Weak test assertion
 - `tests/test_classify_interior.py:test_iqr_multiplier_controls_strictness` asserts
   `strict_rejected or not lenient_rejected`, which can pass even when the classifier
   behaves identically at both multipliers.
 
-### 19. Stale comment in test
+### 18. Stale comment in test
 - `tests/test_modules.py:test_image_file_loader_does_not_upscale_small_images` says
   "default max_dim=2000"; the actual default is `None`.
 
-### 20. Runtime artifacts committed to the repo
-- `gui_uploads/uploaded_pipeline.yaml` is a stale user-uploaded pipeline (it still contains
-  the now-removed duplicate top-level `export_annotated` step) and `gui_uploads/*.png` are
-  runtime uploads. The `gui_uploads/` directory (and possibly `sandbox/`) looks like it
-  should be git-ignored.
+### 19. Stale local artifact in `gui_uploads/` (not tracked)
+- `gui_uploads/` and `sandbox/` are already in `.gitignore` and contain **zero tracked
+  files**, so nothing here is committed to the repo (an earlier draft of this audit claimed
+  otherwise). The only residual point: a stale local `gui_uploads/uploaded_pipeline.yaml`
+  still contains the now-removed duplicate top-level `export_annotated` step, so if a user
+  re-selects that file in the GUI it produces an extra parent-level annotated export.
+  Operational note only: delete the stale file; no repo change needed.
 
-### 21. GUI override forces `crop: False` on `detect_plate`
+### 20. GUI override forces `crop: False` on `detect_plate`
 - `gui/app.py:397` unconditionally sets `crop: False` for `detect_plate`; a user-uploaded
   classic pipeline that sets `crop: true` would behave differently under the GUI than under
   the CLI.
 
-### 22. GUI `data_editor` `edited_rows` may be re-applied on unrelated reruns
+### 21. GUI `data_editor` `edited_rows` may be re-applied on unrelated reruns
 - `gui/app.py:522-545` reads `edited_rows` from widget state and applies them on every
   rerun until the underlying dataframe changes; generally idempotent, but worth confirming
   interactively that repeated application + `st.rerun()` cannot loop. (Low confidence —
@@ -236,3 +229,18 @@ Severity guide:
   generations.
 - Multiplicity rounding (`int(ratio + 0.2)`), interior-classifier IQR guard, and registry
   duplicate-name rejection are all covered by passing tests.
+- **`ml_training/` YAMLs use machine-specific absolute paths (e.g. `C:/Users/samgr/...`).**
+  Not a bug: the whole `ml_training/` directory is in `.gitignore`, is not tracked by git
+  (0 files), and is intentionally local-only tooling for this machine. Training configs are
+  regenerated here rather than distributed.
+
+---
+
+## Incidental observation (not a bug in the code)
+
+- `.gitignore` lists `pipeline_classic.yaml`, `pipeline_multi.yaml`, and `pipeline_yolo.yaml`
+  as ignored, but `pipeline_classic.yaml` and `pipeline_multi.yaml` are actually **tracked**
+  (they were committed before the ignore rules were added; git ignores don't untrack
+  files). `pipeline_yolo.yaml` and `pipeline_yolo_facile_grid.yaml` are genuinely untracked
+  (generated by `blenny init`). Inconsistent, but harmless — just means edits to the two
+  tracked YAMLs show up in git.
