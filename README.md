@@ -128,7 +128,8 @@ For high-throughput scanning of multiple plates at once:
 ### Key `blenny run` Options
 - `--input`, `-i`: Input image path, directory, or quoted glob (e.g. `'plates/*.jpg'`).
 - `--output`, `-o`: Directory to write results into.
-- `--override`, `-v`: Tweak any parameter on the fly (e.g. `-v threshold_segment.min_area=50`).
+- `--override`, `-v`: Tweak any parameter on the fly (e.g. `-v threshold_segment.min_area=50`). Works for modules inside `sub_pipeline` steps too (e.g. `-v yolo_detector.conf_threshold=0.25`).
+- `--confidence`, `--conf`: YOLO detection confidence threshold (0–1). Applies to every `yolo_detector` step, including inside `sub_pipeline` (default: 0.15 in shipped templates).
 - `--provenance`: Save a full audit trail (`provenance.json`) per image.
 - `--debug-dir`: Write intermediate step images for auditing.
 

@@ -164,6 +164,19 @@ def run(
             help="Override module parameters (e.g., -v threshold_segment.min_area=20).",
         ),
     ] = None,
+    confidence: Annotated[
+        float | None,
+        typer.Option(
+            "--confidence",
+            "--conf",
+            min=0.0,
+            max=1.0,
+            help="YOLO detection confidence threshold (0-1). Applies to every "
+            "yolo_detector step, including inside sub_pipeline steps. "
+            "Default: leave the pipeline's conf_threshold unchanged "
+            "(0.15 in the shipped templates).",
+        ),
+    ] = None,
 ) -> None:
     inputs = sorted(_expand_input(input_pattern))
     if not inputs:
@@ -262,17 +275,23 @@ def run(
                     except ValueError:
                         parsed_val = value
 
-                # Find the module in the steps and update it
-                found = False
-                for step in raw_steps:
-                    if step["name"] == mod_name:
-                        step.setdefault("params", {})[param_name] = parsed_val
-                        found = True
+                # Find the module in the steps (top-level or nested inside
+                # sub_pipeline steps) and update it.
+                found = _set_param_recursive(raw_steps, mod_name, param_name, parsed_val)
                 if not found:
                     typer.echo(f"Warning: Module '{mod_name}' not found in pipeline.", err=True)
             except ValueError as e:
                 typer.echo(f"Error: Invalid override format '{item}'. Use mod.param=val", err=True)
                 raise typer.Exit(1) from e
+
+    if confidence is not None and not _set_param_recursive(
+        raw_steps, "yolo_detector", "conf_threshold", confidence
+    ):
+        typer.echo(
+            "Warning: no 'yolo_detector' step found in pipeline; "
+            "--confidence had no effect.",
+            err=True,
+        )
 
     # Sanity-check that the pipeline makes a Pipeline at all (no inputs yet).
     # Substitution leaves placeholders untouched if no values are provided,
@@ -564,6 +583,30 @@ def _expand_input(pattern: str) -> list[Path]:
     if p.is_file():
         return [p]
     return []
+
+
+def _set_param_recursive(
+    steps: list[dict[str, Any]], mod_name: str, param_name: str, value: Any
+) -> bool:
+    """Set ``param_name`` on every step named ``mod_name``.
+
+    Recurses into ``sub_pipeline`` steps so overrides like
+    ``-v yolo_detector.conf_threshold=0.25`` work on pipelines where the
+    target module runs inside a sub-pipeline. Returns True if at least one
+    step was updated.
+    """
+    found = False
+    for step in steps:
+        if step.get("name") == mod_name:
+            step.setdefault("params", {})[param_name] = value
+            found = True
+        if step.get("name") == "sub_pipeline":
+            sub_steps = step.get("params", {}).get("steps")
+            if isinstance(sub_steps, list) and _set_param_recursive(
+                sub_steps, mod_name, param_name, value
+            ):
+                found = True
+    return found
 
 
 def _resolve_for_validation(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:

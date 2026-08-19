@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 from PIL import Image
 from typer.testing import CliRunner
 
 from blenny.cli.main import app
+from blenny.config import load_yaml
+from blenny.pipeline import ImageData
 from blenny.testing import make_synthetic_plate
 
 runner = CliRunner()
@@ -199,3 +202,91 @@ def test_run_keeps_going_after_per_image_failure(tmp_path: Path) -> None:
     assert (out_dir / img_good.stem / "colonies.csv").exists()
     summary_csv = (out_dir / "summary.csv").read_text()
     assert "failed" in summary_csv
+
+
+# --- confidence / nested overrides -------------------------------------------
+
+
+class _FakePipeline:
+    """Pipeline stand-in that skips real execution for config-level tests."""
+
+    def __init__(self, steps: list[dict]) -> None:
+        self.steps = steps
+
+    @classmethod
+    def from_config(cls, steps: list[dict]) -> _FakePipeline:
+        return cls(steps)
+
+    def run(self, *args, **kwargs) -> ImageData:
+        return ImageData(source=str(args[0]))
+
+
+def _write_nested_yolo_pipeline(path: Path) -> None:
+    """Write a pipeline whose yolo_detector step sits inside sub_pipeline."""
+    path.write_text(
+        "steps:\n"
+        "  - name: load_image\n"
+        "  - name: sub_pipeline\n"
+        "    params:\n"
+        "      steps:\n"
+        "        - name: yolo_detector\n"
+        "          params:\n"
+        "            conf_threshold: 0.15\n"
+        "        - name: measure_colonies\n",
+        encoding="utf-8",
+    )
+
+
+def test_run_confidence_flag_overrides_nested_yolo_step(tmp_path: Path) -> None:
+    img = _save_synthetic(tmp_path)
+    pipe_yaml = tmp_path / "pipe.yaml"
+    _write_nested_yolo_pipeline(pipe_yaml)
+
+    out_dir = tmp_path / "out"
+    with patch("blenny.cli.main.Pipeline", _FakePipeline):
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                str(pipe_yaml),
+                "--input",
+                str(img),
+                "--output",
+                str(out_dir),
+                "--confidence",
+                "0.5",
+            ],
+        )
+    assert result.exit_code == 0, result.stdout
+
+    config = load_yaml(out_dir / "reproducible_config.yaml")
+    inner_steps = config["steps"][1]["params"]["steps"]
+    assert inner_steps[0]["name"] == "yolo_detector"
+    assert inner_steps[0]["params"]["conf_threshold"] == 0.5
+
+
+def test_run_override_applies_to_nested_sub_pipeline_step(tmp_path: Path) -> None:
+    img = _save_synthetic(tmp_path)
+    pipe_yaml = tmp_path / "pipe.yaml"
+    _write_nested_yolo_pipeline(pipe_yaml)
+
+    out_dir = tmp_path / "out"
+    with patch("blenny.cli.main.Pipeline", _FakePipeline):
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                str(pipe_yaml),
+                "--input",
+                str(img),
+                "--output",
+                str(out_dir),
+                "-v",
+                "yolo_detector.conf_threshold=0.7",
+            ],
+        )
+    assert result.exit_code == 0, result.stdout
+
+    config = load_yaml(out_dir / "reproducible_config.yaml")
+    inner_steps = config["steps"][1]["params"]["steps"]
+    assert inner_steps[0]["params"]["conf_threshold"] == 0.7

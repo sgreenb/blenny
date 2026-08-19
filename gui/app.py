@@ -28,6 +28,7 @@ min_area_ppm_default = 5
 min_circ_default = 0.0
 interior_radius_default = 1.0
 fallback_ecc_default = 1.0
+yolo_conf_default = 0.15
 max_dimension_default = 3200
 resize_default = False
 
@@ -302,6 +303,13 @@ with st.sidebar:
         resize_sub_enabled = st.checkbox("Resize sub-plates for analysis", key="resize_sub_enabled")
         max_sub_dimension = st.number_input("Max sub-plate dimension (px)", 100, 4000, 1280, key="max_sub_dimension", disabled=not resize_sub_enabled)
 
+    yolo_conf = compact_control(
+        "YOLO Confidence", "yolo_conf", 0.0, 1.0, yolo_conf_default, 0.05,
+        "Minimum confidence for YOLO colony detections. Lower = more colonies "
+        "detected but more false positives; higher = fewer, higher-confidence "
+        "detections. Only used by pipelines with a yolo_detector step.",
+    )
+
     min_area_ppm = compact_control("Min Size (ppm)", "min_area_ppm", 0, 1000, min_area_ppm_default, 1, "Min area.")
     min_circ = compact_control("Min Circularity", "min_circ", 0.0, 1.0, min_circ_default, 0.05, "Min roundness.")
     interior_radius = compact_control("Interior Radius", "int_r", 0.1, 1.0, interior_radius_default, 0.05, "Interior zone.")
@@ -389,6 +397,7 @@ if input_paths:
                     "detect_multi_plate": {"radius_scale": radius_scale, "grid": [grid_rows, grid_cols], "labels": st.session_state.get("grid_labels")},
                     "threshold_segment": {"min_area_ppm": min_area_ppm, "min_circularity": min_circ},
                     "classify_by_interior": {"interior_radius_frac": interior_radius, "strict_fallback_max_eccentricity": fallback_ecc},
+                    "yolo_detector": {"conf_threshold": yolo_conf},
                     "sub_pipeline": {"max_subplate_dimension": int(max_sub_dimension) if resize_sub_enabled else None}
                 }
                 if plate_mode == "Manual Circle":
