@@ -196,7 +196,7 @@ Severity guide:
   as the fallback ordering. Verified with a stub multiplicity module (3 detections ×
   estimate 2 → count 6, per-plate 6).
 
-### 10. `ThresholdClassifier` doesn't validate `color` length → annotated export crashes
+### 10. `ThresholdClassifier` doesn't validate `color` length → annotated export crashes  ✅ FIXED
 - **File:** `src/blenny/modules/classify_threshold.py:30` (`color: list[int] | None`)
   + `src/blenny/modules/export_annotated.py` (`rgb[b] = np.array(r["class_color"])`)
 - **What happens:** a rule with a 2- or 4-element color list passes pydantic validation
@@ -205,6 +205,10 @@ Severity guide:
 - **Reproduced:** `ThresholdClassifier(rules=[{'feature':'mean_v','min':0.5,'label':'x','color':[255,0]}])`
   then `AnnotatedImageExporter.render(...)` → `ValueError`.
 - **Fix direction:** validate length-3 RGB in the `color` field (pydantic `Field(min_length=3, max_length=3)`).
+
+  **Status: FIXED** — `ThresholdRule.color` now enforces exactly 3 elements
+  (`Field(min_length=3, max_length=3)`), so malformed colors raise a `ValidationError` at
+  pipeline build time instead of crashing the annotated exporter.
 
 ### 11. Template drift: `blenny init` writes a different `pipeline_multi.yaml` than the committed one
 - **Files:** `src/blenny/templates/count_colonies_multi.yaml` vs `pipeline_multi.yaml`

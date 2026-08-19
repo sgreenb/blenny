@@ -42,8 +42,8 @@ class ThresholdRule(BlennyParams):
     label: str
     """The classification label to assign (e.g., 'high_expressor')."""
 
-    color: list[int] | None = None
-    """Optional [R, G, B] color for annotated outlines (0-255)."""
+    color: list[int] | None = Field(default=None, min_length=3, max_length=3)
+    """Optional [R, G, B] color for annotated outlines (0-255). Must be exactly 3 values."""
 
 
 @register("classify_by_threshold")
