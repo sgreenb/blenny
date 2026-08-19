@@ -24,7 +24,7 @@ from blenny.pipeline import Pipeline
 
 # --- Globals & Defaults ---
 radius_scale_default = 1.0
-min_area_ppm_default = 5
+min_area_ppm_default = 0
 min_circ_default = 0.0
 interior_radius_default = 1.0
 fallback_ecc_default = 1.0
@@ -334,7 +334,7 @@ with st.sidebar:
     )
 
     if has_threshold or has_filter:
-        min_area_ppm = compact_control("Min Size (ppm)", "min_area_ppm", 0, 1000, min_area_ppm_default, 1, "Smallest colony kept, in parts-per-million (ppm) of the plate area — 1 ppm = one millionth of the plate. On a 90 mm plate, 15 ppm ≈ 0.1 mm². Applies during segmentation (Classic) or as a post-YOLO filter. Raise to ignore fine debris.")
+        min_area_ppm = compact_control("Min Size (ppm)", "min_area_ppm", 0, 1000, min_area_ppm_default, 1, "Smallest colony kept, in parts-per-million (ppm) of the plate area — 1 ppm = one millionth of the plate. On a 90 mm plate, 15 ppm ≈ 0.1 mm². 0 (the default) = no minimum, i.e. no area filtering. Applies during segmentation (Classic) or as a post-YOLO filter. Raise to ignore fine debris.")
         min_circ = compact_control("Min Circularity", "min_circ", 0.0, 1.0, min_circ_default, 0.05, "Roundness filter (1.0 = perfect circle). Detections below this are rejected as artefacts — rim arcs and smudges score <0.5. Applies during segmentation (Classic) or as a post-YOLO filter. Set to 0 to disable.")
     else:
         min_area_ppm, min_circ = min_area_ppm_default, min_circ_default

@@ -44,6 +44,13 @@ def test_no_params_is_noop() -> None:
     assert len(out) == 2
 
 
+def test_min_area_ppm_zero_disables_filter() -> None:
+    """0 (the GUI default) means no minimum, i.e. no area filtering."""
+    rows = [_row(1, area=1), _row(2, area=500)]
+    out = ColonyFilter(min_area_ppm=0).classify(rows, _data())
+    assert all(not r["is_artifact"] for r in out)
+
+
 def test_min_area_px_drops_small_rows() -> None:
     data = _data()
     rows = [_row(1, area=50), _row(2, area=2000)]
