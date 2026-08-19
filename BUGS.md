@@ -107,7 +107,7 @@ Severity guide:
   NOTE: this adds active artifact rejection to CLI YOLO runs (previously YOLO mode had
   none) — intended per the README's core-feature list.
 
-### 5. GUI checkboxes "Save debug images", "Generate annotated images", "Save as Subfolders" do nothing
+### 5. GUI checkboxes "Save debug images", "Generate annotated images", "Save as Subfolders" do nothing  ✅ FIXED
 - **File:** `gui/app.py:317-319`
 - **What happens:** `enable_debug`, `generate_annotated`, `save_subfolders` are read into
   variables but never referenced again anywhere in the file (verified by grep — each
@@ -116,6 +116,13 @@ Severity guide:
   and never flattens output paths, so none of the three checkboxes affects the run.
 - **Fix direction:** wire them up mirroring the CLI flags (`--debug-dir`,
   `--no-annotated-images`, `--flat`), or remove them from the UI.
+
+  **Status: FIXED** — all three are now wired up in the GUI run block: unchecking
+  "Generate annotated images" strips every `export_annotated` step (incl. inside
+  `sub_pipeline`), unchecking "Save as Subfolders" flattens `{output_dir}/{stem}/` paths
+  (same improved logic as the CLI `--flat` fix), and "Save debug images" passes a per-image
+  `debug_dir` to the pipeline runner. Verified by replicating the strip/flatten logic on the
+  template and checking the run call wiring.
 
 ### 6. GUI "Save/Update All results" writes multi-plate annotated images to the *old* output directory
 - **File:** `src/blenny/modules/sub_pipeline.py:120` (copies `output_dir` into each
@@ -231,10 +238,13 @@ Severity guide:
   re-selects that file in the GUI it produces an extra parent-level annotated export.
   Operational note only: delete the stale file; no repo change needed.
 
-### 20. GUI override forces `crop: False` on `detect_plate`
+### 20. GUI override forces `crop: False` on `detect_plate`  ✅ FIXED
 - `gui/app.py:397` unconditionally sets `crop: False` for `detect_plate`; a user-uploaded
   classic pipeline that sets `crop: true` would behave differently under the GUI than under
   the CLI.
+
+  **Status: FIXED** — the GUI override now only sets `radius_scale` for `detect_plate` and
+  `detect_facile`, leaving each pipeline's own `crop` setting intact.
 
 ### 21. GUI `data_editor` `edited_rows` may be re-applied on unrelated reruns
 - `gui/app.py:522-545` reads `edited_rows` from widget state and applies them on every

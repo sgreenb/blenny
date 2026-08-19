@@ -420,10 +420,46 @@ if input_paths:
             from blenny.config import extract_steps, load_yaml, substitute_paths
             try:
                 raw_steps = extract_steps(load_yaml(pipeline_path))
+
+                if not generate_annotated:
+                    # Mirror the CLI's --no-annotated-images: drop every
+                    # export_annotated step, including inside sub_pipeline.
+                    def strip_annotated(steps):
+                        out = []
+                        for s in steps:
+                            if s["name"] == "export_annotated":
+                                continue
+                            if s["name"] == "sub_pipeline":
+                                s["params"]["steps"] = strip_annotated(
+                                    s.get("params", {}).get("steps", [])
+                                )
+                            out.append(s)
+                        return out
+
+                    raw_steps = strip_annotated(raw_steps)
+
+                if not save_subfolders:
+                    # Mirror the CLI's --flat: flatten {output_dir}/{stem}/ paths.
+                    def flatten_paths(steps):
+                        for s in steps:
+                            if "params" in s:
+                                for k, v in s["params"].items():
+                                    if isinstance(v, str) and "{output_dir}/{stem}/" in v:
+                                        rest = v.split("{output_dir}/{stem}/", 1)[1]
+                                        s["params"][k] = (
+                                            "{output_dir}/" + rest
+                                            if rest.startswith("{stem}_")
+                                            else "{output_dir}/{stem}_" + rest
+                                        )
+                            if s["name"] == "sub_pipeline":
+                                flatten_paths(s.get("params", {}).get("steps", []))
+
+                    flatten_paths(raw_steps)
+
                 overrides = {
                     "load_image": {"max_dimension": int(max_dimension) if resize_enabled else None},
-                    "detect_plate": {"radius_scale": radius_scale, "crop": False},
-                    "detect_facile": {"radius_scale": radius_scale, "crop": False},
+                    "detect_plate": {"radius_scale": radius_scale},
+                    "detect_facile": {"radius_scale": radius_scale},
                     "detect_multi_plate": {"radius_scale": radius_scale, "grid": [grid_rows, grid_cols], "labels": st.session_state.get("grid_labels")},
                     "threshold_segment": {"min_area_ppm": min_area_ppm, "min_circularity": min_circ},
                     "classify_by_interior": {"interior_radius_frac": interior_radius, "strict_fallback_max_eccentricity": fallback_ecc},
@@ -460,7 +496,11 @@ if input_paths:
                         
                         t_p_start = time.perf_counter()
                         res = substitute_paths(raw_steps, input_path=p, output_dir=output_dir)
-                        data = Pipeline.from_config(res).run(p, output_dir=output_dir, progress_callback=gui_progress)
+                        dbg_dir = Path(output_dir) / "debug" / p.stem if enable_debug else None
+                        data = Pipeline.from_config(res).run(
+                            p, output_dir=output_dir, debug_dir=dbg_dir,
+                            progress_callback=gui_progress,
+                        )
                         t_p_elapsed = time.perf_counter() - t_p_start
                         st.session_state["gui_analysis_log"] += f"&nbsp;&nbsp;**Plate analysis complete in {t_p_elapsed:.2f}s**  \n\n"
                         log_container.markdown(st.session_state["gui_analysis_log"])
