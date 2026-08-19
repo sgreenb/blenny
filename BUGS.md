@@ -147,7 +147,7 @@ Severity guide:
 
 ## MEDIUM
 
-### 7. Four CLI tests are stale and fail on a clean checkout
+### 7. Four CLI tests are stale and fail on a clean checkout  ✅ FIXED
 - **File:** `tests/test_cli.py`
 - **Failures (all reproduced on the clean baseline before any audit changes):**
   - `test_init_writes_to_default_file` — expects `"Wrote YOLO ML template to pipeline_yolo.yaml"`;
@@ -158,6 +158,11 @@ Severity guide:
     `batch_log.txt` which the CLI no longer produces (it writes `batch_summary.csv`).
   - `test_run_keeps_going_after_per_image_failure` — reads `summary.csv` (old name).
 - **Fix direction:** update assertions to current CLI output names/messages.
+
+  **Status: FIXED** — `tests/test_cli.py` updated to the current CLI contract: init
+  message `(Auto)` variant, `{stem}_run_summary.txt` instead of `log.txt`, and
+  `batch_summary.csv` / `batch_colonies.csv` instead of `summary.csv` / `batch_log.txt`.
+  Full suite now passes (112 passed, including these four).
 
 ### 8. CLI `--flat` mangles multi-plate annotated filenames (duplicated stem)
 - **File:** `src/blenny/cli/main.py:198-209` (`flatten_paths`)
