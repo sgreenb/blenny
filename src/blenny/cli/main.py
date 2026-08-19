@@ -195,18 +195,7 @@ def run(
 
     if flat:
         # Flatten output paths if they follow the /{stem}/ pattern
-        def flatten_paths(steps: list[dict[str, Any]]) -> None:
-            for s in steps:
-                if "params" in s:
-                    for k, v in s["params"].items():
-                        if isinstance(v, str) and "{output_dir}/{stem}/" in v:
-                            s["params"][k] = v.replace(
-                                "{output_dir}/{stem}/", "{output_dir}/{stem}_"
-                            )
-                if s["name"] == "sub_pipeline" and "params" in s and "steps" in s["params"]:
-                    flatten_paths(s["params"]["steps"])
-
-        flatten_paths(raw_steps)
+        _flatten_paths(raw_steps)
 
     if not annotated_images:
         # 1. Remove export_annotated modules
@@ -219,19 +208,7 @@ def run(
                 ]
 
         if not flat:  # Only auto-flatten if not already explicitly handled by --flat
-            # 2. Flatten output paths if they follow the /{stem}/ pattern
-            def flatten_paths_compat(steps: list[dict[str, Any]]) -> None:
-                for s in steps:
-                    if "params" in s:
-                        for k, v in s["params"].items():
-                            if isinstance(v, str) and "{output_dir}/{stem}/" in v:
-                                s["params"][k] = v.replace(
-                                    "{output_dir}/{stem}/", "{output_dir}/{stem}_"
-                                )
-                    if s["name"] == "sub_pipeline" and "params" in s and "steps" in s["params"]:
-                        flatten_paths_compat(s["params"]["steps"])
-
-            flatten_paths_compat(raw_steps)
+            _flatten_paths(raw_steps)
 
     # Pre-detect if we are in multi-plate mode to fix column ordering in summary.csv
     expected_plate_columns: list[str] = []
@@ -607,6 +584,28 @@ def _set_param_recursive(
             ):
                 found = True
     return found
+
+
+def _flatten_paths(steps: list[dict[str, Any]]) -> None:
+    """Flatten ``{output_dir}/{stem}/`` output paths to ``{output_dir}/``.
+
+    Classic paths like ``{output_dir}/{stem}/colonies.csv`` become
+    ``{output_dir}/{stem}_colonies.csv``. Multi-plate paths that already
+    repeat the stem (``{output_dir}/{stem}/{stem}_{plate_label}_annotated.png``)
+    drop the directory instead of producing a duplicated stem.
+    """
+    for s in steps:
+        if "params" in s:
+            for k, v in s["params"].items():
+                if isinstance(v, str) and "{output_dir}/{stem}/" in v:
+                    rest = v.split("{output_dir}/{stem}/", 1)[1]
+                    s["params"][k] = (
+                        "{output_dir}/" + rest
+                        if rest.startswith("{stem}_")
+                        else "{output_dir}/{stem}_" + rest
+                    )
+        if s.get("name") == "sub_pipeline" and "params" in s and "steps" in s["params"]:
+            _flatten_paths(s["params"]["steps"])
 
 
 def _resolve_for_validation(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:

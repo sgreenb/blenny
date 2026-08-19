@@ -164,7 +164,7 @@ Severity guide:
   `batch_summary.csv` / `batch_colonies.csv` instead of `summary.csv` / `batch_log.txt`.
   Full suite now passes (112 passed, including these four).
 
-### 8. CLI `--flat` mangles multi-plate annotated filenames (duplicated stem)
+### 8. CLI `--flat` mangles multi-plate annotated filenames (duplicated stem)  ✅ FIXED
 - **File:** `src/blenny/cli/main.py:198-209` (`flatten_paths`)
 - **What happens:** flattening blindly replaces `{output_dir}/{stem}/` with
   `{output_dir}/{stem}_`. For the multi-plate annotated path
@@ -172,6 +172,12 @@ Severity guide:
   `{output_dir}/{stem}_{stem}_{plate_label}_annotated.png` (stem repeated).
 - **Fix direction:** make the replacement pattern-aware (replace `{stem}/` with `_` only,
   or rebuild the flattened path more carefully).
+
+  **Status: FIXED** — both flattening paths (explicit `--flat` and the `--no-annotated-images`
+  auto-flatten) now share a single `_flatten_paths` helper that strips the directory and
+  avoids the duplicated stem. Verified with real runs: classic `--flat` produces
+  `plate_colonies.csv` / `plate_annotated.png` / `plate_run_summary.txt`, and multi-plate
+  produces `{stem}_{plate_label}_annotated.png` (was `{stem}_{stem}_...`).
 
 ### 9. Multi-plate counts ignore `colony_count_estimate`
 - **File:** `src/blenny/modules/sub_pipeline.py:226-266`
