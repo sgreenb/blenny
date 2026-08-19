@@ -43,6 +43,11 @@ steps:
             mask_key: "objects"
             roi_mask_key: "plate"
 
+        - name: filter_colonies
+          # Post-YOLO size/shape filter (GUI sliders 'Min Size (ppm)' /
+          # 'Min Circularity'). Defaults disable filtering; the GUI/CLI set
+          # min_area_ppm / min_circularity.
+
         - name: classify_by_interior
           # Reject edge-zone detections that don't match the interior colony
           # profile (rim arcs, cracks, pen marks). Tune with the GUI sliders

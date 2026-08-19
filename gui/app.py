@@ -316,6 +316,7 @@ with st.sidebar:
         pass  # unreadable pipeline -> assume nothing is tunable
     has_threshold = "threshold_segment" in pipeline_step_names
     has_interior = "classify_by_interior" in pipeline_step_names
+    has_filter = "filter_colonies" in pipeline_step_names
 
     resize_enabled = st.checkbox("Resize scan for detection", key="resize_enabled", value=resize_default)
     max_dimension = st.number_input("Max scan dimension (px)", 100, 10000, max_dimension_default, key="max_dimension", disabled=not resize_enabled)
@@ -332,9 +333,9 @@ with st.sidebar:
         "detections. Only used by pipelines with a yolo_detector step.",
     )
 
-    if has_threshold:
-        min_area_ppm = compact_control("Min Size (ppm)", "min_area_ppm", 0, 1000, min_area_ppm_default, 1, "Smallest colony kept by segmentation, in parts-per-million (ppm) of the plate area — 1 ppm = one millionth of the plate. On a 90 mm plate, 15 ppm ≈ 0.1 mm². Raise to ignore fine debris.")
-        min_circ = compact_control("Min Circularity", "min_circ", 0.0, 1.0, min_circ_default, 0.05, "Roundness filter (1.0 = perfect circle). Detections below this are rejected as artefacts — rim arcs and smudges score <0.5. Set to 0 to disable.")
+    if has_threshold or has_filter:
+        min_area_ppm = compact_control("Min Size (ppm)", "min_area_ppm", 0, 1000, min_area_ppm_default, 1, "Smallest colony kept, in parts-per-million (ppm) of the plate area — 1 ppm = one millionth of the plate. On a 90 mm plate, 15 ppm ≈ 0.1 mm². Applies during segmentation (Classic) or as a post-YOLO filter. Raise to ignore fine debris.")
+        min_circ = compact_control("Min Circularity", "min_circ", 0.0, 1.0, min_circ_default, 0.05, "Roundness filter (1.0 = perfect circle). Detections below this are rejected as artefacts — rim arcs and smudges score <0.5. Applies during segmentation (Classic) or as a post-YOLO filter. Set to 0 to disable.")
     else:
         min_area_ppm, min_circ = min_area_ppm_default, min_circ_default
 
@@ -461,6 +462,7 @@ if input_paths:
                     "detect_facile": {"radius_scale": radius_scale},
                     "detect_multi_plate": {"radius_scale": radius_scale, "grid": [grid_rows, grid_cols], "labels": st.session_state.get("grid_labels")},
                     "threshold_segment": {"min_area_ppm": min_area_ppm, "min_circularity": min_circ},
+                    "filter_colonies": {"min_area_ppm": min_area_ppm, "min_circularity": min_circ},
                     "classify_by_interior": {"interior_radius_frac": interior_radius, "strict_fallback_max_eccentricity": fallback_ecc},
                     "yolo_detector": {"conf_threshold": yolo_conf},
                     "sub_pipeline": {"max_subplate_dimension": int(max_sub_dimension) if resize_sub_enabled else None}

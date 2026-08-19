@@ -18,6 +18,7 @@ from blenny.modules.export_annotated import AnnotatedImageExporter
 from blenny.modules.export_csv import CSVExporter
 from blenny.modules.export_summary import SummaryExporter
 from blenny.modules.filter_by_id import IDFilter
+from blenny.modules.filter_colonies import ColonyFilter
 from blenny.modules.identity import IdentityPreprocessor
 from blenny.modules.load_image import ImageFileLoader
 from blenny.modules.mask_exclusion import ExclusionMasker
@@ -29,6 +30,7 @@ from blenny.modules.yolo_detector import YoloDetector
 __all__ = [
     "AnnotatedImageExporter",
     "CSVExporter",
+    "ColonyFilter",
     "ColonyMeasurer",
     "ExclusionMasker",
     "FacileDetector",
