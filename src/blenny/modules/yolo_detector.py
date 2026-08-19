@@ -72,9 +72,25 @@ class YoloDetector(Segmenter):
             # Round up to nearest multiple of 32 for YOLO architecture
             inference_imgsz = ((max_dim + 31) // 32) * 32
 
+        # Ultralytics assumes numpy arrays are in OpenCV's BGR channel order
+        # (it converts BGR->RGB internally before inference). Our images are
+        # loaded as RGB (PIL), so convert here to avoid a red/blue swap that
+        # would feed the model a colour distribution it wasn't trained on.
+        if image.ndim == 3 and image.shape[-1] >= 3:
+            rgb = image[:, :, :3]
+            if rgb.dtype != np.uint8:
+                # cv2.cvtColor only accepts uint8; normalise float inputs the
+                # same way the refine-mask path does. (This also prevents a
+                # 0-1 float image from being divided by 255 a second time
+                # inside ultralytics' preprocess step.)
+                rgb = (rgb * 255).astype(np.uint8) if rgb.max() <= 1.1 else rgb.astype(np.uint8)
+            predict_img = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+        else:
+            predict_img = image
+
         # Perform inference
         results = model.predict(
-            image,
+            predict_img,
             imgsz=inference_imgsz,
             conf=self.params.conf_threshold,  # type: ignore[attr-defined]
             iou=self.params.iou_threshold,  # type: ignore[attr-defined]

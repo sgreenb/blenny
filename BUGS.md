@@ -37,7 +37,7 @@ Severity guide:
   override paths end-to-end on a synthetic plate and with new tests in
   `tests/test_detect_facile.py`.
 
-### 2. YOLO detector feeds the model RGB data that ultralytics treats as BGR (channel swap)
+### 2. YOLO detector feeds the model RGB data that ultralytics treats as BGR (channel swap)  ✅ FIXED
 - **File:** `src/blenny/modules/yolo_detector.py:76-80`
 - **What happens:** `load_image` produces an **RGB** numpy array (PIL). `yolo_detector`
   passes that array straight to `model.predict(image, ...)`. In ultralytics 8.4.48,
@@ -51,6 +51,12 @@ Severity guide:
 - **Fix direction:** convert to BGR before calling predict
   (`image[..., ::-1]` / `cv2.cvtColor(image, cv2.COLOR_RGB2BGR)`), or pass the array
   through ultralytics' PIL loader path.
+
+  **Status: FIXED** — `yolo_detector.segment` now converts RGB → BGR
+  (`cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)`) before `predict`, converting float inputs to
+  uint8 first (which also prevents 0–1 float images from being divided by 255 twice).
+  Verified with a mock capturing the array passed to `predict` (pure-red RGB pixel arrives
+  as BGR `[0,0,255]`); regression test added in `tests/test_yolo_detector.py`.
 
 ### 3. CSV exporter silently drops 14 measurement columns (incl. multiplicity, classification, bbox)
 - **File:** `src/blenny/modules/export_csv.py:52-97` (`preferred_order` whitelist +

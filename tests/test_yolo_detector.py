@@ -82,6 +82,34 @@ def test_yolo_detector_roi_filtering() -> None:
         assert out_mask[85, 85] == 0
 
 
+def test_yolo_detector_predict_receives_bgr_input() -> None:
+    """RGB (PIL) images must be converted to BGR before predict().
+
+    Ultralytics treats numpy arrays as BGR; without the conversion the model
+    would receive red/blue-swapped pixels.
+    """
+    mock_model = MagicMock()
+    captured: list[np.ndarray] = []
+
+    def _fake_predict(image, **kwargs):
+        captured.append(np.asarray(image))
+        res = MagicMock()
+        res.boxes = []
+        return [res]
+
+    mock_model.predict.side_effect = _fake_predict
+
+    with patch("blenny.modules.yolo_detector.YOLO", return_value=mock_model):
+        detector = YoloDetector(model_path="dummy.pt", refine_mask=False)
+        image = np.zeros((64, 64, 3), dtype=np.uint8)
+        image[32, 32] = [255, 0, 0]  # pure red in RGB
+        detector.segment(image, ImageData(source="test", image=image))
+
+    assert len(captured) == 1
+    # Red (RGB 255,0,0) must arrive as BGR (0,0,255)
+    assert captured[0][32, 32].tolist() == [0, 0, 255]
+
+
 def test_yolo_detector_handles_float_images() -> None:
     """Test that YoloDetector handles float images correctly (Otsu refinement)."""
     mock_model = MagicMock()
