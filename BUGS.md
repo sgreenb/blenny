@@ -179,7 +179,7 @@ Severity guide:
   `plate_colonies.csv` / `plate_annotated.png` / `plate_run_summary.txt`, and multi-plate
   produces `{stem}_{plate_label}_annotated.png` (was `{stem}_{stem}_...`).
 
-### 9. Multi-plate counts ignore `colony_count_estimate`
+### 9. Multi-plate counts ignore `colony_count_estimate`  ✅ FIXED
 - **File:** `src/blenny/modules/sub_pipeline.py:226-266`
 - **What happens:** `colony_count` and `per_plate_counts` are computed as raw
   non-artifact **detection** counts (`+1` per row). Single-plate mode
@@ -188,6 +188,13 @@ Severity guide:
   same plate report different counts. (Not observable with the shipped YOLO templates,
   which don't include multiplicity in the sub-pipeline.)
 - **Fix direction:** sum `colony_count_estimate` in `sub_pipeline` when present.
+
+  **Status: FIXED** — `sub_pipeline` now sums `colony_count_estimate` for both
+  `colony_count` and `per_plate_counts`, matching single-plate behaviour. Also fixed a
+  related gap: `per_plate_counts` was discarded entirely when plates were found by
+  `detect_facile` (no `MultiPlateDetector` step in provenance) — ROI labels are now used
+  as the fallback ordering. Verified with a stub multiplicity module (3 detections ×
+  estimate 2 → count 6, per-plate 6).
 
 ### 10. `ThresholdClassifier` doesn't validate `color` length → annotated export crashes
 - **File:** `src/blenny/modules/classify_threshold.py:30` (`color: list[int] | None`)

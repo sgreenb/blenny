@@ -222,9 +222,14 @@ class SubPipeline(Module):
                     )
                 )
 
-        # Update global metadata for summary exporters
-        data.metadata["colony_count"] = len(
-            [m for m in all_measurements if not m.get("is_artifact")]
+        # Update global metadata for summary exporters. Counts sum
+        # colony_count_estimate so merged-colony detections (tagged by
+        # estimate_multiplicity inside the sub-pipeline) contribute their
+        # estimated multiplicity, matching single-plate behaviour.
+        data.metadata["colony_count"] = sum(
+            int(m.get("colony_count_estimate", 1))
+            for m in all_measurements
+            if not m.get("is_artifact")
         )
         data.metadata["artifact_count"] = len([m for m in all_measurements if m.get("is_artifact")])
         data.metadata["multi_plate_results"] = all_sub_results
@@ -240,7 +245,9 @@ class SubPipeline(Module):
         for m in all_measurements:
             if not m.get("is_artifact"):
                 pl = m.get("plate_label", "unknown")
-                per_plate_counts[pl] = per_plate_counts.get(pl, 0) + 1
+                per_plate_counts[pl] = per_plate_counts.get(pl, 0) + int(
+                    m.get("colony_count_estimate", 1)
+                )
 
         expected_labels = []
         detector_params = None
@@ -258,6 +265,10 @@ class SubPipeline(Module):
                         expected_labels.append(labels_config[r_p][c_p])
                     else:
                         expected_labels.append(str(r_p * cols_p + c_p + 1))
+        else:
+            # Plates were found by a non-grid detector (e.g. detect_facile):
+            # order by the ROI labels so per_plate_counts is still reported.
+            expected_labels = [str(r["label"]) for r in rois]
 
         ordered_per_plate_counts = {}
         for el in expected_labels:
