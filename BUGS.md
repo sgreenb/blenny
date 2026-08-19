@@ -210,13 +210,17 @@ Severity guide:
   (`Field(min_length=3, max_length=3)`), so malformed colors raise a `ValidationError` at
   pipeline build time instead of crashing the annotated exporter.
 
-### 11. Template drift: `blenny init` writes a different `pipeline_multi.yaml` than the committed one
+### 11. Template drift: `blenny init` writes a different `pipeline_multi.yaml` than the committed one  ✅ FIXED
 - **Files:** `src/blenny/templates/count_colonies_multi.yaml` vs `pipeline_multi.yaml`
 - **Diff:** grid `[2, 3]` vs `[3, 2]`, `max_subplate_dimension: 1280` vs `3200`, and the
   template carries an extra `detect_multi_plate.min_confidence_score: 0.20`. Running
   `blenny init` therefore produces a config that behaves differently from the repo's own
   pipeline file.
 - **Fix direction:** reconcile the template and the root YAML (pick one as canonical).
+
+  **Status: FIXED** — the root `pipeline_multi.yaml` is canonical (newer); the shipped
+  template `count_colonies_multi.yaml` was made byte-identical to it. Verified: `blenny
+  init` now writes a `pipeline_multi.yaml` identical to the committed one.
 
 ### 12. `scripts/evaluate_labeled.py` references a directory that doesn't exist
 - **File:** `scripts/evaluate_labeled.py:28-30` → `example_plates/labels.csv`

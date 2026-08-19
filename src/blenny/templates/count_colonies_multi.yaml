@@ -1,38 +1,58 @@
-# Pipeline for analyzing multiple Petri plates in a single scan (e.g. flatbed scanner)
-# Configured with tuned defaults for high-precision edge-to-edge detection.
+# Pipeline for analyzing multiple Petri plates in a consistent grid arrangement
+# using the 'facile' algorithm for detection and YOLO for counting.
 
 steps:
   - name: "load_image"
     params:
-      max_dimension: null  # null = native resolution
+      # Native resolution is used so that each cropped plate can be
+      # high-quality when passed to the sub-pipeline.
+      max_dimension: null
 
   - name: "detect_multi_plate"
     params:
-      grid: [2, 3]         # Change based on your scanner arrangement
+      grid: [3, 2]         # Change based on your scanner arrangement
       radius_scale: 1.0
-      min_confidence_score: 0.20
 
   - name: "sub_pipeline"
     params:
-      max_subplate_dimension: 1280
+      max_subplate_dimension: 3200
       steps:
+        - name: apply_exclusion_mask
+          params:
+            mask_path: null
+
         - name: "yolo_detector"
           params:
+            model_path: "models/colony_model.pt"
             conf_threshold: 0.15
+            iou_threshold: 0.8
+            imgsz: 3200
+            max_det: 3000
+            refine_mask: true
+            output_key: "objects"
+
+        - name: add_manual_colonies
+          params:
+            coordinates: []
         
         - name: "measure_colonies"
+          params:
+            mask_key: "objects"
+            roi_mask_key: "plate"
 
         - name: classify_by_interior
           # Reject edge-zone detections that don't match the interior colony
           # profile (rim arcs, cracks, pen marks). Tune with the GUI sliders
           # 'Interior Radius' and 'Max Eccentricity'.
 
-        # Plate-level exports
+        - name: filter_by_id
+          params:
+            exclude_ids: []
+        
         - name: "export_annotated"
           params:
             output_path: "{output_dir}/{stem}/{stem}_{plate_label}_annotated.png"
 
-  # Scan-level unified exports
   - name: "export_csv"
     params:
       output_path: "{output_dir}/{stem}/{stem}_results.csv"
