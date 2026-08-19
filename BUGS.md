@@ -238,41 +238,65 @@ Severity guide:
 
 ## LOW
 
-### 13. GUI dead code / unused constants
+### 13. GUI dead code / unused constants  ✅ FIXED
 - `gui/app.py:33` `resize_default` and `gui/app.py:32` `max_dimension_default` are unused
   (the widgets hard-code 3200 etc.).
 - `gui/app.py:322` `manual_exclude_ids` is initialised in session state but never used
   (the "filter_by_id" GUI path is unimplemented).
 
-### 14. `detect_facile` all-outliers path produces no quality flag
+  **Status: FIXED** — the two constants now back the widgets (`value=resize_default`,
+  `max_dimension_default` as the number-input default) and the dead `manual_exclude_ids`
+  initialisation was removed.
+
+### 14. `detect_facile` all-outliers path produces no quality flag  ✅ FIXED
 - `src/blenny/modules/detect_facile.py` — after the size-consistency filter removes every
   circle, the code writes an all-True plate mask and returns without raising any flag, so
   the user gets no warning that detection collapsed.
 
-### 15. `batch_colonies.csv` silently skipped when no measurements
+  **Status: FIXED** — the all-outliers branch now raises a `plate_not_found` warning flag.
+  Verified by mocking `facile_detection` to return wildly-different radii with a strict
+  size-consistency limit.
+
+### 15. `batch_colonies.csv` silently skipped when no measurements  ✅ FIXED
 - `src/blenny/cli/main.py:_write_batch_colonies_csv` returns early on an empty list without
   writing the file; failed/all-empty batches produce no `batch_colonies.csv` at all.
 
-### 16. Debug output collisions in multi-plate mode
+  **Status: FIXED** — an empty batch now writes a `# no measurements` placeholder so batch
+  consumers always find the file. Verified for both empty and normal batches.
+
+### 16. Debug output collisions in multi-plate mode  ✅ FIXED
 - `src/blenny/pipeline/debug.py` — sub-plates reuse the same step names and the writer's
   counter resets per sub-pipeline run, so debug images/masks from plate 2 overwrite plate 1's.
 
-### 17. Weak test assertion
+  **Status: FIXED** — `SubPipeline` now passes each sub-plate its own debug subdirectory
+  (`<debug_dir>/<plate_label>/`). Verified: two-ROI run produces `A1/…` and `A2/…` file
+  sets with no collisions.
+
+### 17. Weak test assertion  ✅ FIXED
 - `tests/test_classify_interior.py:test_iqr_multiplier_controls_strictness` asserts
   `strict_rejected or not lenient_rejected`, which can pass even when the classifier
   behaves identically at both multipliers.
 
-### 18. Stale comment in test
+  **Status: FIXED** — the assertion now requires strict to reject *and* lenient to accept.
+  This exposed a second test bug: the two runs shared the same row dicts, so the lenient
+  run's `is_artifact` reset clobbered the strict run's result; each run now gets fresh
+  copies.
+
+### 18. Stale comment in test  ✅ FIXED
 - `tests/test_modules.py:test_image_file_loader_does_not_upscale_small_images` says
   "default max_dim=2000"; the actual default is `None`.
 
-### 19. Stale local artifact in `gui_uploads/` (not tracked)
+  **Status: FIXED** — comment updated.
+
+### 19. Stale local artifact in `gui_uploads/` (not tracked)  ✅ FIXED (local cleanup)
 - `gui_uploads/` and `sandbox/` are already in `.gitignore` and contain **zero tracked
   files**, so nothing here is committed to the repo (an earlier draft of this audit claimed
   otherwise). The only residual point: a stale local `gui_uploads/uploaded_pipeline.yaml`
   still contains the now-removed duplicate top-level `export_annotated` step, so if a user
   re-selects that file in the GUI it produces an extra parent-level annotated export.
   Operational note only: delete the stale file; no repo change needed.
+
+  **Status: FIXED** — the stale `gui_uploads/uploaded_pipeline.yaml` was deleted locally.
 
 ### 20. GUI override forces `crop: False` on `detect_plate`  ✅ FIXED
 - `gui/app.py:397` unconditionally sets `crop: False` for `detect_plate`; a user-uploaded
@@ -282,11 +306,15 @@ Severity guide:
   **Status: FIXED** — the GUI override now only sets `radius_scale` for `detect_plate` and
   `detect_facile`, leaving each pipeline's own `crop` setting intact.
 
-### 21. GUI `data_editor` `edited_rows` may be re-applied on unrelated reruns
+### 21. GUI `data_editor` `edited_rows` may be re-applied on unrelated reruns  ✅ FIXED
 - `gui/app.py:522-545` reads `edited_rows` from widget state and applies them on every
   rerun until the underlying dataframe changes; generally idempotent, but worth confirming
   interactively that repeated application + `st.rerun()` cannot loop. (Low confidence —
   needs interactive verification.)
+
+  **Status: FIXED** — `edited_rows` is now consumed (`= {}`) immediately after applying,
+  the standard Streamlit pattern, so edits are applied exactly once per interaction.
+  (Interactive confirmation still recommended on next GUI session.)
 
 ---
 

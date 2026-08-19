@@ -317,8 +317,8 @@ with st.sidebar:
     has_threshold = "threshold_segment" in pipeline_step_names
     has_interior = "classify_by_interior" in pipeline_step_names
 
-    resize_enabled = st.checkbox("Resize scan for detection", key="resize_enabled")
-    max_dimension = st.number_input("Max scan dimension (px)", 100, 10000, 3200, key="max_dimension", disabled=not resize_enabled)
+    resize_enabled = st.checkbox("Resize scan for detection", key="resize_enabled", value=resize_default)
+    max_dimension = st.number_input("Max scan dimension (px)", 100, 10000, max_dimension_default, key="max_dimension", disabled=not resize_enabled)
     
     resize_sub_enabled = False; max_sub_dimension = 1280
     if plate_mode == "Multi-Plate Grid":
@@ -349,7 +349,6 @@ with st.sidebar:
     save_subfolders = st.checkbox("Save as Subfolders", value=True)
     enable_interactive = st.checkbox("Interactive Review", value=True)
     
-    if "manual_exclude_ids" not in st.session_state: st.session_state["manual_exclude_ids"] = []
     st.divider()
     run_btn = st.button("Run Analysis", type="primary", width="stretch")
 
@@ -613,6 +612,10 @@ if input_paths:
                                             pm["is_artifact"] = changes["is_artifact"]
                                             break
                                     InteriorColonyClassifier.update_count(parent_data.measurements, parent_data)
+                    # Consume the edit event so it is not re-applied on every
+                    # subsequent rerun (the widget state otherwise keeps the
+                    # stale edited_rows until the user edits again).
+                    st.session_state[f"ed_{stem}"]["edited_rows"] = {}
                     st.rerun()
 
             # Batch Save/Update Button

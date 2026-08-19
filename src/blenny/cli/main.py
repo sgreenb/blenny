@@ -670,6 +670,8 @@ def _write_batch_colonies_csv(path: Path, measurements: list[dict[str, Any]]) ->
     import csv
 
     if not measurements:
+        # Still write a placeholder so batch consumers always find the file.
+        path.write_text("# no measurements\n", encoding="utf-8")
         return
 
     # Define the exact preferred order from CSVExporter to match its format

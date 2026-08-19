@@ -125,12 +125,16 @@ class SubPipeline(Module):
             # This allows modules like ExclusionMasker to correctly crop global masks.
             sub_data.metadata["plate_bbox"] = (y0_hr, x0_hr, y1_hr, x1_hr)
 
-            # 2. Run inner pipeline
+            # 2. Run inner pipeline. Give each sub-plate its own debug subdir
+            # so per-plate step images don't overwrite each other.
+            sub_debug_dir = None
+            if kwargs.get("debug_dir"):
+                sub_debug_dir = Path(kwargs["debug_dir"]) / str(label)
             sub_data = self._inner_pipeline.run(
-                sub_data, 
+                sub_data,
                 progress_callback=progress_callback,
                 output_dir=kwargs.get("output_dir"),
-                debug_dir=kwargs.get("debug_dir")
+                debug_dir=sub_debug_dir,
             )
             all_sub_results.append(sub_data)
 

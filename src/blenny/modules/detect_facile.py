@@ -305,9 +305,15 @@ class FacileDetector(Preprocessor):
                     )
             circles = filtered_circles
 
-        if not circles: # Edge case: all outliers
-             data.masks[self.params.mask_key] = np.ones((h_orig, w_orig), dtype=bool)
-             return image
+        if not circles:  # Edge case: all outliers
+            data.add_flag(
+                "plate_not_found",
+                "FacileDetector found circles but every one was rejected as a "
+                "size outlier; downstream steps will run on the full image.",
+                severity="warning",
+            )
+            data.masks[self.params.mask_key] = np.ones((h_orig, w_orig), dtype=bool)
+            return image
 
         if use_roi_mode and len(circles) > 0:
             rois = []

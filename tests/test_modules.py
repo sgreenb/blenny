@@ -84,7 +84,7 @@ def test_image_file_loader_max_dimension_none_keeps_native_resolution(tmp_path: 
 
 def test_image_file_loader_does_not_upscale_small_images(tmp_path: Path) -> None:
     _, p = _save_synthetic(tmp_path, n_colonies=3, image_size=(256, 256), seed=0)
-    data = ImageFileLoader().run(ImageData(source=str(p)))  # default max_dim=2000
+    data = ImageFileLoader().run(ImageData(source=str(p)))  # default max_dimension=None
     assert data.image.shape[:2] == (256, 256)
     assert "resized" not in data.metadata
 

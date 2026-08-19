@@ -244,17 +244,20 @@ def test_iqr_multiplier_controls_strictness() -> None:
     data_lenient = _data_with_geometry()
 
     # Edge row with area slightly outside the normal IQR range.
-    edge_borderline = [_row(20, 190.0, 100.0, area=200.0)]
-    rows_strict = _INTERIOR + edge_borderline
-    rows_lenient = _INTERIOR + edge_borderline
+    # Note: fresh dict copies per run — the two runs must not share rows,
+    # because classify() resets is_artifact on every row at the start.
+    rows_strict = _INTERIOR + [dict(_row(20, 190.0, 100.0, area=200.0))]
+    rows_lenient = _INTERIOR + [dict(_row(20, 190.0, 100.0, area=200.0))]
 
     InteriorColonyClassifier(iqr_multiplier=0.5).classify(rows_strict, data_strict)
     InteriorColonyClassifier(iqr_multiplier=5.0).classify(rows_lenient, data_lenient)
 
     strict_rejected = rows_strict[-1]["is_artifact"]
     lenient_rejected = rows_lenient[-1]["is_artifact"]
-    # At least one configuration should differ (strict rejects, lenient accepts).
-    assert strict_rejected or not lenient_rejected
+    # The strict multiplier must reject the borderline edge row; the lenient
+    # one must accept it (area 200 vs interior 400 ± 0.5·40 vs ± 5·40).
+    assert strict_rejected, "iqr_multiplier=0.5 should reject the edge row"
+    assert not lenient_rejected, "iqr_multiplier=5.0 should accept the edge row"
 
 
 # ---------------------------------------------------------------------------
