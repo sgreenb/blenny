@@ -33,7 +33,23 @@ from blenny.roi.canvas import PALETTE, roi_canvas
 from blenny.roi.template import map_to_display, parse_template
 
 #: Where uploaded ROI images are stashed so the analysis can read them from disk.
+#: Scratch only (gitignored): this module is imported once per process, so we
+#: clear leftovers from previous runs here, and per-upload on replacement below.
 ROI_TEMP_DIR = Path("gui_uploads") / "roi_uploads"
+
+
+def _prune_roi_scratch() -> None:
+    """Remove ROI uploads left over from previous server runs."""
+    try:
+        if ROI_TEMP_DIR.is_dir():
+            for p in ROI_TEMP_DIR.iterdir():
+                if p.is_file():
+                    p.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+_prune_roi_scratch()
 
 _DISPLAY_MAX_W = 1000
 _DISPLAY_MAX_H = 750
@@ -86,16 +102,32 @@ def render_roi_sidebar() -> None:
         # the same file on every rerun, e.g. after each canvas interaction).
         if st.session_state.get("roi_uploaded_name") != uploaded.name or not target.exists():
             ROI_TEMP_DIR.mkdir(parents=True, exist_ok=True)
+            # Drop the previous upload's scratch copy so the temp dir doesn't
+            # accumulate every image the user has ever uploaded.
+            prev = st.session_state.get("roi_uploaded_path")
+            if prev:
+                try:
+                    Path(prev).unlink(missing_ok=True)
+                except OSError:
+                    pass
             target.write_bytes(uploaded.getvalue())
             st.session_state["roi_uploaded_name"] = uploaded.name
+            st.session_state["roi_uploaded_path"] = str(target.resolve())
             st.session_state.pop("roi_img_b64_for", None)  # force re-encode
         st.session_state["roi_image_path"] = str(target.resolve())
     else:
         # The user removed the uploaded file — clear the image and everything
         # derived from it, mirroring the colony counter's input-change reset.
+        prev = st.session_state.get("roi_uploaded_path")
+        if prev:
+            try:
+                Path(prev).unlink(missing_ok=True)
+            except OSError:
+                pass
         for key in [
             "roi_image_path",
             "roi_uploaded_name",
+            "roi_uploaded_path",
             "roi_last_image",
             "roi_img_b64",
             "roi_img_b64_for",

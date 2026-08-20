@@ -33,9 +33,23 @@ yolo_conf_default = 0.15
 max_dimension_default = 3200
 resize_default = False
 
-# Paths for temporary GUI files
+# Scratch dir for uploaded files the pipeline must read from disk (gitignored).
+# Streamlit's file_uploader hands us in-memory objects, so we write real files
+# here; the dir is pruned on process start (below) and on input change (see
+# the "Input Change Detection" block) so uploads don't accumulate forever.
 GUI_TEMP_DIR = Path("gui_uploads")
 GUI_TEMP_DIR.mkdir(exist_ok=True)
+if not (GUI_TEMP_DIR / f".pid_{os.getpid()}").exists():
+    # First execution of this server process: anything already here belongs to
+    # a previous run (uploads are re-written on every rerun while the widget
+    # holds them), so drop it.
+    for p in GUI_TEMP_DIR.iterdir():
+        if p.is_file() and not p.name.startswith(".pid_"):
+            try:
+                p.unlink()
+            except OSError:
+                pass
+    (GUI_TEMP_DIR / f".pid_{os.getpid()}").touch()
 PLATE_MASK_PATH = GUI_TEMP_DIR / "gui_plate_batch_mask.png"
 EXCLUSION_MASK_PATH = GUI_TEMP_DIR / "gui_mask_batch_exclusion.png"
 
@@ -400,6 +414,14 @@ if input_folder and Path(input_folder).is_dir():
     input_names.extend([f.name for f in Path(input_folder).iterdir() if f.suffix.lower() in IMAGE_EXTENSIONS])
 
 if input_names != st.session_state["last_input_paths"]:
+    # Remove the temp copies we wrote for the previous input set so the
+    # scratch dir doesn't hold every upload forever.
+    for p in st.session_state.get("gui_written_uploads", []):
+        try:
+            Path(p).unlink(missing_ok=True)
+        except OSError:
+            pass
+    st.session_state["gui_written_uploads"] = []
     # Clear Masks
     for p in [PLATE_MASK_PATH, EXCLUSION_MASK_PATH]:
         if p.exists(): p.unlink()
@@ -413,8 +435,13 @@ if mode == "Colony Counting":
     # --- Main Logic ---
     input_paths = []
     if input_files:
+        written = []
         for f in input_files:
-            p = GUI_TEMP_DIR / f.name; p.write_bytes(f.getvalue()); input_paths.append(p)
+            p = GUI_TEMP_DIR / f.name
+            p.write_bytes(f.getvalue())
+            input_paths.append(p)
+            written.append(str(p))
+        st.session_state["gui_written_uploads"] = written
     elif input_folder and Path(input_folder).is_dir():
         from blenny.modules.load_image import IMAGE_EXTENSIONS
         input_paths = sorted([f for f in Path(input_folder).iterdir() if f.suffix.lower() in IMAGE_EXTENSIONS])
