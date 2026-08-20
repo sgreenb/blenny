@@ -542,7 +542,7 @@ def _render_dashboard(img_path: Path, rois: list[dict], analysis: dict, rows: li
     # render it is measured from a throwaway figure.
     pos_key = (
         f"roi_axpos|{analysis.get('fingerprint')}|{param}|{normalize}|"
-        + ",".join(sel_ids)
+        + ",".join(str(_id) for _id in sel_ids)
     )
     pos = st.session_state.get(pos_key)
     if pos is None:
