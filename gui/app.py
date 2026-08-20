@@ -496,6 +496,11 @@ if mode == "Colony Counting":
                                     pass
                     output_dir.mkdir(parents=True, exist_ok=True)
                 st.session_state.update({"all_results": {}, "result_stems": [], "batch_runs": [], "current_view_idx": 0})
+                # Drop cached review-table state/snapshots from the previous
+                # run so the editor rebuilds from the new measurements.
+                for _k in list(st.session_state):
+                    if _k.startswith("ed_"):
+                        del st.session_state[_k]
             
                 from blenny.config import extract_steps, load_yaml, substitute_paths
                 try:
@@ -638,7 +643,17 @@ if mode == "Colony Counting":
                         st.info("No measurements to display.")
                     else:
                         try:
-                            st.dataframe(pd.read_csv(io.StringIO(csv_text)), hide_index=True, width="stretch")
+                            csv_df = pd.read_csv(io.StringIO(csv_text))
+                            # Boolean-ish columns with missing cells (e.g.
+                            # touches_edge) render as empty checkboxes; show
+                            # them as explicit True/False text instead
+                            # (missing -> False).
+                            for _col in csv_df.columns:
+                                if csv_df[_col].isna().any():
+                                    _vals = set(csv_df[_col].dropna().astype(str).unique())
+                                    if _vals <= {"True", "False"}:
+                                        csv_df[_col] = csv_df[_col].fillna(False).astype(str)
+                            st.dataframe(csv_df, hide_index=True, width="stretch")
                         except Exception:
                             st.code(csv_text)
                     st.stop()
@@ -672,26 +687,34 @@ if mode == "Colony Counting":
                 else:
                     c_dl3.button("Download Image", disabled=True, width="stretch")
 
-                df = pd.DataFrame(data.measurements)
-            
-                # Ensure required columns exist for display and editing
-                for col in ["plate_label", "label", "is_artifact", "centroid_x", "centroid_y", "area_px", "colony_count_estimate", "circularity", "solidity"]:
-                    if col not in df.columns:
-                        df[col] = 0 if any(k in col for k in ["centroid", "area", "circ", "solid"]) else (False if col == "is_artifact" else 1 if col == "colony_count_estimate" else "N/A")
+                def _build_editor_df() -> "pd.DataFrame":
+                    """Snapshot of the review table for the selected plate.
 
-                if "Type" not in df.columns:
-                    df["Type"] = df.apply(lambda r: f"Merged(x{int(r.get('colony_count_estimate', 1))})" if int(r.get('colony_count_estimate', 1)) > 1 else "Colony", axis=1)
-                    df.loc[df['is_artifact'] == True, 'Type'] = "Artifact"
+                    Built from the current measurements and kept stable across
+                    reruns so Streamlit does not remount the editor grid and
+                    lose the scroll position (streamlit#10181). It is refreshed
+                    only when the widget state is missing (first render,
+                    view/plate switch, or a fresh run).
 
-                # Filter to final display set
-                display_cols = ["plate_label", "label", "is_artifact", "Type", "centroid_x", "centroid_y", "area_px", "circularity", "solidity"]
-                cols = [c for c in display_cols if c in df.columns]
-            
-                edited = st.data_editor(df[cols], key=f"ed_{stem}", hide_index=True, width="stretch",
+                    The derived "Type" column is intentionally omitted: it
+                    cannot update in place when artifacts are toggled without
+                    feeding new data back into the editor, which would reset
+                    the scroll position.
+                    """
+                    df = pd.DataFrame(data.measurements)
+                    for col in ["plate_label", "label", "is_artifact", "centroid_x", "centroid_y", "area_px", "colony_count_estimate", "circularity", "solidity"]:
+                        if col not in df.columns:
+                            df[col] = 0 if any(k in col for k in ["centroid", "area", "circ", "solid"]) else (False if col == "is_artifact" else 1 if col == "colony_count_estimate" else "N/A")
+                    display_cols = ["plate_label", "label", "is_artifact", "centroid_x", "centroid_y", "area_px", "circularity", "solidity"]
+                    return df[[c for c in display_cols if c in df.columns]]
+
+                if f"ed_{stem}" not in st.session_state:
+                    st.session_state[f"ed_snapshot_{stem}"] = _build_editor_df()
+
+                edited = st.data_editor(st.session_state[f"ed_snapshot_{stem}"], key=f"ed_{stem}", hide_index=True, width="stretch",
                                         column_config={
                                             "is_artifact": st.column_config.CheckboxColumn("Artifact?"),
                                             "label": st.column_config.TextColumn("ID", disabled=True),
-                                            "Type": st.column_config.TextColumn("Class", disabled=True),
                                             "centroid_x": st.column_config.NumberColumn("X", disabled=True, format="%.0f"),
                                             "centroid_y": st.column_config.NumberColumn("Y", disabled=True, format="%.0f"),
                                             "area_px": st.column_config.NumberColumn("Area", disabled=True),
@@ -702,31 +725,40 @@ if mode == "Colony Counting":
                 if st.session_state.get(f"ed_{stem}"):
                     edits = st.session_state[f"ed_{stem}"]["edited_rows"]
                     if edits:
+                        changed_any = False
                         for r_idx, changes in edits.items():
                             if "is_artifact" in changes:
-                                data.measurements[r_idx]["is_artifact"] = changes["is_artifact"]
-                                # Also update main parent data if this is a sub-plate
-                                if " [" in stem:
-                                    parent_stem = stem.split(" [")[0]
-                                    parent_data = next((d for d, p in st.session_state["batch_runs"] if d.metadata.get("stem") == parent_stem), None)
-                                    if parent_data:
-                                        # Find matching row in parent data. Measurements in parent
-                                        # include global IDs and plate_label.
-                                        plabel = data.metadata.get("plate_label")
-                                        # Local label is the index in sub-plate. 
-                                        # SubPipeline maps measurements linearly.
-                                        # However, it's safer to match by plate_label + local label.
-                                        local_label = data.measurements[r_idx].get("label")
-                                        for pm in parent_data.measurements:
-                                            if pm.get("plate_label") == plabel and pm.get("label") == local_label:
-                                                pm["is_artifact"] = changes["is_artifact"]
-                                                break
-                                        InteriorColonyClassifier.update_count(parent_data.measurements, parent_data)
-                        # Consume the edit event so it is not re-applied on every
-                        # subsequent rerun (the widget state otherwise keeps the
-                        # stale edited_rows until the user edits again).
+                                new_val = bool(changes["is_artifact"])
+                                if data.measurements[r_idx].get("is_artifact") != new_val:
+                                    data.measurements[r_idx]["is_artifact"] = new_val
+                                    changed_any = True
+                                    # Also update main parent data if this is a sub-plate
+                                    if " [" in stem:
+                                        parent_stem = stem.split(" [")[0]
+                                        parent_data = next((d for d, p in st.session_state["batch_runs"] if d.metadata.get("stem") == parent_stem), None)
+                                        if parent_data:
+                                            # Find matching row in parent data. Measurements in parent
+                                            # include global IDs and plate_label.
+                                            plabel = data.metadata.get("plate_label")
+                                            # Local label is the index in sub-plate. 
+                                            # SubPipeline maps measurements linearly.
+                                            # However, it's safer to match by plate_label + local label.
+                                            local_label = data.measurements[r_idx].get("label")
+                                            for pm in parent_data.measurements:
+                                                if pm.get("plate_label") == plabel and pm.get("label") == local_label:
+                                                    if pm.get("is_artifact") != new_val:
+                                                        pm["is_artifact"] = new_val
+                                                        InteriorColonyClassifier.update_count(parent_data.measurements, parent_data)
+                                                    break
+                        if changed_any:
+                            InteriorColonyClassifier.update_count(data.measurements, data)
+                        # Consume the edit event in place. Deliberately no
+                        # st.rerun(): re-running (or feeding the edited data
+                        # back into the editor) makes Streamlit remount the
+                        # grid and reset the scroll position (streamlit#10181).
+                        # Any re-emitted edits are idempotent via the guards
+                        # above.
                         st.session_state[f"ed_{stem}"]["edited_rows"] = {}
-                        st.rerun()
 
                 # Batch Save/Update Button — the only step that requires an
                 # output folder.
