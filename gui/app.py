@@ -21,6 +21,7 @@ from blenny.modules.export_annotated import AnnotatedImageExporter
 from blenny.modules.export_csv import CSVExporter
 from blenny.modules.export_summary import SummaryExporter
 from blenny.pipeline import Pipeline
+from blenny.roi.gui import render_roi_main, render_roi_sidebar
 
 # --- Globals & Defaults ---
 radius_scale_default = 1.0
@@ -181,6 +182,24 @@ cli_cmd = [sys.executable, "-m", "blenny"]
 # --- Sidebar ---
 with st.sidebar:
     st.title("Blenny Control Panel")
+    mode = st.segmented_control(
+        "Mode",
+        ["Colony Counting", "ROI Mode"],
+        default="Colony Counting",
+        key="app_mode",
+    )
+    st.divider()
+
+# ROI mode takes over both the sidebar and the main area; everything below
+# (colony counter) is skipped via st.stop().
+if mode == "ROI Mode":
+    with st.sidebar:
+        render_roi_sidebar()
+    render_roi_main()
+    st.stop()
+
+# --- Colony-mode sidebar ---
+with st.sidebar:
     st.header("1. Data Input")
     input_files = st.file_uploader("Upload Plate Images", type=["jpg", "jpeg", "png", "tif"], accept_multiple_files=True)
     
@@ -372,269 +391,271 @@ if input_names != st.session_state["last_input_paths"]:
         st.session_state.pop(key, None)
     st.session_state["last_input_paths"] = input_names
 
-# --- Main Logic ---
-input_paths = []
-if input_files:
-    for f in input_files:
-        p = GUI_TEMP_DIR / f.name; p.write_bytes(f.getvalue()); input_paths.append(p)
-elif input_folder and Path(input_folder).is_dir():
-    from blenny.modules.load_image import IMAGE_EXTENSIONS
-    input_paths = sorted([f for f in Path(input_folder).iterdir() if f.suffix.lower() in IMAGE_EXTENSIONS])
+# --- Main area ----------------------------------------------------------------
+if mode == "Colony Counting":
+    # --- Main Logic ---
+    input_paths = []
+    if input_files:
+        for f in input_files:
+            p = GUI_TEMP_DIR / f.name; p.write_bytes(f.getvalue()); input_paths.append(p)
+    elif input_folder and Path(input_folder).is_dir():
+        from blenny.modules.load_image import IMAGE_EXTENSIONS
+        input_paths = sorted([f for f in Path(input_folder).iterdir() if f.suffix.lower() in IMAGE_EXTENSIONS])
 
-if input_paths:
-    ref_img = Image.open(input_paths[0]); ref_img = ImageOps.exif_transpose(ref_img).convert("RGB")
-    scale = min(1200 / ref_img.width, 1000 / ref_img.height, 1.0)
-    canvas_w, canvas_height = int(ref_img.width * scale), int(ref_img.height * scale)
-    canvas_bg_img = ref_img.copy()
+    if input_paths:
+        ref_img = Image.open(input_paths[0]); ref_img = ImageOps.exif_transpose(ref_img).convert("RGB")
+        scale = min(1200 / ref_img.width, 1000 / ref_img.height, 1.0)
+        canvas_w, canvas_height = int(ref_img.width * scale), int(ref_img.height * scale)
+        canvas_bg_img = ref_img.copy()
 
-    # Drawing context overlays
-    if plate_mode == "Multi-Plate Grid":
-        from PIL import ImageDraw
-        d = ImageDraw.Draw(canvas_bg_img); h, w = canvas_bg_img.height, canvas_bg_img.width
-        ch, cw = h / grid_rows, w / grid_cols
-        for r in range(1, grid_rows): d.line([(0, r*ch), (w, r*ch)], fill=(0,255,255), width=2)
-        for c in range(1, grid_cols): d.line([(c*cw, 0), (c*cw, h)], fill=(0,255,255), width=2)
+        # Drawing context overlays
+        if plate_mode == "Multi-Plate Grid":
+            from PIL import ImageDraw
+            d = ImageDraw.Draw(canvas_bg_img); h, w = canvas_bg_img.height, canvas_bg_img.width
+            ch, cw = h / grid_rows, w / grid_cols
+            for r in range(1, grid_rows): d.line([(0, r*ch), (w, r*ch)], fill=(0,255,255), width=2)
+            for c in range(1, grid_cols): d.line([(c*cw, 0), (c*cw, h)], fill=(0,255,255), width=2)
 
-    active_tool = {"View": None, "Polygon Plate Area": "Define Plate Area", "Exclusion Mask": "Paint Exclusion Mask"}[selected_tool_label]
-    canvas_bg = canvas_bg_img.resize((canvas_w, canvas_height), Image.Resampling.LANCZOS)
+        active_tool = {"View": None, "Polygon Plate Area": "Define Plate Area", "Exclusion Mask": "Paint Exclusion Mask"}[selected_tool_label]
+        canvas_bg = canvas_bg_img.resize((canvas_w, canvas_height), Image.Resampling.LANCZOS)
 
-    col1, col2 = st.columns(2)
-    with col1:
-        if active_tool:
-            mode = "polygon" if active_tool == "Define Plate Area" else "freedraw"
-            canvas = st_canvas(fill_color="rgba(0,0,255,0.3)", stroke_width=2 if mode=="polygon" else brush_size,
-                               stroke_color="#0000FF", background_image=canvas_bg, height=canvas_height, width=canvas_w,
-                               drawing_mode=mode, key=f"canvas_{st.session_state.get('canvas_version', 0)}")
-            if canvas.image_data is not None and np.any(canvas.image_data[:,:,3] > 0):
-                mask = Image.fromarray((canvas.image_data[:,:,3] > 0).astype(np.uint8)*255).resize(ref_img.size, Image.Resampling.NEAREST)
-                mask.save(PLATE_MASK_PATH if active_tool == "Define Plate Area" else EXCLUSION_MASK_PATH)
-        else:
-            st.image(canvas_bg_img, width="stretch")
+        col1, col2 = st.columns(2)
+        with col1:
+            if active_tool:
+                mode = "polygon" if active_tool == "Define Plate Area" else "freedraw"
+                canvas = st_canvas(fill_color="rgba(0,0,255,0.3)", stroke_width=2 if mode=="polygon" else brush_size,
+                                   stroke_color="#0000FF", background_image=canvas_bg, height=canvas_height, width=canvas_w,
+                                   drawing_mode=mode, key=f"canvas_{st.session_state.get('canvas_version', 0)}")
+                if canvas.image_data is not None and np.any(canvas.image_data[:,:,3] > 0):
+                    mask = Image.fromarray((canvas.image_data[:,:,3] > 0).astype(np.uint8)*255).resize(ref_img.size, Image.Resampling.NEAREST)
+                    mask.save(PLATE_MASK_PATH if active_tool == "Define Plate Area" else EXCLUSION_MASK_PATH)
+            else:
+                st.image(canvas_bg_img, width="stretch")
 
-    with col2:
-        if run_btn:
-            if not output_folder_input.strip(): st.error("Specify output folder."); st.stop()
-            output_dir = Path(output_folder_input); output_dir.mkdir(parents=True, exist_ok=True)
-            st.session_state.update({"all_results": {}, "result_stems": [], "batch_runs": [], "current_view_idx": 0})
+        with col2:
+            if run_btn:
+                if not output_folder_input.strip(): st.error("Specify output folder."); st.stop()
+                output_dir = Path(output_folder_input); output_dir.mkdir(parents=True, exist_ok=True)
+                st.session_state.update({"all_results": {}, "result_stems": [], "batch_runs": [], "current_view_idx": 0})
             
-            from blenny.config import extract_steps, load_yaml, substitute_paths
-            try:
-                raw_steps = extract_steps(load_yaml(pipeline_path))
+                from blenny.config import extract_steps, load_yaml, substitute_paths
+                try:
+                    raw_steps = extract_steps(load_yaml(pipeline_path))
 
-                if not generate_annotated:
-                    # Mirror the CLI's --no-annotated-images: drop every
-                    # export_annotated step, including inside sub_pipeline.
-                    def strip_annotated(steps):
-                        out = []
+                    if not generate_annotated:
+                        # Mirror the CLI's --no-annotated-images: drop every
+                        # export_annotated step, including inside sub_pipeline.
+                        def strip_annotated(steps):
+                            out = []
+                            for s in steps:
+                                if s["name"] == "export_annotated":
+                                    continue
+                                if s["name"] == "sub_pipeline":
+                                    s["params"]["steps"] = strip_annotated(
+                                        s.get("params", {}).get("steps", [])
+                                    )
+                                out.append(s)
+                            return out
+
+                        raw_steps = strip_annotated(raw_steps)
+
+                    if not save_subfolders:
+                        # Mirror the CLI's --flat: flatten {output_dir}/{stem}/ paths.
+                        def flatten_paths(steps):
+                            for s in steps:
+                                if "params" in s:
+                                    for k, v in s["params"].items():
+                                        if isinstance(v, str) and "{output_dir}/{stem}/" in v:
+                                            rest = v.split("{output_dir}/{stem}/", 1)[1]
+                                            s["params"][k] = (
+                                                "{output_dir}/" + rest
+                                                if rest.startswith("{stem}_")
+                                                else "{output_dir}/{stem}_" + rest
+                                            )
+                                if s["name"] == "sub_pipeline":
+                                    flatten_paths(s.get("params", {}).get("steps", []))
+
+                        flatten_paths(raw_steps)
+
+                    overrides = {
+                        "load_image": {"max_dimension": int(max_dimension) if resize_enabled else None},
+                        "detect_plate": {"radius_scale": radius_scale},
+                        "detect_facile": {"radius_scale": radius_scale},
+                        "detect_multi_plate": {"radius_scale": radius_scale, "grid": [grid_rows, grid_cols], "labels": st.session_state.get("grid_labels")},
+                        "threshold_segment": {"min_area_ppm": min_area_ppm, "min_circularity": min_circ},
+                        "filter_colonies": {"min_area_ppm": min_area_ppm, "min_circularity": min_circ},
+                        "classify_by_interior": {"interior_radius_frac": interior_radius, "strict_fallback_max_eccentricity": fallback_ecc},
+                        "yolo_detector": {"conf_threshold": yolo_conf},
+                        "sub_pipeline": {"max_subplate_dimension": int(max_sub_dimension) if resize_sub_enabled else None}
+                    }
+                    if plate_mode == "Manual Circle":
+                        for k in ["detect_plate", "detect_facile"]: overrides[k].update({"force_cy": manual_cy, "force_cx": manual_cx, "force_r": manual_r})
+                    if plate_mode == "Manual Shape" and PLATE_MASK_PATH.exists():
+                        for k in ["detect_plate", "detect_facile"]: overrides[k].update({"force_mask_path": str(PLATE_MASK_PATH)})
+                    if EXCLUSION_MASK_PATH.exists(): overrides["apply_exclusion_mask"] = {"mask_path": str(EXCLUSION_MASK_PATH)}
+
+                    def apply_overrides(steps):
                         for s in steps:
-                            if s["name"] == "export_annotated":
-                                continue
-                            if s["name"] == "sub_pipeline":
-                                s["params"]["steps"] = strip_annotated(
-                                    s.get("params", {}).get("steps", [])
-                                )
-                            out.append(s)
-                        return out
+                            if s["name"] in overrides: s.setdefault("params", {}).update(overrides[s["name"]])
+                            if s["name"] == "sub_pipeline": apply_overrides(s["params"].get("steps", []))
+                    apply_overrides(raw_steps)
 
-                    raw_steps = strip_annotated(raw_steps)
-
-                if not save_subfolders:
-                    # Mirror the CLI's --flat: flatten {output_dir}/{stem}/ paths.
-                    def flatten_paths(steps):
-                        for s in steps:
-                            if "params" in s:
-                                for k, v in s["params"].items():
-                                    if isinstance(v, str) and "{output_dir}/{stem}/" in v:
-                                        rest = v.split("{output_dir}/{stem}/", 1)[1]
-                                        s["params"][k] = (
-                                            "{output_dir}/" + rest
-                                            if rest.startswith("{stem}_")
-                                            else "{output_dir}/{stem}_" + rest
-                                        )
-                            if s["name"] == "sub_pipeline":
-                                flatten_paths(s.get("params", {}).get("steps", []))
-
-                    flatten_paths(raw_steps)
-
-                overrides = {
-                    "load_image": {"max_dimension": int(max_dimension) if resize_enabled else None},
-                    "detect_plate": {"radius_scale": radius_scale},
-                    "detect_facile": {"radius_scale": radius_scale},
-                    "detect_multi_plate": {"radius_scale": radius_scale, "grid": [grid_rows, grid_cols], "labels": st.session_state.get("grid_labels")},
-                    "threshold_segment": {"min_area_ppm": min_area_ppm, "min_circularity": min_circ},
-                    "filter_colonies": {"min_area_ppm": min_area_ppm, "min_circularity": min_circ},
-                    "classify_by_interior": {"interior_radius_frac": interior_radius, "strict_fallback_max_eccentricity": fallback_ecc},
-                    "yolo_detector": {"conf_threshold": yolo_conf},
-                    "sub_pipeline": {"max_subplate_dimension": int(max_sub_dimension) if resize_sub_enabled else None}
-                }
-                if plate_mode == "Manual Circle":
-                    for k in ["detect_plate", "detect_facile"]: overrides[k].update({"force_cy": manual_cy, "force_cx": manual_cx, "force_r": manual_r})
-                if plate_mode == "Manual Shape" and PLATE_MASK_PATH.exists():
-                    for k in ["detect_plate", "detect_facile"]: overrides[k].update({"force_mask_path": str(PLATE_MASK_PATH)})
-                if EXCLUSION_MASK_PATH.exists(): overrides["apply_exclusion_mask"] = {"mask_path": str(EXCLUSION_MASK_PATH)}
-
-                def apply_overrides(steps):
-                    for s in steps:
-                        if s["name"] in overrides: s.setdefault("params", {}).update(overrides[s["name"]])
-                        if s["name"] == "sub_pipeline": apply_overrides(s["params"].get("steps", []))
-                apply_overrides(raw_steps)
-
-                t_batch_start = time.perf_counter()
-                with st.status("Analyzing...", expanded=True) as status:
-                    # Clear log area for a fresh run
-                    st.session_state["gui_analysis_log"] = ""
-                    log_container = st.empty()
+                    t_batch_start = time.perf_counter()
+                    with st.status("Analyzing...", expanded=True) as status:
+                        # Clear log area for a fresh run
+                        st.session_state["gui_analysis_log"] = ""
+                        log_container = st.empty()
                     
-                    for i, p in enumerate(input_paths):
-                        status.update(label=f"Analyzing {p.name} ({i+1}/{len(input_paths)})...")
-                        st.session_state["gui_analysis_log"] += f"### {p.name}\n"
-                        log_container.markdown(st.session_state["gui_analysis_log"])
-                        
-                        def gui_progress(current, total, name):
-                            # Append to persistent session log
-                            st.session_state["gui_analysis_log"] += f"&nbsp;&nbsp;[{current}/{total}] `{name}`  \n"
+                        for i, p in enumerate(input_paths):
+                            status.update(label=f"Analyzing {p.name} ({i+1}/{len(input_paths)})...")
+                            st.session_state["gui_analysis_log"] += f"### {p.name}\n"
                             log_container.markdown(st.session_state["gui_analysis_log"])
                         
-                        t_p_start = time.perf_counter()
-                        res = substitute_paths(raw_steps, input_path=p, output_dir=output_dir)
-                        dbg_dir = Path(output_dir) / "debug" / p.stem if enable_debug else None
-                        data = Pipeline.from_config(res).run(
-                            p, output_dir=output_dir, debug_dir=dbg_dir,
-                            progress_callback=gui_progress,
-                        )
-                        t_p_elapsed = time.perf_counter() - t_p_start
-                        st.session_state["gui_analysis_log"] += f"&nbsp;&nbsp;**Plate analysis complete in {t_p_elapsed:.2f}s**  \n\n"
-                        log_container.markdown(st.session_state["gui_analysis_log"])
+                            def gui_progress(current, total, name):
+                                # Append to persistent session log
+                                st.session_state["gui_analysis_log"] += f"&nbsp;&nbsp;[{current}/{total}] `{name}`  \n"
+                                log_container.markdown(st.session_state["gui_analysis_log"])
+                        
+                            t_p_start = time.perf_counter()
+                            res = substitute_paths(raw_steps, input_path=p, output_dir=output_dir)
+                            dbg_dir = Path(output_dir) / "debug" / p.stem if enable_debug else None
+                            data = Pipeline.from_config(res).run(
+                                p, output_dir=output_dir, debug_dir=dbg_dir,
+                                progress_callback=gui_progress,
+                            )
+                            t_p_elapsed = time.perf_counter() - t_p_start
+                            st.session_state["gui_analysis_log"] += f"&nbsp;&nbsp;**Plate analysis complete in {t_p_elapsed:.2f}s**  \n\n"
+                            log_container.markdown(st.session_state["gui_analysis_log"])
 
-                        st.session_state["batch_runs"].append((data, Pipeline.from_config(res)))
-                        if enable_interactive:
-                            if "multi_plate_results" in data.metadata:
-                                for sr in data.metadata["multi_plate_results"]:
-                                    plabel = sr.metadata.get("plate_label", "unknown")
-                                    # Inject plate_label into sub-result measurements for UI display
-                                    for m in sr.measurements:
-                                        m["plate_label"] = plabel
-                                    n = f"{p.stem} [{plabel}]"
-                                    st.session_state["all_results"][n] = sr; st.session_state["result_stems"].append(n)
-                            else:
-                                st.session_state["all_results"][p.stem] = data; st.session_state["result_stems"].append(p.stem)
-                    generate_batch_summary([d for d, _ in st.session_state["batch_runs"]], output_dir)
-                    t_batch_elapsed = time.perf_counter() - t_batch_start
-                    status.update(label=f"Complete! ({t_batch_elapsed:.2f}s)", state="complete", expanded=True)
-            except Exception as e: st.error(f"Error: {e}")
+                            st.session_state["batch_runs"].append((data, Pipeline.from_config(res)))
+                            if enable_interactive:
+                                if "multi_plate_results" in data.metadata:
+                                    for sr in data.metadata["multi_plate_results"]:
+                                        plabel = sr.metadata.get("plate_label", "unknown")
+                                        # Inject plate_label into sub-result measurements for UI display
+                                        for m in sr.measurements:
+                                            m["plate_label"] = plabel
+                                        n = f"{p.stem} [{plabel}]"
+                                        st.session_state["all_results"][n] = sr; st.session_state["result_stems"].append(n)
+                                else:
+                                    st.session_state["all_results"][p.stem] = data; st.session_state["result_stems"].append(p.stem)
+                        generate_batch_summary([d for d, _ in st.session_state["batch_runs"]], output_dir)
+                        t_batch_elapsed = time.perf_counter() - t_batch_start
+                        status.update(label=f"Complete! ({t_batch_elapsed:.2f}s)", state="complete", expanded=True)
+                except Exception as e: st.error(f"Error: {e}")
 
-        # --- Interactive Review ---
-        if st.session_state.get("all_results"):
-            stems = st.session_state["result_stems"]; idx = st.session_state["current_view_idx"]
-            c_nav1, c_nav2, c_nav3 = st.columns([1, 2, 1])
-            if c_nav1.button("←", disabled=idx==0, width="stretch"): st.session_state["current_view_idx"] -= 1; st.rerun()
-            st.session_state["current_view_idx"] = stems.index(c_nav2.selectbox("Plate", stems, index=idx, label_visibility="collapsed"))
-            if c_nav3.button("→", disabled=idx==len(stems)-1, width="stretch"): st.session_state["current_view_idx"] += 1; st.rerun()
+            # --- Interactive Review ---
+            if st.session_state.get("all_results"):
+                stems = st.session_state["result_stems"]; idx = st.session_state["current_view_idx"]
+                c_nav1, c_nav2, c_nav3 = st.columns([1, 2, 1])
+                if c_nav1.button("←", disabled=idx==0, width="stretch"): st.session_state["current_view_idx"] -= 1; st.rerun()
+                st.session_state["current_view_idx"] = stems.index(c_nav2.selectbox("Plate", stems, index=idx, label_visibility="collapsed"))
+                if c_nav3.button("→", disabled=idx==len(stems)-1, width="stretch"): st.session_state["current_view_idx"] += 1; st.rerun()
             
-            stem = stems[st.session_state["current_view_idx"]]; data = st.session_state["all_results"][stem]
-            import pandas as pd
-            InteriorColonyClassifier.update_count(data.measurements, data)
+                stem = stems[st.session_state["current_view_idx"]]; data = st.session_state["all_results"][stem]
+                import pandas as pd
+                InteriorColonyClassifier.update_count(data.measurements, data)
             
-            # Use original pipeline exporters if possible
-            annotator = AnnotatedImageExporter(output_path="d.png")
-            summarizer = SummaryExporter(output_path="d.txt")
-            csv_exporter = CSVExporter(output_path="d.csv")
+                # Use original pipeline exporters if possible
+                annotator = AnnotatedImageExporter(output_path="d.png")
+                summarizer = SummaryExporter(output_path="d.txt")
+                csv_exporter = CSVExporter(output_path="d.csv")
             
-            img = annotator.render(data)
-            if img is not None:
-                st.image(img, width="stretch")
-            else:
-                st.warning("Annotation failed. Displaying original/preprocessed image.")
-                display_img = data.image if data.image is not None else data.original_image
-                if display_img is not None:
-                    st.image(display_img, width="stretch")
+                img = annotator.render(data)
+                if img is not None:
+                    st.image(img, width="stretch")
                 else:
-                    st.error("No image available to display.")
+                    st.warning("Annotation failed. Displaying original/preprocessed image.")
+                    display_img = data.image if data.image is not None else data.original_image
+                    if display_img is not None:
+                        st.image(display_img, width="stretch")
+                    else:
+                        st.error("No image available to display.")
             
-            # --- Download Section ---
-            c_dl1, c_dl2, c_dl3 = st.columns(3)
-            c_dl1.download_button("Download CSV", csv_exporter.generate_csv(data), file_name=f"{stem}_colonies.csv", mime="text/csv", width="stretch")
-            c_dl2.download_button("Download Summary", summarizer.generate_text(data), file_name=f"{stem}_run_summary.txt", mime="text/plain", width="stretch")
+                # --- Download Section ---
+                c_dl1, c_dl2, c_dl3 = st.columns(3)
+                c_dl1.download_button("Download CSV", csv_exporter.generate_csv(data), file_name=f"{stem}_colonies.csv", mime="text/csv", width="stretch")
+                c_dl2.download_button("Download Summary", summarizer.generate_text(data), file_name=f"{stem}_run_summary.txt", mime="text/plain", width="stretch")
             
-            if img is not None:
-                import io
-                buf = io.BytesIO()
-                img.save(buf, format="PNG")
-                c_dl3.download_button("Download Image", buf.getvalue(), file_name=f"{stem}_annotated.png", mime="image/png", width="stretch")
-            else:
-                c_dl3.button("Download Image", disabled=True, width="stretch")
+                if img is not None:
+                    import io
+                    buf = io.BytesIO()
+                    img.save(buf, format="PNG")
+                    c_dl3.download_button("Download Image", buf.getvalue(), file_name=f"{stem}_annotated.png", mime="image/png", width="stretch")
+                else:
+                    c_dl3.button("Download Image", disabled=True, width="stretch")
 
-            df = pd.DataFrame(data.measurements)
+                df = pd.DataFrame(data.measurements)
             
-            # Ensure required columns exist for display and editing
-            for col in ["plate_label", "label", "is_artifact", "centroid_x", "centroid_y", "area_px", "colony_count_estimate", "circularity", "solidity"]:
-                if col not in df.columns:
-                    df[col] = 0 if any(k in col for k in ["centroid", "area", "circ", "solid"]) else (False if col == "is_artifact" else 1 if col == "colony_count_estimate" else "N/A")
+                # Ensure required columns exist for display and editing
+                for col in ["plate_label", "label", "is_artifact", "centroid_x", "centroid_y", "area_px", "colony_count_estimate", "circularity", "solidity"]:
+                    if col not in df.columns:
+                        df[col] = 0 if any(k in col for k in ["centroid", "area", "circ", "solid"]) else (False if col == "is_artifact" else 1 if col == "colony_count_estimate" else "N/A")
 
-            if "Type" not in df.columns:
-                df["Type"] = df.apply(lambda r: f"Merged(x{int(r.get('colony_count_estimate', 1))})" if int(r.get('colony_count_estimate', 1)) > 1 else "Colony", axis=1)
-                df.loc[df['is_artifact'] == True, 'Type'] = "Artifact"
+                if "Type" not in df.columns:
+                    df["Type"] = df.apply(lambda r: f"Merged(x{int(r.get('colony_count_estimate', 1))})" if int(r.get('colony_count_estimate', 1)) > 1 else "Colony", axis=1)
+                    df.loc[df['is_artifact'] == True, 'Type'] = "Artifact"
 
-            # Filter to final display set
-            display_cols = ["plate_label", "label", "is_artifact", "Type", "centroid_x", "centroid_y", "area_px", "circularity", "solidity"]
-            cols = [c for c in display_cols if c in df.columns]
+                # Filter to final display set
+                display_cols = ["plate_label", "label", "is_artifact", "Type", "centroid_x", "centroid_y", "area_px", "circularity", "solidity"]
+                cols = [c for c in display_cols if c in df.columns]
             
-            edited = st.data_editor(df[cols], key=f"ed_{stem}", hide_index=True, width="stretch",
-                                    column_config={
-                                        "is_artifact": st.column_config.CheckboxColumn("Artifact?"),
-                                        "label": st.column_config.TextColumn("ID", disabled=True),
-                                        "Type": st.column_config.TextColumn("Class", disabled=True),
-                                        "centroid_x": st.column_config.NumberColumn("X", disabled=True, format="%.0f"),
-                                        "centroid_y": st.column_config.NumberColumn("Y", disabled=True, format="%.0f"),
-                                        "area_px": st.column_config.NumberColumn("Area", disabled=True),
-                                        "circularity": st.column_config.NumberColumn("Circ", disabled=True, format="%.2f"),
-                                        "solidity": st.column_config.NumberColumn("Solid", disabled=True, format="%.2f"),
-                                    })
+                edited = st.data_editor(df[cols], key=f"ed_{stem}", hide_index=True, width="stretch",
+                                        column_config={
+                                            "is_artifact": st.column_config.CheckboxColumn("Artifact?"),
+                                            "label": st.column_config.TextColumn("ID", disabled=True),
+                                            "Type": st.column_config.TextColumn("Class", disabled=True),
+                                            "centroid_x": st.column_config.NumberColumn("X", disabled=True, format="%.0f"),
+                                            "centroid_y": st.column_config.NumberColumn("Y", disabled=True, format="%.0f"),
+                                            "area_px": st.column_config.NumberColumn("Area", disabled=True),
+                                            "circularity": st.column_config.NumberColumn("Circ", disabled=True, format="%.2f"),
+                                            "solidity": st.column_config.NumberColumn("Solid", disabled=True, format="%.2f"),
+                                        })
             
-            if st.session_state.get(f"ed_{stem}"):
-                edits = st.session_state[f"ed_{stem}"]["edited_rows"]
-                if edits:
-                    for r_idx, changes in edits.items():
-                        if "is_artifact" in changes:
-                            data.measurements[r_idx]["is_artifact"] = changes["is_artifact"]
-                            # Also update main parent data if this is a sub-plate
-                            if " [" in stem:
-                                parent_stem = stem.split(" [")[0]
-                                parent_data = next((d for d, p in st.session_state["batch_runs"] if d.metadata.get("stem") == parent_stem), None)
-                                if parent_data:
-                                    # Find matching row in parent data. Measurements in parent
-                                    # include global IDs and plate_label.
-                                    plabel = data.metadata.get("plate_label")
-                                    # Local label is the index in sub-plate. 
-                                    # SubPipeline maps measurements linearly.
-                                    # However, it's safer to match by plate_label + local label.
-                                    local_label = data.measurements[r_idx].get("label")
-                                    for pm in parent_data.measurements:
-                                        if pm.get("plate_label") == plabel and pm.get("label") == local_label:
-                                            pm["is_artifact"] = changes["is_artifact"]
-                                            break
-                                    InteriorColonyClassifier.update_count(parent_data.measurements, parent_data)
-                    # Consume the edit event so it is not re-applied on every
-                    # subsequent rerun (the widget state otherwise keeps the
-                    # stale edited_rows until the user edits again).
-                    st.session_state[f"ed_{stem}"]["edited_rows"] = {}
-                    st.rerun()
+                if st.session_state.get(f"ed_{stem}"):
+                    edits = st.session_state[f"ed_{stem}"]["edited_rows"]
+                    if edits:
+                        for r_idx, changes in edits.items():
+                            if "is_artifact" in changes:
+                                data.measurements[r_idx]["is_artifact"] = changes["is_artifact"]
+                                # Also update main parent data if this is a sub-plate
+                                if " [" in stem:
+                                    parent_stem = stem.split(" [")[0]
+                                    parent_data = next((d for d, p in st.session_state["batch_runs"] if d.metadata.get("stem") == parent_stem), None)
+                                    if parent_data:
+                                        # Find matching row in parent data. Measurements in parent
+                                        # include global IDs and plate_label.
+                                        plabel = data.metadata.get("plate_label")
+                                        # Local label is the index in sub-plate. 
+                                        # SubPipeline maps measurements linearly.
+                                        # However, it's safer to match by plate_label + local label.
+                                        local_label = data.measurements[r_idx].get("label")
+                                        for pm in parent_data.measurements:
+                                            if pm.get("plate_label") == plabel and pm.get("label") == local_label:
+                                                pm["is_artifact"] = changes["is_artifact"]
+                                                break
+                                        InteriorColonyClassifier.update_count(parent_data.measurements, parent_data)
+                        # Consume the edit event so it is not re-applied on every
+                        # subsequent rerun (the widget state otherwise keeps the
+                        # stale edited_rows until the user edits again).
+                        st.session_state[f"ed_{stem}"]["edited_rows"] = {}
+                        st.rerun()
 
-            # Batch Save/Update Button
-            save_dir = Path(output_folder_input).resolve()
-            if st.button(f"Save/Update All results to {save_dir.name}", type="primary", width="stretch"):
-                save_dir.mkdir(parents=True, exist_ok=True)
-                for d, p in st.session_state.get("batch_runs", []):
-                    old_out = d.metadata.get("output_dir")
-                    d.metadata["output_dir"] = str(save_dir)
-                    for step in p.steps:
-                        if hasattr(step, "export"): step.export(d)
-                    if old_out: d.metadata["output_dir"] = old_out
-                generate_batch_summary([d for d, _ in st.session_state["batch_runs"]], save_dir)
-                generate_batch_colonies([d for d, _ in st.session_state["batch_runs"]], save_dir)
-                st.success(f"Saved results to {save_dir}")
-else:
-    st.info("Upload images to begin.")
+                # Batch Save/Update Button
+                save_dir = Path(output_folder_input).resolve()
+                if st.button(f"Save/Update All results to {save_dir.name}", type="primary", width="stretch"):
+                    save_dir.mkdir(parents=True, exist_ok=True)
+                    for d, p in st.session_state.get("batch_runs", []):
+                        old_out = d.metadata.get("output_dir")
+                        d.metadata["output_dir"] = str(save_dir)
+                        for step in p.steps:
+                            if hasattr(step, "export"): step.export(d)
+                        if old_out: d.metadata["output_dir"] = old_out
+                    generate_batch_summary([d for d, _ in st.session_state["batch_runs"]], save_dir)
+                    generate_batch_colonies([d for d, _ in st.session_state["batch_runs"]], save_dir)
+                    st.success(f"Saved results to {save_dir}")
+    else:
+        st.info("Upload images to begin.")
 
-st.divider()
-st.caption("Blenny GUI v0.2 • Engine: " + subprocess.run(cli_cmd + ["--version"], capture_output=True, text=True).stdout.strip())
+    st.divider()
+    st.caption("Blenny GUI v0.2 • Engine: " + subprocess.run(cli_cmd + ["--version"], capture_output=True, text=True).stdout.strip())
