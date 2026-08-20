@@ -86,15 +86,23 @@ Launch the interactive interface with:
 blenny gui
 ```
 
-**Windows shortcut:** a portable `Blenny GUI.lnk` ships at the repo root —
-double-click it to launch without the command line. It points at
-`scripts/launch_gui.bat` with `screenshots/blenny_icon.ico` as its icon and uses
-relative paths internally, so it works from wherever you clone the repo.
+**Desktop shortcuts:**
 
-To put a copy on the Desktop (with a machine-specific absolute path), run:
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\create_shortcut.ps1
-```
+- **Windows:** a portable `Blenny GUI.lnk` ships at the repo root — double-click it
+  to launch without the command line. It points at `scripts/launch_gui.bat` with
+  `screenshots/blenny_icon.ico` as its icon and uses relative paths internally, so
+  it works from wherever you clone the repo. To put a copy on the Desktop (with a
+  machine-specific absolute path), run:
+  ```powershell
+  powershell -NoProfile -ExecutionPolicy Bypass -File scripts\create_shortcut.ps1
+  ```
+
+- **macOS:** a portable `Blenny GUI.app` bundle ships at the repo root —
+  double-click it to launch the GUI in a Terminal window (close the window to
+  stop the server). It uses `screenshots/blenny_icon.icns` as its icon. To put a
+  copy on the Desktop, double-click `scripts/create_macos_shortcut.command` in
+  Finder (or run `cp -R "Blenny GUI.app" ~/Desktop`). The shared launcher
+  `scripts/launch_gui.sh` also works from any terminal, and on Linux.
 
 The GUI provides point-and-click analysis with **Interactive Review**:
 - **Engine Selection**: Toggle between **YOLO ML** and **Classic CV**.

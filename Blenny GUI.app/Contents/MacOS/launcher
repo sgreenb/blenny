@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# macOS app-bundle launcher for the Blenny GUI.
+#
+# The bundle lives at <repo>/Blenny GUI.app, so the repository root is three
+# directories up from this file (Contents/MacOS -> Contents -> bundle root ->
+# repo root). We open a Terminal window running the shared POSIX launcher so
+# the user sees the Streamlit output and can close the window to stop it --
+# the same behaviour as the Windows .bat launcher.
+set -u
+
+APP_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+LAUNCHER="$APP_ROOT/scripts/launch_gui.sh"
+
+if [ ! -f "$LAUNCHER" ]; then
+    osascript -e 'display alert "Blenny GUI" message "Could not find scripts/launch_gui.sh inside the repository."' 2>/dev/null || true
+    exit 1
+fi
+
+osascript -e "tell application \"Terminal\" to do script \"cd '$APP_ROOT' && exec bash '$LAUNCHER'\"" || exec "$LAUNCHER"
