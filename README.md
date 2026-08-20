@@ -86,9 +86,12 @@ Launch the interactive interface with:
 blenny gui
 ```
 
-**Windows shortcut:** double-click the **Blenny GUI** desktop icon to launch without
-the command line. The shortcut points at `scripts/launch_gui.bat` and uses
-`screenshots/blenny_icon.ico`. Recreate it on any machine with:
+**Windows shortcut:** a portable `Blenny GUI.lnk` ships at the repo root —
+double-click it to launch without the command line. It points at
+`scripts/launch_gui.bat` with `screenshots/blenny_icon.ico` as its icon and uses
+relative paths internally, so it works from wherever you clone the repo.
+
+To put a copy on the Desktop (with a machine-specific absolute path), run:
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\create_shortcut.ps1
 ```
