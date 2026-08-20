@@ -619,7 +619,35 @@ if mode == "Colony Counting":
                 annotator = AnnotatedImageExporter(output_path="d.png")
                 summarizer = SummaryExporter(output_path="d.txt")
                 csv_exporter = CSVExporter(output_path="d.csv")
-            
+
+                # View selector: mark artifacts (default), the raw colonies.csv
+                # output as a table, or the log.txt output.
+                view = st.selectbox(
+                    "View",
+                    ["Mark Artifacts", "colonies.csv", "log.txt"],
+                    help="Mark Artifacts: editable table for reviewing colonies. "
+                    "colonies.csv: the raw CSV output rendered as a table. "
+                    "log.txt: the processing log as written by export_summary.",
+                )
+
+                if view == "colonies.csv":
+                    # The exact content of colonies.csv, rendered as a table.
+                    import io
+                    csv_text = csv_exporter.generate_csv(data)
+                    if csv_text.lstrip().startswith("# (no measurements)"):
+                        st.info("No measurements to display.")
+                    else:
+                        try:
+                            st.dataframe(pd.read_csv(io.StringIO(csv_text)), hide_index=True, width="stretch")
+                        except Exception:
+                            st.code(csv_text)
+                    st.stop()
+
+                if view == "log.txt":
+                    # The exact content of log.txt, as written by export_summary.
+                    st.code(summarizer.generate_text(data), language=None)
+                    st.stop()
+
                 img = annotator.render(data)
                 if img is not None:
                     st.image(img, width="stretch")
@@ -633,8 +661,8 @@ if mode == "Colony Counting":
             
                 # --- Download Section ---
                 c_dl1, c_dl2, c_dl3 = st.columns(3)
-                c_dl1.download_button("Download CSV", csv_exporter.generate_csv(data), file_name=f"{stem}_colonies.csv", mime="text/csv", width="stretch")
-                c_dl2.download_button("Download Summary", summarizer.generate_text(data), file_name=f"{stem}_run_summary.txt", mime="text/plain", width="stretch")
+                c_dl1.download_button("Download colonies.csv", csv_exporter.generate_csv(data), file_name=f"{stem}_colonies.csv", mime="text/csv", width="stretch")
+                c_dl2.download_button("Download log.txt", summarizer.generate_text(data), file_name=f"{stem}_log.txt", mime="text/plain", width="stretch")
             
                 if img is not None:
                     import io
@@ -704,11 +732,9 @@ if mode == "Colony Counting":
                 # output folder.
                 if output_folder_input.strip():
                     save_dir = Path(output_folder_input).resolve()
-                    save_label = f"Save/Update All results to {save_dir.name}"
                 else:
                     save_dir = None
-                    save_label = "Save/Update All results…"
-                if st.button(save_label, type="primary", width="stretch"):
+                if st.button("Save All Results to Output Location", type="primary", width="stretch"):
                     if save_dir is None:
                         st.error("Specify an output folder to save results.")
                         st.stop()
