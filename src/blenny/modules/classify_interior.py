@@ -292,7 +292,12 @@ class InteriorColonyClassifier(Classifier):
         if plate_center is not None and plate_radius is not None:
             orig_cy, orig_cx = plate_center
             r = float(plate_radius)
-            if plate_bbox is not None:
+            # Only shift the centre into the cropped frame when it was written
+            # in the ORIGINAL image frame (detect_plate / detect_facile crop
+            # mode). Sub-pipeline steps write ``plate_center_local=True`` and
+            # already provide the centre in the local frame -- subtracting the
+            # original-frame bbox origin there would double-shift it.
+            if plate_bbox is not None and not data.metadata.get("plate_center_local", False):
                 y0, x0 = plate_bbox[0], plate_bbox[1]
                 orig_cy = float(orig_cy) - y0
                 orig_cx = float(orig_cx) - x0

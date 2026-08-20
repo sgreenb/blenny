@@ -273,3 +273,86 @@ def test_classifier_in_full_pipeline_does_not_reject_real_colonies(tmp_path) -> 
         f"Too many artifacts rejected ({n_artifacts}/{total}); "
         "classifier is probably too strict for clean images."
     )
+
+
+# ---------------------------------------------------------------------------
+# Plate geometry frame handling (regression for the sub-pipeline double-shift)
+# ---------------------------------------------------------------------------
+
+
+def test_local_plate_center_with_bbox_is_not_shifted() -> None:
+    """sub_pipeline writes plate_center in the LOCAL frame plus
+    ``plate_center_local=True``; _plate_geometry must not subtract the
+    (original-frame) plate_bbox in that case."""
+    data = ImageData(source="scan.jpg")
+    data.metadata["plate_center"] = (150, 120)
+    data.metadata["plate_radius"] = 180
+    data.metadata["plate_bbox"] = (500, 700, 860, 1060)
+    data.metadata["plate_center_local"] = True
+    cy, cx, r = InteriorColonyClassifier()._plate_geometry(data)
+    assert (cy, cx) == (150.0, 120.0)
+    assert r == 180.0
+
+
+def test_original_frame_plate_center_is_shifted_by_bbox() -> None:
+    """detect_plate / detect_facile crop mode: centre is in the ORIGINAL frame
+    and the bbox offset must be applied to reach the cropped frame."""
+    data = ImageData(source="plate.jpg")
+    data.metadata["plate_center"] = (650, 820)
+    data.metadata["plate_radius"] = 180
+    data.metadata["plate_bbox"] = (500, 700, 860, 1060)
+    cy, cx, _ = InteriorColonyClassifier()._plate_geometry(data)
+    assert (cy, cx) == (150.0, 120.0)
+
+
+def test_sub_pipeline_geometry_matches_local_center(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """End-to-end: detect_facile -> sub_pipeline must feed classify_by_interior
+    a geometry centred on the true plate centre (regression for the
+    double-shift bug that shifted it by the ROI bbox origin)."""
+    import numpy as np
+    from PIL import Image
+
+    h, w = 800, 1500
+    img = np.full((h, w, 3), 25, dtype=np.uint8)
+    yy, xx = np.mgrid[0:h, 0:w]
+    plates = [(400, 420, 180), (400, 1050, 180)]  # (cy, cx, r)
+    for cy, cx, r in plates:
+        d = np.sqrt((yy - cy) ** 2 + (xx - cx) ** 2)
+        img[d <= r] = (130, 130, 130)
+        img[(d > r) & (d <= r + 6)] = (215, 215, 215)
+    img_path = tmp_path / "two_plate.png"
+    Image.fromarray(img).save(img_path)
+
+    pipe = Pipeline.from_config(
+        [
+            {"name": "load_image"},
+            {"name": "detect_facile", "params": {"multi_plate": None}},
+            {
+                "name": "sub_pipeline",
+                "params": {
+                    "steps": [
+                        {
+                            "name": "add_manual_colonies",
+                            "params": {
+                                "coordinates": [[420, 400], [1050, 400]],
+                                "radius": 12,
+                            },
+                        },
+                        {"name": "measure_colonies", "params": {"roi_mask_key": "plate"}},
+                        {"name": "classify_by_interior"},
+                    ]
+                },
+            },
+        ]
+    )
+    data = pipe.run(img_path)
+    subs = data.metadata["multi_plate_results"]
+    assert len(subs) == 2
+    for sub in subs:
+        cy_l, cx_l = sub.metadata["plate_center"]
+        geom = sub.metadata["interior_classifier_geometry"]
+        assert (geom["cy"], geom["cx"]) == (float(cy_l), float(cx_l))
+        # A colony drawn exactly at the plate centre must be interior.
+        for m in sub.measurements:
+            if abs(m["centroid_y"] - cy_l) < 3 and abs(m["centroid_x"] - cx_l) < 3:
+                assert m["zone"] == "interior"

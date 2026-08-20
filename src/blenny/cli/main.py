@@ -347,23 +347,13 @@ def run(
             typer.echo(f"  [OK]   {img.name}  colonies={count}  ({elapsed:.1f}s)")
 
     if first_resolved is not None:
-        # For the reproducible config, we want a "template" version where
-        # per-image placeholders like {stem} are preserved, but global
-        # parameters (including CLI overrides) are baked in.
-        reproducible_steps = substitute_paths(
-            raw_steps, output_dir="{output_dir}", input_path="{input_path_placeholder}"
-        )
-        # Fix the dummy input path back to placeholders
-        for step in reproducible_steps:
-            if "params" in step:
-                for k, v in step["params"].items():
-                    if isinstance(v, str) and "{input_path_placeholder}" in v:
-                        step["params"][k] = v.replace(
-                            "{input_path_placeholder}.stem", "{stem}"
-                        ).replace("{input_path_placeholder}", "{input}")
-
+        # Write a reproducible config: raw_steps already carries the CLI
+        # overrides while preserving the per-image placeholders ({stem}, ...),
+        # so the dumped YAML can be re-run as-is. (raw_steps is deliberately
+        # used directly -- a previous "template" round-trip via substitute_paths
+        # with a dummy input corrupted {stem} into {input}.)
         dump_resolved_config(
-            raw_steps,  # raw_steps already has CLI overrides but preserves placeholders
+            raw_steps,
             output_dir / "reproducible_config.yaml",
             extra={
                 "_blenny_version": __version__,
@@ -667,54 +657,10 @@ def _to_jsonable(obj: Any) -> Any:
 
 
 def _write_batch_colonies_csv(path: Path, measurements: list[dict[str, Any]]) -> None:
-    import csv
+    """Thin wrapper kept for call-site compatibility; see :mod:`blenny.batch`."""
+    from blenny.batch import write_batch_colonies_csv
 
-    if not measurements:
-        # Still write a placeholder so batch consumers always find the file.
-        path.write_text("# no measurements\n", encoding="utf-8")
-        return
-
-    # Define the exact preferred order from CSVExporter to match its format
-    preferred_order = [
-        "plate_label",
-        "label",
-        "centroid_x",
-        "centroid_y",
-        "centroid_x_global",
-        "centroid_y_global",
-        "area_px",
-        "circularity",
-        "solidity",
-        "eccentricity",
-        "mean_r",
-        "mean_g",
-        "mean_b",
-        "mean_h",
-        "mean_s",
-        "mean_v",
-        "is_artifact",
-        "artifact_reason",
-        "source",
-    ]
-
-    fieldnames = []
-    for p in preferred_order:
-        if any(p in m for m in measurements):
-            fieldnames.append(p)
-
-    # Append any remaining columns produced by modules so the batch CSV
-    # matches the per-image CSVExporter format (no silent column drops).
-    seen = set(fieldnames)
-    for m in measurements:
-        for key in m:
-            if key not in seen:
-                fieldnames.append(key)
-                seen.add(key)
-
-    with path.open("w", newline="", encoding="utf-8") as fh:
-        writer = csv.DictWriter(fh, fieldnames=fieldnames, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(measurements)
+    write_batch_colonies_csv(path, measurements)
 
 
 def _write_summary_csv(

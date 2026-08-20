@@ -146,20 +146,14 @@ def generate_batch_summary(batch_data, output_dir):
         writer.writerows(rows)
 
 def generate_batch_colonies(batch_data, output_dir):
-    import csv
     if not batch_data: return
     all_measurements = []
     for data in batch_data: all_measurements.extend(data.measurements)
-    if not all_measurements: return
-    path = Path(output_dir) / "batch_colonies.csv"
-    preferred_order = ["plate_label", "label", "centroid_x", "centroid_y", "centroid_x_global", "centroid_y_global", 
-                       "area_px", "circularity", "solidity", "eccentricity", "mean_r", "mean_g", "mean_b", 
-                       "is_artifact", "artifact_reason", "source"]
-    fieldnames = [p for p in preferred_order if any(p in m for m in all_measurements)]
-    with open(path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(all_measurements)
+    # Shared writer keeps every measurement column (the old fixed-column list
+    # here silently dropped mean_h/s/v, colony_count_estimate, segment_label,
+    # classification and the bbox columns while the CLI kept them).
+    from blenny.batch import write_batch_colonies_csv
+    write_batch_colonies_csv(Path(output_dir) / "batch_colonies.csv", all_measurements)
 
 # --- App Layout ---
 st.set_page_config(page_title="Blenny Plate Reader", layout="wide", initial_sidebar_state="expanded")
@@ -235,6 +229,9 @@ with st.sidebar:
             if not Path(p).exists(): p = "pipeline_multi.yaml"
             st.session_state["pipeline_path"] = p
         st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
+        # Keep the keyed text input in sync: without this, its stale session
+        # value re-syncs pipeline_path back to the old file on the same rerun.
+        st.session_state["pipeline_path_input"] = st.session_state["pipeline_path"]
 
     plate_mode = st.radio("Plate Detection Mode", ["Auto", "Multi-Plate Grid", "Manual Circle", "Manual Shape"],
                           key="manual_plate_mode", on_change=on_mode_change)
@@ -262,6 +259,7 @@ with st.sidebar:
         root.destroy()
         if selected:
             st.session_state["pipeline_path"] = selected
+            st.session_state["pipeline_path_input"] = selected
             st.rerun()
 
     uploaded_pipeline = st.file_uploader("OR Upload Pipeline YAML", type=["yaml", "yml"])
@@ -270,6 +268,7 @@ with st.sidebar:
         if st.session_state.get("last_uploaded_p") != uploaded_pipeline.name:
             temp_p.write_bytes(uploaded_pipeline.getvalue())
             st.session_state["pipeline_path"] = str(temp_p.resolve())
+            st.session_state["pipeline_path_input"] = str(temp_p.resolve())
             st.session_state["last_uploaded_p"] = uploaded_pipeline.name
             st.rerun()
 
@@ -289,8 +288,26 @@ with st.sidebar:
         c_g1, c_g2 = st.columns(2)
         grid_rows = c_g1.number_input("Rows", 1, 10, 2)
         grid_cols = c_g2.number_input("Columns", 1, 10, 3)
-        if "grid_labels" not in st.session_state or len(st.session_state["grid_labels"]) != grid_rows:
-            st.session_state["grid_labels"] = [[f"{chr(65+r)}{c+1}" for c in range(grid_cols)] for r in range(grid_rows)]
+        # Preserve any user-typed labels, but always match the current grid
+        # shape. (Rebuilding only on a ROW change used to IndexError when the
+        # user changed Columns, and left stale labels when shrinking.)
+        labels = st.session_state.get("grid_labels")
+        if labels is None or len(labels) != grid_rows or any(
+            len(row) != grid_cols for row in labels
+        ):
+            if labels is None:
+                labels = [[f"{chr(65 + r)}{c + 1}" for c in range(grid_cols)] for r in range(grid_rows)]
+            else:
+                while len(labels) < grid_rows:
+                    labels.append([f"{chr(65 + len(labels))}{c + 1}" for c in range(grid_cols)])
+                while len(labels) > grid_rows:
+                    labels.pop()
+                for r, row in enumerate(labels):
+                    if len(row) < grid_cols:
+                        labels[r] = row + [f"{chr(65 + r)}{c + 1}" for c in range(len(row), grid_cols)]
+                    elif len(row) > grid_cols:
+                        labels[r] = row[:grid_cols]
+            st.session_state["grid_labels"] = labels
         with st.expander("Edit Labels"):
             for r in range(grid_rows):
                 cols_ui = st.columns(grid_cols)

@@ -92,6 +92,10 @@ class Pipeline:
         if ctx.source and "stem" not in ctx.metadata:
             ctx.metadata["stem"] = Path(ctx.source).stem
 
+        # Stamp when this analysis ran so exporters (e.g. export_summary's
+        # "Timestamp" line) have a real value instead of "N/A".
+        ctx.metadata.setdefault("run_at", time.strftime("%Y-%m-%dT%H:%M:%S"))
+
         if output_dir is not None:
             ctx.metadata["output_dir"] = str(output_dir)
 

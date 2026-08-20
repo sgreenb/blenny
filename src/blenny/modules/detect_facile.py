@@ -260,11 +260,14 @@ class FacileDetector(Preprocessor):
             det_scale = 1.0
 
         circles = facile_detection(
-            det_img, 
-            petri_only=self.params.petri_only,
+            det_img,
+            # petri_only=False: the size filter must run in full-resolution
+            # space (see below) -- inside facile_detection it would test the
+            # DOWNScaled radius, making the 150 px threshold resolution-dependent.
+            petri_only=False,
             min_points=self.params.min_points,
             max_error=self.params.max_error,
-            suppression_dist_frac=self.params.suppression_dist_frac
+            suppression_dist_frac=self.params.suppression_dist_frac,
         )
 
         if not circles:
@@ -282,6 +285,14 @@ class FacileDetector(Preprocessor):
         for xc, yc, r, std, n in circles:
             rescaled_circles.append((xc / det_scale, yc / det_scale, r / det_scale, std, n))
         circles = rescaled_circles
+
+        # Apply the "petri-only" size filter in FULL-RESOLUTION space. Inside
+        # facile_detection the same rule (r > 150 or r >= 0.5 * max_r) would be
+        # evaluated against the downscaled radius, so a genuine small plate
+        # could be silently dropped on a large scan. Here radii are scaled back.
+        if self.params.petri_only and circles:
+            max_r = max(c[2] for c in circles)
+            circles = [c for c in circles if c[2] > 150 or c[2] >= max_r * 0.5]
 
         # Determination of multi-plate mode.
         use_roi_mode = self.params.multi_plate is not False

@@ -113,6 +113,13 @@ class SubPipeline(Module):
             sub_data.masks["plate"] = local_mask
             sub_data.metadata["plate_label"] = label
             sub_data.metadata["plate_center"] = (cy_l, cx_l)
+            # The centre/radius above are already expressed in the sub-image's
+            # own (local) frame. Downstream modules (e.g. classify_by_interior)
+            # must NOT subtract ``plate_bbox`` from them -- that offset belongs
+            # to the ORIGINAL image frame (see the comment below on plate_bbox)
+            # and is only applied when a detector writes the centre in the
+            # original frame (detect_plate / detect_facile crop mode).
+            sub_data.metadata["plate_center_local"] = True
             sub_data.metadata["plate_radius"] = int(
                 roi["radius"] * max(scale_x, scale_y) * max(sub_scale_x, sub_scale_y)
             )
@@ -123,6 +130,8 @@ class SubPipeline(Module):
 
             # Record the ROI's bounding box in the original image coordinate frame.
             # This allows modules like ExclusionMasker to correctly crop global masks.
+            # NOTE: plate_center/plate_radius are LOCAL (see plate_center_local
+            # above), so plate_bbox must only be used for original-frame masks.
             sub_data.metadata["plate_bbox"] = (y0_hr, x0_hr, y1_hr, x1_hr)
 
             # 2. Run inner pipeline. Give each sub-plate its own debug subdir
