@@ -533,13 +533,50 @@ def _render_dashboard(img_path: Path, rois: list[dict], analysis: dict, rows: li
     counts = pooled_counts(hists, [rid for rid, _, _ in pairs], param)
 
     lo0, hi0 = PARAM_RANGES[param]
-    lo, hi = st.slider(
-        "Threshold range",
-        lo0,
-        hi0,
-        st.session_state.get(f"roi_thr_{param}", (lo0, hi0)),
-        key=f"roi_thr_{param}",
+
+    # Align the slider track with the histogram's x-axis. The axes only span
+    # [x0, x1] of the figure width (y-label/tick margins take the rest), so
+    # the slider goes into a zero-gap column spanning exactly those fractions.
+    # The axes position depends on the data + labels, not the thresholds, so
+    # the span measured from the previous rerun's figure is reused; on first
+    # render it is measured from a throwaway figure.
+    pos_key = (
+        f"roi_axpos|{analysis.get('fingerprint')}|{param}|{normalize}|"
+        + ",".join(sel_ids)
     )
+    pos = st.session_state.get(pos_key)
+    if pos is None:
+        import matplotlib.pyplot as _plt
+
+        _probe = build_histogram_figure(
+            param,
+            per_roi_hists,
+            per_roi_stats,
+            per_roi_names,
+            per_roi_colors,
+            lo0,
+            hi0,
+            combined,
+            0,
+            0.0,
+            0.0,
+            normalize=normalize,
+        )
+        _pos = _probe.axes[0].get_position()
+        pos = (float(_pos.x0), float(_pos.x1))
+        _plt.close(_probe)
+        st.session_state[pos_key] = pos
+    x0, x1 = pos
+
+    _c_sl = st.columns([x0, x1 - x0, 1.0 - x1], gap=None)
+    with _c_sl[1]:
+        lo, hi = st.slider(
+            "Threshold range",
+            lo0,
+            hi0,
+            st.session_state.get(f"roi_thr_{param}", (lo0, hi0)),
+            key=f"roi_thr_{param}",
+        )
     st.session_state.setdefault("roi_thresholds", {})[param] = (float(lo), float(hi))
 
     clipped_n, clipped_mean, clipped_std = stats_from_hist(counts, param, lo, hi)
@@ -557,6 +594,10 @@ def _render_dashboard(img_path: Path, rois: list[dict], analysis: dict, rows: li
         clipped_std,
         normalize=normalize,
     )
+    # Cache the axes span measured from this rerun's figure for the next
+    # rerun's slider alignment.
+    _axpos = fig.axes[0].get_position()
+    st.session_state[pos_key] = (float(_axpos.x0), float(_axpos.x1))
     st.pyplot(fig)
     import matplotlib.pyplot as plt
 
