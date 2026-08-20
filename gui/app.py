@@ -43,7 +43,7 @@ if not (GUI_TEMP_DIR / f".pid_{os.getpid()}").exists():
     # First execution of this server process: anything already here belongs to
     # a previous run (uploads are re-written on every rerun while the widget
     # holds them), so drop it.
-    for p in GUI_TEMP_DIR.iterdir():
+    for p in GUI_TEMP_DIR.rglob("*"):
         if p.is_file() and not p.name.startswith(".pid_"):
             try:
                 p.unlink()
@@ -221,7 +221,7 @@ with st.sidebar:
             st.rerun()
 
     c_o1, c_o2 = st.columns([3, 1])
-    output_folder_input = c_o1.text_input("Output Folder", value=st.session_state.get("output_folder_path", ""))
+    output_folder_input = c_o1.text_input("Output Folder", value=st.session_state.get("output_folder_path", ""), help="Leave empty to run analysis — the folder is only required when saving/exporting results.")
     c_o2.markdown("<div style='height: 29px;'></div>", unsafe_allow_html=True)
     if c_o2.button("Browse", key="browse_output", width="stretch"):
         selected = local_folder_picker("Select Output Folder")
@@ -478,8 +478,23 @@ if mode == "Colony Counting":
 
         with col2:
             if run_btn:
-                if not output_folder_input.strip(): st.error("Specify output folder."); st.stop()
-                output_dir = Path(output_folder_input); output_dir.mkdir(parents=True, exist_ok=True)
+                if output_folder_input.strip():
+                    output_dir = Path(output_folder_input)
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                else:
+                    # Analysis runs fine without an output folder: exports go
+                    # to gitignored scratch (cleared each run, and on the next
+                    # server launch) and results stay fully interactive. The
+                    # folder is only required when the user explicitly saves.
+                    output_dir = GUI_TEMP_DIR / "output"
+                    if output_dir.exists():
+                        for _f in output_dir.rglob("*"):
+                            if _f.is_file():
+                                try:
+                                    _f.unlink()
+                                except OSError:
+                                    pass
+                    output_dir.mkdir(parents=True, exist_ok=True)
                 st.session_state.update({"all_results": {}, "result_stems": [], "batch_runs": [], "current_view_idx": 0})
             
                 from blenny.config import extract_steps, load_yaml, substitute_paths
@@ -685,9 +700,18 @@ if mode == "Colony Counting":
                         st.session_state[f"ed_{stem}"]["edited_rows"] = {}
                         st.rerun()
 
-                # Batch Save/Update Button
-                save_dir = Path(output_folder_input).resolve()
-                if st.button(f"Save/Update All results to {save_dir.name}", type="primary", width="stretch"):
+                # Batch Save/Update Button — the only step that requires an
+                # output folder.
+                if output_folder_input.strip():
+                    save_dir = Path(output_folder_input).resolve()
+                    save_label = f"Save/Update All results to {save_dir.name}"
+                else:
+                    save_dir = None
+                    save_label = "Save/Update All results…"
+                if st.button(save_label, type="primary", width="stretch"):
+                    if save_dir is None:
+                        st.error("Specify an output folder to save results.")
+                        st.stop()
                     save_dir.mkdir(parents=True, exist_ok=True)
                     for d, p in st.session_state.get("batch_runs", []):
                         old_out = d.metadata.get("output_dir")
