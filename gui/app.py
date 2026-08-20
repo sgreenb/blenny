@@ -496,10 +496,11 @@ if mode == "Colony Counting":
                                     pass
                     output_dir.mkdir(parents=True, exist_ok=True)
                 st.session_state.update({"all_results": {}, "result_stems": [], "batch_runs": [], "current_view_idx": 0})
-                # Drop cached review-table state/snapshots from the previous
-                # run so the editor rebuilds from the new measurements.
+                # Drop cached review-table state/snapshots and annotated-image
+                # caches from the previous run so they rebuild from the new
+                # measurements.
                 for _k in list(st.session_state):
-                    if _k.startswith("ed_"):
+                    if _k.startswith("ed_") or _k.startswith("annot_img_"):
                         del st.session_state[_k]
             
                 from blenny.config import extract_steps, load_yaml, substitute_paths
@@ -664,11 +665,23 @@ if mode == "Colony Counting":
                     st.stop()
 
                 # Placeholders keep the annotated image and the download row
-                # visually on top of the review section, but their content is
-                # rendered AFTER the edit handler below (into these slots) so
-                # they reflect artifact toggles made in this same rerun.
+                # visually on top of the review section. The image slot is
+                # filled immediately from a per-plate cache (see below) and
+                # swapped in place after the edit handler, so the layout never
+                # collapses while the editor re-renders; the downloads render
+                # after the handler so they include the latest toggles.
                 img_ph = st.empty()
                 dl_ph = st.container()
+
+                # Fill the image slot from the per-plate cache immediately, so
+                # the slot is never left empty while the editor re-renders (an
+                # empty slot collapses the layout and jerks the table). The
+                # cache is refreshed further down only when artifacts were
+                # toggled this rerun (or on first render).
+                _annot_cache_key = f"annot_img_{stem}"
+                _cached_annot = st.session_state.get(_annot_cache_key)
+                if _cached_annot is not None:
+                    img_ph.image(_cached_annot, width="stretch")
 
                 def _build_editor_df() -> "pd.DataFrame":
                     """Snapshot of the review table for the selected plate.
@@ -705,10 +718,10 @@ if mode == "Colony Counting":
                                             "solidity": st.column_config.NumberColumn("Solid", disabled=True, format="%.2f"),
                                         })
             
+                changed_any = False
                 if st.session_state.get(f"ed_{stem}"):
                     edits = st.session_state[f"ed_{stem}"]["edited_rows"]
                     if edits:
-                        changed_any = False
                         for r_idx, changes in edits.items():
                             if "is_artifact" in changes:
                                 new_val = bool(changes["is_artifact"])
@@ -743,30 +756,40 @@ if mode == "Colony Counting":
                         # above.
                         st.session_state[f"ed_{stem}"]["edited_rows"] = {}
 
-                # Render the annotated image and downloads AFTER edits were
-                # applied, so a colony just marked as an artifact shows up
-                # magenta immediately (and the downloads include the latest
-                # toggles).
-                img = annotator.render(data)
-                if img is not None:
-                    img_ph.image(img, width="stretch")
-                else:
-                    img_ph.warning("Annotation failed. Displaying original/preprocessed image.")
-                    display_img = data.image if data.image is not None else data.original_image
-                    if display_img is not None:
-                        img_ph.image(display_img, width="stretch")
+                # Refresh the cached annotated image only when artifacts were
+                # toggled this rerun (or on first render), so a colony just
+                # marked as an artifact shows up magenta immediately.
+                if changed_any or _annot_cache_key not in st.session_state:
+                    import io
+                    _img = annotator.render(data)
+                    if _img is not None:
+                        _buf = io.BytesIO()
+                        _img.save(_buf, format="PNG")
+                        st.session_state[_annot_cache_key] = _buf.getvalue()
                     else:
-                        img_ph.error("No image available to display.")
+                        _disp = data.image if data.image is not None else data.original_image
+                        if _disp is not None:
+                            _buf = io.BytesIO()
+                            _disp.save(_buf, format="PNG")
+                            st.session_state[_annot_cache_key] = _buf.getvalue()
+                        else:
+                            st.session_state[_annot_cache_key] = None
+
+                # Swap the image in place: the early fill above already holds
+                # the previous frame, so the slot keeps its size and the table
+                # below never shifts while the new annotations load.
+                _cached_annot = st.session_state.get(_annot_cache_key)
+                if _cached_annot is not None:
+                    img_ph.image(_cached_annot, width="stretch")
+                else:
+                    img_ph.error("No image available to display.")
 
                 with dl_ph:
                     c_dl1, c_dl2, c_dl3 = st.columns(3)
                     c_dl1.download_button("Download colonies.csv", csv_exporter.generate_csv(data), file_name=f"{stem}_colonies.csv", mime="text/csv", width="stretch")
                     c_dl2.download_button("Download log.txt", summarizer.generate_text(data), file_name=f"{stem}_log.txt", mime="text/plain", width="stretch")
-                    if img is not None:
-                        import io
-                        buf = io.BytesIO()
-                        img.save(buf, format="PNG")
-                        c_dl3.download_button("Download Image", buf.getvalue(), file_name=f"{stem}_annotated.png", mime="image/png", width="stretch")
+                    if _cached_annot is not None:
+                        c_dl3.download_button("Download Image", _cached_annot, file_name=f"{stem}_annotated.png", mime="image/png", width="stretch")
                     else:
                         c_dl3.button("Download Image", disabled=True, width="stretch")
 
