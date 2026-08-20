@@ -663,29 +663,12 @@ if mode == "Colony Counting":
                     st.code(summarizer.generate_text(data), language=None)
                     st.stop()
 
-                img = annotator.render(data)
-                if img is not None:
-                    st.image(img, width="stretch")
-                else:
-                    st.warning("Annotation failed. Displaying original/preprocessed image.")
-                    display_img = data.image if data.image is not None else data.original_image
-                    if display_img is not None:
-                        st.image(display_img, width="stretch")
-                    else:
-                        st.error("No image available to display.")
-            
-                # --- Download Section ---
-                c_dl1, c_dl2, c_dl3 = st.columns(3)
-                c_dl1.download_button("Download colonies.csv", csv_exporter.generate_csv(data), file_name=f"{stem}_colonies.csv", mime="text/csv", width="stretch")
-                c_dl2.download_button("Download log.txt", summarizer.generate_text(data), file_name=f"{stem}_log.txt", mime="text/plain", width="stretch")
-            
-                if img is not None:
-                    import io
-                    buf = io.BytesIO()
-                    img.save(buf, format="PNG")
-                    c_dl3.download_button("Download Image", buf.getvalue(), file_name=f"{stem}_annotated.png", mime="image/png", width="stretch")
-                else:
-                    c_dl3.button("Download Image", disabled=True, width="stretch")
+                # Placeholders keep the annotated image and the download row
+                # visually on top of the review section, but their content is
+                # rendered AFTER the edit handler below (into these slots) so
+                # they reflect artifact toggles made in this same rerun.
+                img_ph = st.empty()
+                dl_ph = st.container()
 
                 def _build_editor_df() -> "pd.DataFrame":
                     """Snapshot of the review table for the selected plate.
@@ -759,6 +742,33 @@ if mode == "Colony Counting":
                         # Any re-emitted edits are idempotent via the guards
                         # above.
                         st.session_state[f"ed_{stem}"]["edited_rows"] = {}
+
+                # Render the annotated image and downloads AFTER edits were
+                # applied, so a colony just marked as an artifact shows up
+                # magenta immediately (and the downloads include the latest
+                # toggles).
+                img = annotator.render(data)
+                if img is not None:
+                    img_ph.image(img, width="stretch")
+                else:
+                    img_ph.warning("Annotation failed. Displaying original/preprocessed image.")
+                    display_img = data.image if data.image is not None else data.original_image
+                    if display_img is not None:
+                        img_ph.image(display_img, width="stretch")
+                    else:
+                        img_ph.error("No image available to display.")
+
+                with dl_ph:
+                    c_dl1, c_dl2, c_dl3 = st.columns(3)
+                    c_dl1.download_button("Download colonies.csv", csv_exporter.generate_csv(data), file_name=f"{stem}_colonies.csv", mime="text/csv", width="stretch")
+                    c_dl2.download_button("Download log.txt", summarizer.generate_text(data), file_name=f"{stem}_log.txt", mime="text/plain", width="stretch")
+                    if img is not None:
+                        import io
+                        buf = io.BytesIO()
+                        img.save(buf, format="PNG")
+                        c_dl3.download_button("Download Image", buf.getvalue(), file_name=f"{stem}_annotated.png", mime="image/png", width="stretch")
+                    else:
+                        c_dl3.button("Download Image", disabled=True, width="stretch")
 
                 # Batch Save/Update Button — the only step that requires an
                 # output folder.
