@@ -20,6 +20,16 @@ import numpy as np
 #: Parameters exposed in the dashboard, in display order.
 PARAMS: list[str] = ["R", "G", "B", "H", "S", "V"]
 
+#: Display names for the dashboard dropdown and figure labels (keys stay short).
+PARAM_LABELS: dict[str, str] = {
+    "R": "Red",
+    "G": "Green",
+    "B": "Blue",
+    "H": "Hue",
+    "S": "Saturation",
+    "V": "Value",
+}
+
 #: Theoretical value range for each parameter (also the histogram x-range).
 PARAM_RANGES: dict[str, tuple[float, float]] = {
     "R": (0.0, 255.0),
@@ -229,12 +239,12 @@ def build_histogram_figure(
     xmin, xmax = PARAM_RANGES[param]
     ax.set_xlim(xmin, xmax)
     ax.set_ylim(bottom=0)
-    ax.set_xlabel(param)
+    ax.set_xlabel(PARAM_LABELS.get(param, param))
     ax.set_ylabel("fraction of pixels" if normalize else "pixel count")
 
     if clipped_n and clipped_n != n_all:
         ax.set_title(
-            f"{param}: {clipped_n:,}/{n_all:,} px kept "
+            f"{PARAM_LABELS.get(param, param)}: {clipped_n:,}/{n_all:,} px kept "
             f"({100.0 * clipped_n / max(int(n_all), 1):.1f}%) — "
             f"clipped mean {clipped_mean:.3f} ± {clipped_std:.3f}"
         )

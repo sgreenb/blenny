@@ -23,6 +23,7 @@ from blenny.roi import analyze_rois, run_roi_analysis, write_analysis_outputs
 from blenny.roi.analyze import (
     PARAM_RANGES,
     PARAMS,
+    PARAM_LABELS,
     build_histogram_figure,
     count_in_range,
     pooled_counts,
@@ -472,7 +473,12 @@ def _render_dashboard(img_path: Path, rois: list[dict], analysis: dict, rows: li
         return
 
     st.markdown("#### Dashboard")
-    param = st.selectbox("Parameter", PARAMS, key="roi_param")
+    param = st.selectbox(
+        "Parameter",
+        PARAMS,
+        format_func=lambda p: PARAM_LABELS.get(p, p),
+        key="roi_param",
+    )
 
     c_norm = st.columns([1, 4])[0]
     normalize = c_norm.checkbox(
