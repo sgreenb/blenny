@@ -62,11 +62,7 @@ blenny init
 ### 3. View Results
 Results land in `results/<image_name>/`:
 - **`annotated.png`**: Original image with every detected colony outlined and numbered (the YOLO pipelines write one annotated image per plate, e.g. `plate_1_annotated.png`).
-- **`colonies.csv`**: One row per colony with rich quantification data, including:
-  - **Spatial**: ID, Centroid (X, Y), Area (px, ppm), Bounding Box.
-  - **Morphology**: Circularity, Solidity, Eccentricity.
-  - **Color**: Mean RGB and HSV values.
-  - **Audit**: Artifact status, classification reason, and image source.
+- **`colonies.csv`**: One row per colony with position, size, shape, color, and artifact-status measurements.
 - **`<image_name>_run_summary.txt`** (classic) or **`log.txt`** (YOLO pipelines): A human-readable report with count statistics and quality flags.
 - **`reproducible_config.yaml`**: The exact resolved pipeline config, so any analysis can be re-run verbatim.
 
@@ -88,34 +84,15 @@ Launch the interactive interface with:
 blenny gui
 ```
 
-**Desktop shortcuts:**
-
-- **Windows:** a portable `Blenny GUI.lnk` ships at the repo root — double-click it
-  to launch without the command line. It points at `scripts/launch_gui.bat` with
-  `screenshots/blenny_icon.ico` as its icon and uses relative paths internally, so
-  it works from wherever you clone the repo. To put a copy on the Desktop (with a
-  machine-specific absolute path), run:
-  ```powershell
-  powershell -NoProfile -ExecutionPolicy Bypass -File scripts\create_shortcut.ps1
-  ```
-
-- **macOS:** a portable `Blenny GUI.app` bundle ships at the repo root —
-  double-click it to launch the GUI in a Terminal window (close the window to
-  stop the server). It uses `screenshots/blenny_icon.icns` as its icon. To put a
-  copy on the Desktop, double-click `scripts/create_macos_shortcut.command` in
-  Finder — the script bakes in the repo's absolute path, so the Desktop copy
-  keeps working wherever the repo lives. The shared launcher
-  `scripts/launch_gui.sh` also works from any terminal, and on Linux.
+**Desktop shortcuts:** `Blenny GUI.lnk` (Windows) and `Blenny GUI.app` (macOS)
+ship at the repo root — double-click either to launch the GUI without the
+command line. `scripts/create_shortcut.ps1` and
+`scripts/create_macos_shortcut.command` put a copy on your Desktop.
 
 The GUI provides point-and-click analysis with **Interactive Review**:
-- **Colony Counting mode**: analyze plates with automatic or manual detection
-  (Auto, Multi-Plate Grid, Manual Circle, or Manual Shape), then review each
-  plate in a table.
-- **ROI Mode**: draw free-form regions of interest on any image and get
-  per-region area and colour statistics (histograms, CSV export, and an
-  annotated overlay) — no pipeline needed.
-- **Live Editing**: check or uncheck the **"Artifact?"** box on any colony to flip its classification—the count updates instantly.
-- **Multi-Plate Support**: Automatically detect and analyze multiple plates in a single scan grid (e.g., 2x3).
+- **Colony Counting**: automatic (Auto, Multi-Plate Grid) or manual (Manual Circle, Manual Shape) plate detection, then review each plate in a table.
+- **ROI Mode**: draw regions of interest on any image for per-region area and colour statistics — no pipeline needed.
+- **Live Editing**: toggle the **"Artifact?"** box on any colony to flip its classification; the count updates instantly.
 - **Manual Exclusion**: paint directly on the image to exclude contaminants or writing.
 
 ---
@@ -154,8 +131,8 @@ For high-throughput scanning of multiple plates at once:
 ### Key `blenny run` Options
 - `--input`, `-i`: Input image path, directory, or quoted glob (e.g. `'plates/*.jpg'`).
 - `--output`, `-o`: Directory to write results into.
-- `--override`, `-v`: Tweak any parameter on the fly (e.g. `-v threshold_segment.min_area=50`). Works for modules inside `sub_pipeline` steps too (e.g. `-v yolo_detector.conf_threshold=0.25`).
-- `--confidence`, `--conf`: YOLO detection confidence threshold (0–1). Applies to every `yolo_detector` step, including inside `sub_pipeline` (default: 0.15 in shipped templates).
+- `--override`, `-v`: Tweak any parameter on the fly (e.g. `-v threshold_segment.min_area=50`), including inside sub-pipelines.
+- `--confidence`, `--conf`: YOLO detection confidence threshold (0–1), applied to every `yolo_detector` step (default: 0.15 in shipped templates).
 - `--provenance`: Save a full audit trail (`provenance.json`) per image.
 - `--debug-dir`: Write intermediate step images for auditing.
 
