@@ -8,7 +8,7 @@ version = "1.1.0"
 description = "A free, open-source toolkit for analyzing colonies on petri plates."
 readme = "README.md"
 requires-python = ">=3.11,<3.15"
-license = "GPL-3.0-or-later"
+license = "MIT"
 authors = [{ name = "The Blenny contributors" }]
 keywords = ["microscopy", "image-analysis", "colony-counting", "bioimage", "plates"]
 classifiers = [
