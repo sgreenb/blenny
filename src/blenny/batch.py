@@ -11,18 +11,19 @@ from pathlib import Path
 from typing import Any
 
 
-def write_batch_colonies_csv(path: Path, measurements: list[dict[str, Any]]) -> None:
-    """Write one row per measurement to ``path``.
+def batch_colonies_csv_text(measurements: list[dict[str, Any]]) -> str:
+    """Return one row per measurement as CSV text.
 
     Column order follows the per-image :class:`CSVExporter`'s preferred order;
     any remaining columns produced by modules are appended (first appearance
-    across rows) so no data is silently dropped. Writes a ``# no measurements``
+    across rows) so no data is silently dropped. Returns a ``# no measurements``
     placeholder when there is nothing to write, so batch consumers always find
     the file.
     """
+    import io
+
     if not measurements:
-        path.write_text("# no measurements\n", encoding="utf-8")
-        return
+        return "# no measurements\n"
 
     preferred_order = [
         "plate_label",
@@ -57,7 +58,17 @@ def write_batch_colonies_csv(path: Path, measurements: list[dict[str, Any]]) -> 
                 fieldnames.append(key)
                 seen.add(key)
 
-    with path.open("w", newline="", encoding="utf-8") as fh:
-        writer = csv.DictWriter(fh, fieldnames=fieldnames, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(measurements)
+    fh = io.StringIO()
+    writer = csv.DictWriter(fh, fieldnames=fieldnames, extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(measurements)
+    return fh.getvalue()
+
+
+def write_batch_colonies_csv(path: Path, measurements: list[dict[str, Any]]) -> None:
+    """Write one row per measurement to ``path`` (see :func:`batch_colonies_csv_text`).
+
+    Bytes are written directly so the CSV's native ``\r\n`` line endings are
+    preserved on Windows (``write_text`` would translate them to ``\r\r\n``).
+    """
+    path.write_bytes(batch_colonies_csv_text(measurements).encode("utf-8"))
