@@ -112,10 +112,7 @@ class Pipeline:
 
             t0 = time.perf_counter()
             ctx = step.run(
-                ctx, 
-                progress_callback=progress_callback,
-                output_dir=output_dir,
-                debug_dir=debug_dir
+                ctx, progress_callback=progress_callback, output_dir=output_dir, debug_dir=debug_dir
             )
             duration = time.perf_counter() - t0
             ctx.provenance.append(

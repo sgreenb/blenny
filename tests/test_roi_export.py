@@ -42,9 +42,7 @@ def test_run_roi_analysis_writes_all_outputs(tmp_path: Path) -> None:
     _make_test_image(img)
     out = tmp_path / "results"
 
-    rows, paths = run_roi_analysis(
-        img, _two_rois(), out, scale=(1.0, 1.0), stem="plate"
-    )
+    rows, paths = run_roi_analysis(img, _two_rois(), out, scale=(1.0, 1.0), stem="plate")
 
     assert len(rows) == 2
     assert rows[0]["name"] == "red_zone"
@@ -60,7 +58,10 @@ def test_run_roi_analysis_writes_all_outputs(tmp_path: Path) -> None:
 
     # CSV summary
     csv_text = paths["csv"].read_text()
-    assert csv_text.splitlines()[0] == "name,area_px,area_pct,n_pixels,mean_r,mean_g,mean_b,mean_h,mean_s,mean_v"
+    assert (
+        csv_text.splitlines()[0]
+        == "name,area_px,area_pct,n_pixels,mean_r,mean_g,mean_b,mean_h,mean_s,mean_v"
+    )
     assert "red_zone" in csv_text and "green_zone" in csv_text
 
     # Granular pixel data
@@ -121,25 +122,51 @@ def test_canvas_js_has_inlined_palette() -> None:
 def test_writers_standalone(tmp_path: Path) -> None:
     out = tmp_path / "w"
     csv_path = out / "a.csv"
-    write_rois_csv(csv_path, [{"name": "r1", "area_px": 10, "area_pct": 1.0, "n_pixels": 10,
-                               "mean_r": 1.0, "mean_g": 2.0, "mean_b": 3.0,
-                               "mean_h": 0.1, "mean_s": 0.2, "mean_v": 0.3}])
+    write_rois_csv(
+        csv_path,
+        [
+            {
+                "name": "r1",
+                "area_px": 10,
+                "area_pct": 1.0,
+                "n_pixels": 10,
+                "mean_r": 1.0,
+                "mean_g": 2.0,
+                "mean_b": 3.0,
+                "mean_h": 0.1,
+                "mean_s": 0.2,
+                "mean_v": 0.3,
+            }
+        ],
+    )
     assert csv_path.exists()
 
     npz_path = out / "p.npz"
-    write_pixels_npz(npz_path, {"roi_1_x": {"rgb": np.zeros((3, 3), dtype=np.uint8),
-                                            "hsv": np.zeros((3, 3))}})
+    write_pixels_npz(
+        npz_path, {"roi_1_x": {"rgb": np.zeros((3, 3), dtype=np.uint8), "hsv": np.zeros((3, 3))}}
+    )
     d = np.load(npz_path)
     assert "roi_1_x/rgb" in d and "roi_keys" in d
 
     json_path = out / "g.json"
-    write_geometry_json(json_path, [{"id": 1, "name": "x", "color": "#fff",
-                                     "points": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]}])
+    write_geometry_json(
+        json_path,
+        [{"id": 1, "name": "x", "color": "#fff", "points": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]}],
+    )
     assert json_path.exists()
 
     overlay_path = out / "o.png"
-    write_overlay(overlay_path, np.zeros((32, 32, 3), dtype=np.uint8),
-                  [{"id": 1, "name": "x", "color": "#e6194b",
-                    "points": [[2.0, 2.0], [20.0, 2.0], [20.0, 20.0], [2.0, 20.0]]}])
+    write_overlay(
+        overlay_path,
+        np.zeros((32, 32, 3), dtype=np.uint8),
+        [
+            {
+                "id": 1,
+                "name": "x",
+                "color": "#e6194b",
+                "points": [[2.0, 2.0], [20.0, 2.0], [20.0, 20.0], [2.0, 20.0]],
+            }
+        ],
+    )
     with Image.open(overlay_path) as im:
         assert im.size == (32, 32)

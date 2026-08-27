@@ -44,8 +44,8 @@ def kasa_fit(points):
         if R2 <= 0:
             return None
         R = np.sqrt(R2)
-        dist_sq = (x - xc)**2 + (y - yc)**2
-        std_dev = np.sqrt(np.mean((dist_sq - R**2)**2)) / (2 * R)
+        dist_sq = (x - xc) ** 2 + (y - yc) ** 2
+        std_dev = np.sqrt(np.mean((dist_sq - R**2) ** 2)) / (2 * R)
         return xc, yc, R, std_dev, n
     except np.linalg.LinAlgError:
         return None
@@ -63,7 +63,7 @@ def refine_circle(xc, yc, r, edges, angles, delta_r=12, angle_threshold=8):
     edge_y, edge_x = np.where(roi_edges > 0)
     edge_y, edge_x = edge_y + y_min, edge_x + x_min
 
-    dist = np.sqrt((edge_x - xc)**2 + (edge_y - yc)**2)
+    dist = np.sqrt((edge_x - xc) ** 2 + (edge_y - yc) ** 2)
     in_annulus = (dist >= r - delta_r) & (dist <= r + delta_r)
     edge_x, edge_y = edge_x[in_annulus], edge_y[in_annulus]
 
@@ -83,11 +83,10 @@ def refine_circle(xc, yc, r, edges, angles, delta_r=12, angle_threshold=8):
     return kasa_fit(final_points)
 
 
-def facile_detection(image, petri_only=True, min_points=None, max_error=None, suppression_dist_frac=0.45):
-    if image.ndim == 3:
-        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-    else:
-        gray = image
+def facile_detection(
+    image, petri_only=True, min_points=None, max_error=None, suppression_dist_frac=0.45
+):
+    gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY) if image.ndim == 3 else image
     blurred = cv2.GaussianBlur(gray, (7, 7), 0)
     edges = cv2.Canny(blurred, 40, 110)
 
@@ -107,9 +106,7 @@ def facile_detection(image, petri_only=True, min_points=None, max_error=None, su
 
     for mask in masks:
         seg_edges = (mask & (edges > 0)).astype(np.uint8) * 255
-        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
-            seg_edges, connectivity=8
-        )
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(seg_edges, connectivity=8)
 
         for i in range(1, num_labels):
             x, y, w, h, area = stats[i]
@@ -156,8 +153,8 @@ def facile_detection(image, petri_only=True, min_points=None, max_error=None, su
 
     for xc, yc, r, std, n in refined_circles:
         is_duplicate = False
-        for i, (fxc, fyc, fr, fstd, fn) in enumerate(final_circles):
-            dist = np.sqrt((xc - fxc)**2 + (yc - fyc)**2)
+        for i, (fxc, fyc, fr, _fstd, fn) in enumerate(final_circles):
+            dist = np.sqrt((xc - fxc) ** 2 + (yc - fyc) ** 2)
             # If centers are within suppression_dist_frac of the radius, they are the same plate.
             if dist < fr * suppression_dist_frac:
                 is_duplicate = True
@@ -203,14 +200,14 @@ class FacileDetector(Preprocessor):
         If None (default), automatically switch based on number found."""
 
         size_consistency_limit: float | None = 0.15
-        """Max allowed deviation from the median radius (0.15 = 15%). 
+        """Max allowed deviation from the median radius (0.15 = 15%).
         Only applied when multiple plates are found. Set to None to disable."""
 
         suppression_dist_frac: float = 0.45
         """Fraction of radius used as the threshold for center-to-center suppression."""
 
         min_points: int | None = None
-        """Minimum number of edge points required to accept a circle. 
+        """Minimum number of edge points required to accept a circle.
         If None, automatically scaled based on radius."""
 
         max_error: float | None = None
@@ -302,7 +299,7 @@ class FacileDetector(Preprocessor):
             radii = np.array([c[2] for c in circles])
             median_r = np.median(radii)
             limit = self.params.size_consistency_limit
-            
+
             filtered_circles = []
             for c in circles:
                 deviation = abs(c[2] - median_r) / median_r
@@ -312,7 +309,7 @@ class FacileDetector(Preprocessor):
                     data.add_flag(
                         "plate_size_outlier",
                         f"A circle with radius {c[2]:.1f} was rejected as an outlier (median={median_r:.1f}).",
-                        severity="info"
+                        severity="info",
                     )
             circles = filtered_circles
 
@@ -330,15 +327,21 @@ class FacileDetector(Preprocessor):
             rois = []
             # Sort circles by position (top-to-bottom, then left-to-right) for consistent naming
             circles.sort(key=lambda c: (c[1], c[0]))
-            
-            for i, (xc, yc, r_raw, std, n) in enumerate(circles):
+
+            for i, (xc, yc, r_raw, _std, _n) in enumerate(circles):
                 r_eff = max(1, round(r_raw * self.params.radius_scale))
                 r = max(r_raw, r_eff)
 
                 buffer = int(r * 0.05) + 20
                 h_img, w_img = image.shape[:2]
-                y0_crop, y1_crop = max(0, int(yc - r - buffer)), min(h_img, int(yc + r + buffer + 1))
-                x0_crop, x1_crop = max(0, int(xc - r - buffer)), min(w_img, int(xc + r + buffer + 1))
+                y0_crop, y1_crop = (
+                    max(0, int(yc - r - buffer)),
+                    min(h_img, int(yc + r + buffer + 1)),
+                )
+                x0_crop, x1_crop = (
+                    max(0, int(xc - r - buffer)),
+                    min(w_img, int(xc + r + buffer + 1)),
+                )
 
                 rois.append(
                     {

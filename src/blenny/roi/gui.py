@@ -9,6 +9,7 @@ GUI. ``gui/app.py`` only calls :func:`render_roi_sidebar` and
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import io
 import json
@@ -21,9 +22,9 @@ from PIL import Image, ImageOps
 
 from blenny.roi import analyze_rois, run_roi_analysis, write_analysis_outputs
 from blenny.roi.analyze import (
+    PARAM_LABELS,
     PARAM_RANGES,
     PARAMS,
-    PARAM_LABELS,
     build_histogram_figure,
     count_in_range,
     pooled_counts,
@@ -107,10 +108,8 @@ def render_roi_sidebar() -> None:
             # accumulate every image the user has ever uploaded.
             prev = st.session_state.get("roi_uploaded_path")
             if prev:
-                try:
+                with contextlib.suppress(OSError):
                     Path(prev).unlink(missing_ok=True)
-                except OSError:
-                    pass
             target.write_bytes(uploaded.getvalue())
             st.session_state["roi_uploaded_name"] = uploaded.name
             st.session_state["roi_uploaded_path"] = str(target.resolve())
@@ -121,10 +120,8 @@ def render_roi_sidebar() -> None:
         # derived from it, mirroring the colony counter's input-change reset.
         prev = st.session_state.get("roi_uploaded_path")
         if prev:
-            try:
+            with contextlib.suppress(OSError):
                 Path(prev).unlink(missing_ok=True)
-            except OSError:
-                pass
         for key in [
             "roi_image_path",
             "roi_uploaded_name",
@@ -250,9 +247,7 @@ def render_roi_main() -> None:
                 st.session_state["roi_template_map_error"] = str(exc)
             else:
                 if not mapped:
-                    st.session_state["roi_template_map_error"] = (
-                        "the template contains no ROIs"
-                    )
+                    st.session_state["roi_template_map_error"] = "the template contains no ROIs"
                 else:
                     st.session_state["roi_template_map_error"] = None
                     st.session_state["roi_rois"] = [
@@ -260,9 +255,7 @@ def render_roi_main() -> None:
                         for i, r in enumerate(mapped)
                     ]
                     st.session_state["roi_draft"] = []
-                    st.session_state["roi_next_id"] = (
-                        max((r["id"] for r in mapped), default=0) + 1
-                    )
+                    st.session_state["roi_next_id"] = max((r["id"] for r in mapped), default=0) + 1
                     # Any previous analysis is stale — mirror the image-switch reset.
                     for key in [
                         "roi_analysis",
@@ -273,9 +266,7 @@ def render_roi_main() -> None:
                     ]:
                         st.session_state.pop(key, None)
                     # Python-side change: bump revision so the canvas re-inits.
-                    st.session_state["roi_revision"] = (
-                        st.session_state.get("roi_revision", 0) + 1
-                    )
+                    st.session_state["roi_revision"] = st.session_state.get("roi_revision", 0) + 1
     if st.session_state.get("roi_template_map_error"):
         st.error(
             "ROI template not applied — "
@@ -546,9 +537,8 @@ def _render_dashboard(img_path: Path, rois: list[dict], analysis: dict, rows: li
     # The axes position depends on the data + labels, not the thresholds, so
     # the span measured from the previous rerun's figure is reused; on first
     # render it is measured from a throwaway figure.
-    pos_key = (
-        f"roi_axpos|{analysis.get('fingerprint')}|{param}|{normalize}|"
-        + ",".join(str(_id) for _id in sel_ids)
+    pos_key = f"roi_axpos|{analysis.get('fingerprint')}|{param}|{normalize}|" + ",".join(
+        str(_id) for _id in sel_ids
     )
     pos = st.session_state.get(pos_key)
     if pos is None:

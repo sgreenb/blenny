@@ -1,50 +1,65 @@
-# Count and analyze colonies on a plate photo using trained YOLO ML model.
+# Fully Automatic Colony Counting Pipeline (Facile + YOLO)
 #
-# This pipeline uses a trained YOLO object detection model for robust
-# colony identification, followed by traditional CV for refinement.
-# It is typically faster and more accurate for complex plates than
-# the classical thresholding pipeline.
+# This pipeline automatically detects one or multiple plates. 
+# - If 1 plate is found: It analyzes it normally.
+# - If >1 plates are found: It splits them into ROIs for individual review.
 
 steps:
   - name: load_image
     params:
-      # Native resolution is used by default for maximum precision.
-      # Large scans may be slow; set to 2000-3000 to speed up if needed.
       max_dimension: null
 
-  - name: detect_plate
+  - name: detect_facile
     params:
-      # YOLO is robust enough to handle the plate rim, so we can use
-      # a radius scale of 1.0.
+      # 'null' enables automatic single/multi plate detection.
+      multi_plate: null 
       radius_scale: 1.0
       crop: false
 
-  - name: apply_exclusion_mask
+  - name: sub_pipeline
     params:
-      mask_path: null
+      max_subplate_dimension: 3200
+      steps:
+        - name: apply_exclusion_mask
+          params:
+            mask_path: null
 
-  - name: yolo_detector
-    params:
-      model_path: "models/colony_model.pt"
-      conf_threshold: 0.15
-      iou_threshold: 0.8
-      imgsz: 3200
-      max_det: 3000
-      refine_mask: true
-      output_key: "objects"
+        - name: yolo_detector
+          params:
+            model_path: "models/colony_model.pt"
+            conf_threshold: 0.15
+            iou_threshold: 0.8
+            imgsz: 3200
+            max_det: 3000
+            refine_mask: true
+            output_key: "objects"
 
-  - name: add_manual_colonies
-    params:
-      coordinates: []
+        - name: add_manual_colonies
+          params:
+            coordinates: []
 
-  - name: measure_colonies
-    params:
-      mask_key: "objects"
-      roi_mask_key: "plate"
+        - name: measure_colonies
+          params:
+            mask_key: "objects"
+            roi_mask_key: "plate"
 
-  - name: filter_by_id
-    params:
-      exclude_ids: []
+        - name: filter_colonies
+          # Post-YOLO size/shape filter (GUI sliders 'Min Size (ppm)' /
+          # 'Min Circularity'). Defaults disable filtering; the GUI/CLI set
+          # min_area_ppm / min_circularity.
+
+        - name: classify_by_interior
+          # Reject edge-zone detections that don't match the interior colony
+          # profile (rim arcs, cracks, pen marks). Tune with the GUI sliders
+          # 'Interior Radius' and 'Max Eccentricity'.
+
+        - name: filter_by_id
+          params:
+            exclude_ids: []
+
+        - name: export_annotated
+          params:
+            output_path: "{output_dir}/{stem}/{stem}_{plate_label}_annotated.png"
 
   - name: export_csv
     params:
@@ -52,8 +67,4 @@ steps:
 
   - name: export_summary
     params:
-      output_path: "{output_dir}/{stem}/{stem}_run_summary.txt"
-
-  - name: export_annotated
-    params:
-      output_path: "{output_dir}/{stem}/annotated.png"
+      output_path: "{output_dir}/{stem}/log.txt"

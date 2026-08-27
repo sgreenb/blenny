@@ -1,51 +1,63 @@
-[tool.poetry]
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
 name = "blenny"
-version = "1.0.0"
+version = "1.1.0"
 description = "A free, open-source toolkit for analyzing colonies on petri plates."
-authors = ["The Blenny contributors"]
-license = "GPL-3.0-or-later"
 readme = "README.md"
-homepage = "https://github.com/sgreenb/blenny"
-repository = "https://github.com/sgreenb/blenny"
+requires-python = ">=3.11,<3.15"
+license = "GPL-3.0-or-later"
+authors = [{ name = "The Blenny contributors" }]
 keywords = ["microscopy", "image-analysis", "colony-counting", "bioimage", "plates"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: Image Processing",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
-packages = [{include = "blenny", from = "src"}]
+dependencies = [
+    "numpy>=1.26",
+    "pydantic>=2.5",
+    "pyyaml>=6.0",
+    "pillow>=10",
+    "scikit-image>=0.22",
+    "scipy>=1.10",
+    "typer>=0.12",
+    "streamlit>=1.35",
+    "streamlit-drawable-canvas>=0.9",
+    "pandas>=2.0",
+    "ultralytics>=8.3",
+    "torch>=2.2",
+    "torchvision>=0.17",
+    "opencv-python>=4.8",
+]
 
-[tool.poetry.dependencies]
-python = ">=3.11,<3.14"
-numpy = ">=1.24,<2.0"
-pydantic = ">=2.5"
-pyyaml = ">=6.0"
-pillow = ">=10"
-scikit-image = ">=0.22"
-scipy = ">=1.10"
-typer = ">=0.12"
-streamlit = ">=1.35"
-streamlit-drawable-canvas = ">=0.9"
-pandas = ">=2.0"
-ultralytics = ">=8.3"
-torch = ">=2.0,<2.3"
-torchvision = ">=0.15,<0.18"
-opencv-python = ">=4.8,<4.12"
+[project.optional-dependencies]
+dev = [
+    "pytest>=7",
+    "pytest-cov>=4",
+    "ruff>=0.5",
+    "mypy>=1.8",
+    "pre-commit>=3.6",
+]
 
-[tool.poetry.group.dev.dependencies]
-pytest = ">=7"
-pytest-cov = ">=4"
-ruff = ">=0.5"
-mypy = ">=1.8"
-pre-commit = ">=3.6"
+[project.urls]
+Homepage = "https://github.com/sgreenb/blenny"
+Repository = "https://github.com/sgreenb/blenny"
 
-[tool.poetry.scripts]
+[project.scripts]
 blenny = "blenny.cli.main:main"
 
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+# The YAML pipeline templates are read via importlib.resources at runtime
+# (``blenny init``, ``blenny.templates.load_text``), so they must ship in the
+# wheel/sdist even though they are not Python modules.
+blenny = ["templates/*.yaml"]
 
 [tool.ruff]
 line-length = 100
@@ -55,6 +67,11 @@ src = ["src", "tests"]
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
 ignore = ["E501"]  # line length handled by formatter
+
+[tool.ruff.lint.per-file-ignores]
+# Streamlit callback idiom (compact `if x: y` one-liners) and the deliberate
+# runtime monkeypatch imports (drawable-canvas compatibility) in the GUI.
+"gui/app.py" = ["E402", "E701", "E702"]
 
 [tool.ruff.format]
 quote-style = "double"

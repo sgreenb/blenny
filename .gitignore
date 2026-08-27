@@ -51,9 +51,6 @@ sandbox/
 ml_training/
 runs/
 yolov8n.pt
-pipeline_classic.yaml
-pipeline_multi.yaml
-pipeline_yolo.yaml
 prepare_yolo_data.py
 train_yolo.py
 train_colony_yolo.ipynb
@@ -63,3 +60,4 @@ train_colony_yolo.ipynb
 
 # Local planning notes
 TODO.md
+BUGS.md

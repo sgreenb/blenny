@@ -265,8 +265,7 @@ def run(
         raw_steps, "yolo_detector", "conf_threshold", confidence
     ):
         typer.echo(
-            "Warning: no 'yolo_detector' step found in pipeline; "
-            "--confidence had no effect.",
+            "Warning: no 'yolo_detector' step found in pipeline; --confidence had no effect.",
             err=True,
         )
 
@@ -414,9 +413,15 @@ def gui() -> None:
 
     typer.echo(f"Launching Blenny GUI from {app_path}...")
     try:
-        subprocess.run([sys.executable, "-m", "streamlit", "run", str(app_path)], check=True)
+        # Don't use check=True: streamlit exits non-zero on an ordinary Ctrl-C
+        # shutdown, which would surface as a scary "Error launching GUI"
+        # traceback. Mirror the server's exit code instead.
+        proc = subprocess.run([sys.executable, "-m", "streamlit", "run", str(app_path)])
+        raise typer.Exit(code=proc.returncode)
     except KeyboardInterrupt:
         pass
+    except typer.Exit:
+        raise
     except Exception as e:
         typer.echo(f"Error launching GUI: {e}", err=True)
         raise typer.Exit(code=1) from e
@@ -495,16 +500,19 @@ def init(
             typer.echo(name)
         return
 
-    # Default behavior: Write core templates to their standard filenames
+    # Default behavior: Write core templates to their standard filenames.
+    # Use newline="\n" so the generated files are byte-identical on every
+    # platform (Path.write_text otherwise converts to CRLF on Windows, and
+    # the shipped pipelines in the repo are committed with LF endings).
     if template is None and out is None:
         try:
             classic_text = templates.load_text("count-colonies")
-            yolo_text = templates.load_text("count-colonies-yolo-facile")
-            multi_text = templates.load_text("count-colonies-yolo-facile-grid")
+            yolo_text = templates.load_text("count-colonies-yolo")
+            multi_text = templates.load_text("count-colonies-multi")
 
-            Path("pipeline_classic.yaml").write_text(classic_text, encoding="utf-8")
-            Path("pipeline_yolo.yaml").write_text(yolo_text, encoding="utf-8")
-            Path("pipeline_multi.yaml").write_text(multi_text, encoding="utf-8")
+            Path("pipeline_classic.yaml").write_text(classic_text, encoding="utf-8", newline="\n")
+            Path("pipeline_yolo.yaml").write_text(yolo_text, encoding="utf-8", newline="\n")
+            Path("pipeline_multi.yaml").write_text(multi_text, encoding="utf-8", newline="\n")
 
             typer.echo("Wrote Classic CV template to pipeline_classic.yaml")
             typer.echo("Wrote YOLO ML (Auto) template to pipeline_yolo.yaml")
@@ -525,7 +533,7 @@ def init(
         raise typer.Exit(code=1) from None
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(text, encoding="utf-8")
+    out_path.write_text(text, encoding="utf-8", newline="\n")
     typer.echo(f"Wrote {template_name} template to {out_path}")
 
 
@@ -655,7 +663,6 @@ def _to_jsonable(obj: Any) -> Any:
     return obj
 
 
-
 def _write_batch_colonies_csv(path: Path, measurements: list[dict[str, Any]]) -> None:
     """Thin wrapper kept for call-site compatibility; see :mod:`blenny.batch`."""
     from blenny.batch import write_batch_colonies_csv
@@ -698,7 +705,12 @@ def _write_summary_csv(
 
 def main() -> None:
     """Console-script entry point. ``pyproject.toml`` points ``blenny`` here."""
-    app()
+    # Click 8+ expands glob patterns in ``sys.argv`` on Windows before parsing
+    # (``windows_expand_args``), which turns the CLI's documented quoted-glob
+    # input (``-i "plates/*.jpg"``) into multiple positional arguments and
+    # breaks batch runs there. ``_expand_input`` already expands globs itself,
+    # so disable Click's pre-expansion.
+    app(windows_expand_args=False)
 
 
 if __name__ == "__main__":

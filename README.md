@@ -21,52 +21,54 @@ Blenny combines modern deep learning (YOLO) with classical computer vision to pr
 ## Quick Start
 
 ### 1. Installation
-Blenny requires **Python 3.11, 3.12, or 3.13** Python 3.14 may or may not work, depending on your platform.
+Blenny supports **Python 3.11, 3.12, 3.13, and 3.14**.
 
-#### Recommended: Installation with Poetry
-Poetry ensures all dependencies (including specific versions of Torch and NumPy) are installed correctly without conflicts.
+#### Recommended: Install with pip
+```bash
+git clone https://github.com/sgreenb/blenny.git
+cd blenny
 
-1. **Install Poetry** (if you don't have it): [Follow instructions here](https://python-poetry.org/docs/#installation).
-2. **Setup the environment**:
-   ```bash
-   git clone https://github.com/sgreenb/blenny.git
-   cd blenny
-   # Download and force use of Python 3.12.10 if you have multiple versions
-   poetry python install 3.12.10
-   poetry env use 3.12.10 
-   poetry install
-   ```
-3. **Running from Poetry**
-   ```bash
-   poetry run python -m blenny [command]
-   ```
+# Create and activate a virtual environment (optional but recommended)
+python -m venv .venv
+source .venv/bin/activate        # macOS / Linux
+# .venv\Scripts\activate         # Windows
 
-#### Alternative: Basic Pip installation
-If you prefer standard pip, ensure you are using a compatible Python version:
-   ```bash
-python3.12 -m pip install -e .
+# Install Blenny and all dependencies (Torch, Ultralytics, Streamlit, ...)
+pip install -e .
+```
+To also install the development tools (pytest, ruff, mypy, pre-commit):
+```bash
+pip install -e ".[dev]"
 ```
 
 > **Windows note:** If `blenny` isn't recognized as a command after install, either activate your virtual environment first or use `python -m blenny` (e.g., `python -m blenny gui`).
 
 ### 2. Run your first analysis
-```bash
-# Generate default pipelines (pipeline_yolo.yaml, pipeline_classic.yaml, and pipeline_multi.yaml)
-blenny init
+Starter pipelines are **shipped in the repository** (`pipeline_yolo.yaml`, `pipeline_classic.yaml`, and `pipeline_multi.yaml`), so you can run analysis immediately after cloning:
 
+```bash
 # Run the YOLO ML pipeline (Recommended: Faster and more robust)
 blenny run pipeline_yolo.yaml --input plate.jpg --output results/
+
+# Or the classical CV pipeline (no ML model needed)
+blenny run pipeline_classic.yaml --input plate.jpg --output results/
+```
+
+If you ever modify or lose a pipeline file, `blenny init` regenerates all three starter pipelines from their built-in templates:
+```bash
+blenny init
 ```
 
 ### 3. View Results
 Results land in `results/<image_name>/`:
-- **`image_name_annotated.png`**: Original image with every detected colony outlined and numbered.
-- **`image_name_colonies.csv`**: One row per colony with rich quantification data, including:
+- **`annotated.png`**: Original image with every detected colony outlined and numbered (the YOLO pipelines write one annotated image per plate, e.g. `plate_1_annotated.png`).
+- **`colonies.csv`**: One row per colony with rich quantification data, including:
   - **Spatial**: ID, Centroid (X, Y), Area (px, ppm), Bounding Box.
   - **Morphology**: Circularity, Solidity, Eccentricity.
   - **Color**: Mean RGB and HSV values.
   - **Audit**: Artifact status, classification reason, and image source.
-- **`image_name_run_summary.txt`**: A human-readable report with count statistics and quality flags.
+- **`<image_name>_run_summary.txt`** (classic) or **`log.txt`** (YOLO pipelines): A human-readable report with count statistics and quality flags.
+- **`reproducible_config.yaml`**: The exact resolved pipeline config, so any analysis can be re-run verbatim.
 
 ---
 
@@ -101,20 +103,26 @@ blenny gui
   double-click it to launch the GUI in a Terminal window (close the window to
   stop the server). It uses `screenshots/blenny_icon.icns` as its icon. To put a
   copy on the Desktop, double-click `scripts/create_macos_shortcut.command` in
-  Finder (or run `cp -R "Blenny GUI.app" ~/Desktop`). The shared launcher
+  Finder — the script bakes in the repo's absolute path, so the Desktop copy
+  keeps working wherever the repo lives. The shared launcher
   `scripts/launch_gui.sh` also works from any terminal, and on Linux.
 
 The GUI provides point-and-click analysis with **Interactive Review**:
-- **Engine Selection**: Toggle between **YOLO ML** and **Classic CV**.
-- **Live Editing**: Check or uncheck the **"Artifact?"** box on any colony to flip its classification—the count updates instantly.
+- **Colony Counting mode**: analyze plates with automatic or manual detection
+  (Auto, Multi-Plate Grid, Manual Circle, or Manual Shape), then review each
+  plate in a table.
+- **ROI Mode**: draw free-form regions of interest on any image and get
+  per-region area and colour statistics (histograms, CSV export, and an
+  annotated overlay) — no pipeline needed.
+- **Live Editing**: check or uncheck the **"Artifact?"** box on any colony to flip its classification—the count updates instantly.
 - **Multi-Plate Support**: Automatically detect and analyze multiple plates in a single scan grid (e.g., 2x3).
-- **Manual Exclusion**: Paint directly on the image to exclude contaminants or writing.
+- **Manual Exclusion**: paint directly on the image to exclude contaminants or writing.
 
 ---
 
 ## Multi-Plate Analysis
 For high-throughput scanning of multiple plates at once:
-1. Use `pipeline_multi.yaml` (generated by `blenny init`).
+1. Use `pipeline_multi.yaml` (shipped in the repo, or regenerated by `blenny init`).
 2. Run via CLI:
    ```bash
    blenny run pipeline_multi.yaml -i scan.jpg -o out/ -v detect_multi_plate.grid=[2,3]
@@ -139,7 +147,7 @@ For high-throughput scanning of multiple plates at once:
 | Command | Description |
 | :--- | :--- |
 | `blenny run` | Processes images through a YAML pipeline. |
-| `blenny init` | Scaffolds starter `pipeline_yolo.yaml`, `pipeline_classic.yaml`, and `pipeline_multi.yaml`. |
+| `blenny init` | Regenerates the starter pipelines (`pipeline_yolo.yaml`, `pipeline_classic.yaml`, `pipeline_multi.yaml`) from their templates. |
 | `blenny modules` | Lists all available analysis modules and their parameters. |
 | `blenny gui` | Launches the visual interface. |
 
@@ -162,6 +170,7 @@ For high-throughput scanning of multiple plates at once:
 | `no_objects` | warning | Segmenter found nothing after filtering. |
 | `many_edge_touches` | warning | >10% of colonies touch the image border. |
 | `suspect_high_count` | warning | Count exceeds 600 or coverage >50%; likely false positives. |
+| `no_plates_found` | error | Multi-plate detector found zero plates in the scan. |
 | `multiplicity_estimated` | info | Some detections were tagged as merged/overlapping colonies. |
 | `artifacts_removed` | info | Edge detections rejected based on the interior profile. |
 

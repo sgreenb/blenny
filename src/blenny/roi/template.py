@@ -67,9 +67,7 @@ def parse_template(data: bytes | bytearray | str) -> list[dict[str, Any]]:
             raise ValueError(f"ROI #{i} is not a JSON object")
         pts = r.get("points")
         if not isinstance(pts, list) or len(pts) < 3:
-            raise ValueError(
-                f"ROI #{i} ({r.get('name', 'unnamed')}) needs at least 3 points"
-            )
+            raise ValueError(f"ROI #{i} ({r.get('name', 'unnamed')}) needs at least 3 points")
         clean_pts: list[list[float]] = []
         for j, p in enumerate(pts, start=1):
             if (
@@ -125,8 +123,7 @@ def map_to_display(
     for r in rois:
         for j, (x, y) in enumerate(r["points"], start=1):
             if not (
-                -tolerance <= x <= full_w + tolerance
-                and -tolerance <= y <= full_h + tolerance
+                -tolerance <= x <= full_w + tolerance and -tolerance <= y <= full_h + tolerance
             ):
                 violations.append(
                     f"ROI '{r.get('name', 'unnamed')}' vertex {j} "
@@ -134,9 +131,14 @@ def map_to_display(
                     f"({full_w} x {full_h} px)"
                 )
     if violations:
-        shown = violations if len(violations) <= 5 else violations[:5] + [
-            f"... and {len(violations) - 5} more"
-        ]
+        shown = (
+            violations
+            if len(violations) <= 5
+            else [
+                *violations[:5],
+                f"... and {len(violations) - 5} more",
+            ]
+        )
         raise ValueError("; ".join(shown))
 
     out: list[dict[str, Any]] = []

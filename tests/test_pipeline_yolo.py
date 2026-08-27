@@ -38,7 +38,10 @@ def test_yolo_pipeline_integration(tmp_path: Path) -> None:
     mock_model = MagicMock()
     mock_results = MagicMock()
     # Two known boxes so the count and mask are deterministic.
-    mock_results.boxes = [_mock_box(np.array([110, 110, 120, 120])), _mock_box(np.array([130, 130, 140, 140]))]
+    mock_results.boxes = [
+        _mock_box(np.array([110, 110, 120, 120])),
+        _mock_box(np.array([130, 130, 140, 140])),
+    ]
     mock_model.predict.return_value = [mock_results]
 
     with patch("blenny.modules.yolo_detector.YOLO", return_value=mock_model):

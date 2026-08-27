@@ -218,6 +218,7 @@ def _parse_args() -> tuple[bool, Path, Path]:
         i += 1
     return force, data_dir, labels
 
+
 ISSUE_LABELS = {
     "has_pen_text": "Pen text on plate/lid",
     "has_shadow": "Shadow across plate",

@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-import numpy as np
-from blenny.pipeline import BlennyParams, Field, ImageData, Preprocessor, register
 from blenny.modules.detect_facile import facile_detection
+from blenny.pipeline import BlennyParams, Field, ImageData, Preprocessor, register
 
 
 @register("detect_multi_plate")
@@ -52,29 +51,31 @@ class MultiPlateDetector(Preprocessor):
                 x1 = min(w, (c + 1) * cell_w + padding_w)
 
                 cell_img = image[y0:y1, x0:x1]
-                
+
                 # Use the fast facile detection in each cell
                 # We expect exactly one plate per cell in this mode
                 circles = facile_detection(
-                    cell_img, 
+                    cell_img,
                     petri_only=True,
                     min_points=self.params.min_points,
-                    max_error=self.params.max_error
+                    max_error=self.params.max_error,
                 )
-                
+
                 label = self._get_label(r, c)
 
                 if circles:
                     # facile sorts by radius descending, take the largest one in the cell
-                    xc_c, yc_c, r_raw, std, n = circles[0]
-                    
-                    found_plates.append({
-                        "label": label,
-                        "cy_global": yc_c + y0,
-                        "cx_global": xc_c + x0,
-                        "radius": r_raw,
-                        "grid_pos": (r, c),
-                    })
+                    xc_c, yc_c, r_raw, _std, _n = circles[0]
+
+                    found_plates.append(
+                        {
+                            "label": label,
+                            "cy_global": yc_c + y0,
+                            "cx_global": xc_c + x0,
+                            "radius": r_raw,
+                            "grid_pos": (r, c),
+                        }
+                    )
                 else:
                     data.add_flag(
                         "plate_not_found",
@@ -83,7 +84,9 @@ class MultiPlateDetector(Preprocessor):
                     )
 
         if not found_plates:
-            data.add_flag("no_plates_found", "MultiPlateDetector found zero plates.", severity="error")
+            data.add_flag(
+                "no_plates_found", "MultiPlateDetector found zero plates.", severity="error"
+            )
             return image
 
         # 3. Construct final ROIs
@@ -100,13 +103,15 @@ class MultiPlateDetector(Preprocessor):
             y0_crop, y1_crop = max(0, int(cy - r - buffer)), min(h, int(cy + r + buffer + 1))
             x0_crop, x1_crop = max(0, int(cx - r - buffer)), min(w, int(cx + r + buffer + 1))
 
-            rois.append({
-                "label": p["label"],
-                "bbox": (int(y0_crop), int(x0_crop), int(y1_crop), int(x1_crop)),
-                "center_local": (int(cy - y0_crop), int(cx - x0_crop)),
-                "radius": int(r),
-                "radius_eff": int(r_eff),
-            })
+            rois.append(
+                {
+                    "label": p["label"],
+                    "bbox": (int(y0_crop), int(x0_crop), int(y1_crop), int(x1_crop)),
+                    "center_local": (int(cy - y0_crop), int(cx - x0_crop)),
+                    "radius": int(r),
+                    "radius_eff": int(r_eff),
+                }
+            )
 
         data.metadata["rois"] = rois
         data.metadata["multi_plate_mode"] = True

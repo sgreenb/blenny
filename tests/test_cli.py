@@ -245,9 +245,7 @@ def _write_nested_yolo_pipeline(path: Path) -> None:
         (["-v", "yolo_detector.conf_threshold=0.7"], 0.7),  # generic override
     ],
 )
-def test_nested_yolo_conf_is_overridable(
-    tmp_path: Path, args: list[str], expected: float
-) -> None:
+def test_nested_yolo_conf_is_overridable(tmp_path: Path, args: list[str], expected: float) -> None:
     """Both --confidence and -v reach a yolo_detector inside sub_pipeline."""
     img = _save_synthetic(tmp_path)
     pipe_yaml = tmp_path / "pipe.yaml"

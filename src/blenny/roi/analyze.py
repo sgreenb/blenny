@@ -64,9 +64,8 @@ def resolve_colors(colors: Sequence[str | None] | None, n: int) -> list[str]:
     """Return ``n`` display colours, substituting ``None`` with palette defaults."""
     if not colors:
         return [_DEFAULT_COLORS[i % len(_DEFAULT_COLORS)] for i in range(n)]
-    return [
-        c if c else _DEFAULT_COLORS[i % len(_DEFAULT_COLORS)] for i, c in enumerate(colors)
-    ]
+    return [c if c else _DEFAULT_COLORS[i % len(_DEFAULT_COLORS)] for i, c in enumerate(colors)]
+
 
 _EDGES: dict[str, np.ndarray] = {
     p: np.linspace(lo, hi, N_BINS + 1) for p, (lo, hi) in PARAM_RANGES.items()
