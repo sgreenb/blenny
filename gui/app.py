@@ -671,7 +671,6 @@ with st.sidebar:
     else:
         interior_radius, fallback_ecc = interior_radius_default, fallback_ecc_default
 
-    enable_debug = st.checkbox("Save debug images", value=False)
     generate_annotated = st.checkbox("Generate annotated images", value=True, key="gen_ann_check")
     enable_interactive = st.checkbox("Interactive Review", value=True)
 
@@ -902,11 +901,9 @@ if mode == "Colony Counting":
 
                             t_p_start = time.perf_counter()
                             res = substitute_paths(raw_steps, input_path=p, output_dir=output_dir)
-                            dbg_dir = Path(output_dir) / "debug" / p.stem if enable_debug else None
                             data = Pipeline.from_config(res).run(
                                 p,
                                 output_dir=output_dir,
-                                debug_dir=dbg_dir,
                                 progress_callback=gui_progress,
                             )
                             t_p_elapsed = time.perf_counter() - t_p_start
