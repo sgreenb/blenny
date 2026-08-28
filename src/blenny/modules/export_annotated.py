@@ -52,6 +52,10 @@ class AnnotatedImageExporter(Exporter):
         """Key in ``data.masks`` for the plate interior mask used to draw
         the boundary ring."""
 
+        draw_exclusion_boundary: bool = True
+        """If True, draw the manual exclusion mask's boundary in the artifact
+        (magenta) color, so excluded regions stay visible on the output."""
+
         draw_interior_boundary: bool = True
         """If True, draw the boundary between the 'safe' interior zone and
         the edge zone used by the interior classifier. Useful for tuning
@@ -195,6 +199,9 @@ class AnnotatedImageExporter(Exporter):
         if self.params.draw_plate_boundary:  # type: ignore[attr-defined]
             self._draw_plate_boundary(rgb, data, labels.shape)
 
+        if self.params.draw_exclusion_boundary:  # type: ignore[attr-defined]
+            self._draw_exclusion_boundary(rgb, data, labels.shape)
+
         if self.params.draw_interior_boundary:  # type: ignore[attr-defined]
             self._draw_interior_boundary(rgb, data)
 
@@ -232,6 +239,26 @@ class AnnotatedImageExporter(Exporter):
             return util.img_as_ubyte(np.clip(image, 0, 1))
         return image.astype(np.uint8, copy=True)
 
+    def _draw_exclusion_boundary(
+        self, rgb: np.ndarray, data: ImageData, target_shape: tuple[int, int]
+    ) -> None:
+        """Draw the manual exclusion mask's boundary in magenta (the same
+        colour as artifacts) so excluded regions stay visible on the output.
+
+        The mask is stashed by :class:`ExclusionMasker` under
+        ``data.masks["exclusion"]``; the carved plate mask alone would lose
+        the exclusion geometry.
+        """
+        exclusion = data.masks.get("exclusion")
+        if exclusion is None:
+            return
+        arr = np.asarray(exclusion, dtype=bool)
+        if arr.shape[:2] != target_shape:
+            return
+        boundary = segmentation.find_boundaries(arr, mode="outer")
+        color = np.array(self.params.artifact_outline_color, dtype=np.uint8)  # type: ignore[attr-defined]
+        rgb[boundary] = color
+
     def _draw_plate_boundary(
         self, rgb: np.ndarray, data: Any, target_shape: tuple[int, int]
     ) -> None:
@@ -252,7 +279,16 @@ class AnnotatedImageExporter(Exporter):
         rgb[boundary] = color
 
     def _draw_interior_boundary(self, rgb: np.ndarray, data: ImageData) -> None:
-        """Draw a circle indicating the interior vs edge zone."""
+        """Draw a circle indicating the interior vs edge zone.
+
+        Skipped for manual polygon plates: the circle is derived from the
+        polygon's centroid + equivalent radius (see ``force_plate``), which
+        is meaningless for a drawn shape and would look like a spurious
+        circle detection on the annotated output. Manual Polygon mode shows
+        only the polygon and exclusion-mask boundaries.
+        """
+        if data.metadata.get("plate_shape") == "manual_polygon":
+            return
         geom = data.metadata.get("interior_classifier_geometry")
         if geom is None:
             return

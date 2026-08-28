@@ -77,7 +77,7 @@ class Pipeline:
         *,
         output_dir: str | Path | None = None,
         debug_dir: str | Path | None = None,
-        progress_callback: Callable[[int, int, str], None] | None = None,
+        progress_callback: Callable[[int, int, str, int], None] | None = None,
     ) -> ImageData:
         """Run the pipeline. Accepts an `ImageData`, a source path/string, or nothing.
 
@@ -86,7 +86,9 @@ class Pipeline:
         after each step into that directory.
 
         The ``progress_callback`` (if provided) is called after each step with
-        ``(step_index, total_steps, step_name)``.
+        ``(step_index, total_steps, step_name, depth)``. ``depth`` counts how
+        many sub-pipeline levels the step is nested under (0 for top-level
+        steps) so UIs can indent nested progress.
         """
         ctx = self._coerce_input(data)
         if ctx.source and "stem" not in ctx.metadata:
@@ -108,7 +110,7 @@ class Pipeline:
         n_steps = len(self.steps)
         for i, step in enumerate(self.steps):
             if progress_callback:
-                progress_callback(i + 1, n_steps, step.name)
+                progress_callback(i + 1, n_steps, step.name, 0)
 
             t0 = time.perf_counter()
             ctx = step.run(

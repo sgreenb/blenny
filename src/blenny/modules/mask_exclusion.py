@@ -91,4 +91,9 @@ class ExclusionMasker(Preprocessor):
 
         data.masks[target_key] = target_mask & ~mask_array
 
+        # Keep the exclusion shape around (in the same frame as the target
+        # mask) so exporters can draw its boundary on annotated output -- the
+        # carved plate mask alone loses the exclusion geometry.
+        data.masks["exclusion"] = mask_array
+
         return image

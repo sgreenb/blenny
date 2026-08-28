@@ -356,3 +356,76 @@ def test_sub_pipeline_geometry_matches_local_center(tmp_path) -> None:  # type: 
         for m in sub.measurements:
             if abs(m["centroid_y"] - cy_l) < 3 and abs(m["centroid_x"] - cx_l) < 3:
                 assert m["zone"] == "interior"
+
+
+# ---------------------------------------------------------------------------
+# Manual plate modes
+# ---------------------------------------------------------------------------
+
+
+def _manual_data(shape: str) -> ImageData:
+    """ImageData tagged as a manual polygon/circle plate (see force_plate)."""
+    data = _data_with_geometry()
+    data.metadata["plate_shape"] = shape
+    return data
+
+
+def test_manual_polygon_skips_edge_artifact_testing() -> None:
+    """Manual Polygon plates are ground truth: edge-zone artifact testing is
+    disabled, so nothing is rejected and no interior/edge geometry is built
+    (the polygon's centroid + equivalent radius is not a circle)."""
+    data = _manual_data("manual_polygon")
+    # Rows that WOULD be edge-zone artifacts under a circular plate. Built
+    # fresh (do NOT reuse the shared _ARTIFACTS list: earlier tests mutate
+    # those dicts in place, and the manual-polygon branch preserves any
+    # pre-existing is_artifact marks).
+    rows = list(_INTERIOR) + [
+        _row(11 + i, 100 + 88 * math.sin(i), 100 + 88 * math.cos(i), area=15.0) for i in range(5)
+    ]
+    result = InteriorColonyClassifier().classify(rows, data)
+
+    assert all(not r["is_artifact"] for r in result)
+    assert all(r["zone"] == "interior" for r in result)
+    assert "interior_classifier_geometry" not in data.metadata
+    assert "artifacts_removed" not in [f.code for f in data.quality_flags]
+    assert "interior_classifier_skipped_manual_polygon" in [f.code for f in data.quality_flags]
+    # Counts still reflect every detection (nothing rejected).
+    assert data.metadata["colony_count"] == len(rows)
+    assert data.metadata["artifact_count"] == 0
+
+
+def test_manual_polygon_preserves_upstream_filter_marks() -> None:
+    """Artifact marks from an upstream step (e.g. filter_colonies' size /
+    circularity filter, which still applies in Manual Polygon mode) must
+    survive classify_by_interior."""
+    import copy
+
+    data = _manual_data("manual_polygon")
+    rows = list(_INTERIOR) + [copy.deepcopy(r) for r in _ARTIFACTS]
+    for r in rows[len(_INTERIOR) :]:
+        r["is_artifact"] = True
+        r["artifact_reason"] = "filter_colonies: area 15 px < min"
+    result = InteriorColonyClassifier().classify(rows, data)
+
+    kept = result[: len(_INTERIOR)]
+    filtered = result[len(_INTERIOR) :]
+    assert all(not r["is_artifact"] for r in kept)
+    assert all(r["is_artifact"] for r in filtered)
+    assert all("filter_colonies" in r["artifact_reason"] for r in filtered)
+    assert data.metadata["colony_count"] == len(_INTERIOR)
+    assert data.metadata["artifact_count"] == len(_ARTIFACTS)
+
+
+def test_manual_circle_still_uses_edge_artifact_testing() -> None:
+    """Manual Circle plates keep the circle-based interior/edge zoning: the
+    user's circle is a real circle, so the radial zones are meaningful."""
+    data = _manual_data("manual_circle")
+    rows = _INTERIOR + _ARTIFACTS
+    result = InteriorColonyClassifier().classify(rows, data)
+
+    interior_result = result[: len(_INTERIOR)]
+    artifact_result = result[len(_INTERIOR) :]
+    assert all(not r["is_artifact"] for r in interior_result)
+    assert all(r["is_artifact"] for r in artifact_result)
+    assert "interior_classifier_geometry" in data.metadata
+    assert "artifacts_removed" in [f.code for f in data.quality_flags]

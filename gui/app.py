@@ -125,6 +125,36 @@ def compact_control(label, key, min_val, max_val, default_val, step, help_text):
     return st.session_state[key]
 
 
+def _first_input_image_size(input_files, input_folder):
+    """Return (width, height) of the first input image without decoding
+    pixels (header + EXIF orientation only), or None when no image is
+    available yet. Used to auto-centre the Manual Circle preview and to cap
+    the centre coordinates at the image size."""
+    import io as _io
+
+    from blenny.modules.load_image import IMAGE_EXTENSIONS
+
+    try:
+        if input_files:
+            src: Path | _io.BytesIO = _io.BytesIO(input_files[0].getvalue())
+        elif input_folder and Path(input_folder).is_dir():
+            imgs = sorted(
+                f for f in Path(input_folder).iterdir() if f.suffix.lower() in IMAGE_EXTENSIONS
+            )
+            if not imgs:
+                return None
+            src = imgs[0]
+        else:
+            return None
+        with Image.open(src) as im:
+            w, h = im.size
+            if im.getexif().get(0x0112, 1) in (5, 6, 7, 8):
+                w, h = h, w  # rotated 90/270 degrees
+            return w, h
+    except Exception:
+        return None
+
+
 # Monkey-patch for streamlit-drawable-canvas compatibility
 import streamlit.elements.image as st_image
 
@@ -229,6 +259,27 @@ def generate_batch_colonies(batch_data, output_dir):
     if text is None:
         return
     (Path(output_dir) / "batch_colonies.csv").write_bytes(text.encode("utf-8"))
+
+
+def restamp_source(data, display_source):
+    """Point an analysed ImageData at the user-facing source path.
+
+    The pipeline runs against the scratch copy in GUI_TEMP_DIR (the loader
+    reads bytes from disk), so ``data.source`` ends up pointing at the temp
+    folder. That path is meaningless to the user, so re-stamp it everywhere
+    exporters look: ``data.source``, ``metadata["source_path"]``, every
+    measurement row's ``source`` column, and any multi-plate sub-results.
+    """
+    data.source = display_source
+    data.metadata["source_path"] = display_source
+    for row in data.measurements:
+        row["source"] = display_source
+    for sr in data.metadata.get("multi_plate_results", []):
+        label = sr.metadata.get("plate_label", "unknown")
+        sr.source = f"{display_source} [{label}]"
+        sr.metadata["source_path"] = display_source
+        for row in sr.measurements:
+            row["source"] = sr.source
 
 
 @st.dialog("Export Results", width="medium")
@@ -407,10 +458,21 @@ with st.sidebar:
         # Keep the keyed text input in sync: without this, its stale session
         # value re-syncs pipeline_path back to the old file on the same rerun.
         st.session_state["pipeline_path_input"] = st.session_state["pipeline_path"]
+        # The mode change resets the drawing canvas (new key), so drop any
+        # per-channel clear replay left over from a previous canvas.
+        st.session_state.pop("canvas_initial_drawing", None)
+        # Entering Manual Polygon starts on the plate-area tool (the natural
+        # first action for a hand-drawn plate); leaving it, drop the plate
+        # tool so a stale selection can't force a switch back or crash later
+        # (and the preview reverts to a plain image).
+        if mode == "Manual Polygon":
+            st.session_state["active_drawing_tool"] = "Plate Area"
+        elif st.session_state.get("active_drawing_tool") == "Plate Area":
+            st.session_state["active_drawing_tool"] = "View"
 
     plate_mode = st.radio(
         "Plate Detection Mode",
-        ["Auto", "Multi-Plate Grid", "Manual Circle", "Manual Shape"],
+        ["Auto", "Multi-Plate Grid", "Manual Circle", "Manual Polygon"],
         key="manual_plate_mode",
         on_change=on_mode_change,
     )
@@ -422,9 +484,11 @@ with st.sidebar:
         st.session_state["pipeline_path"] = suggested
 
     c_p1, c_p2 = st.columns([3, 1])
-    pipeline_path_ui = c_p1.text_input(
-        "Pipeline YAML Path", key="pipeline_path_input", value=st.session_state["pipeline_path"]
-    )
+    # Seed the keyed input once; on_mode_change / Browse / upload keep it in
+    # sync. Don't pass value= here: Streamlit warns when a keyed widget is
+    # created with a default value while its session value was set via API.
+    st.session_state.setdefault("pipeline_path_input", st.session_state["pipeline_path"])
+    pipeline_path_ui = c_p1.text_input("Pipeline YAML Path", key="pipeline_path_input")
     st.session_state["pipeline_path"] = pipeline_path_ui
 
     if c_p2.button("Browse", key="browse_pipeline", width="stretch"):
@@ -454,16 +518,28 @@ with st.sidebar:
     st.divider()
     st.header("3. Masking & Tools")
 
+    def on_drawing_tool_change():
+        # Selecting the plate-area tool implies a manual-polygon analysis:
+        # switch the mode to match. Runs as a widget callback, i.e. BEFORE any
+        # widget is instantiated, so writing manual_plate_mode is allowed here
+        # -- the script body cannot (the radio already exists by the time it
+        # runs, which used to raise StreamlitAPIException).
+        #
+        # Deliberately does NOT reset the canvas: the drawing tools share one
+        # canvas (see the main area), so the plate polygon persists when you
+        # switch to the exclusion tool and back -- matching main.
+        tool = st.session_state.get("active_drawing_tool")
+        if tool == "Plate Area" and st.session_state.get("manual_plate_mode") != "Manual Polygon":
+            st.session_state["manual_plate_mode"] = "Manual Polygon"
+
     selected_tool_label = st.radio(
         "Select Drawing Tool",
-        ["View", "Polygon Plate Area", "Exclusion Mask"],
-        index=0,
+        ["Plate Area", "Exclusion Mask", "View"],
+        index=0 if plate_mode == "Manual Polygon" else 2,
         horizontal=True,
         key="active_drawing_tool",
+        on_change=on_drawing_tool_change,
     )
-    if selected_tool_label == "Polygon Plate Area" and plate_mode != "Manual Shape":
-        st.session_state["manual_plate_mode"] = "Manual Shape"
-        st.rerun()
 
     radius_scale = (
         compact_control(
@@ -523,12 +599,32 @@ with st.sidebar:
 
     manual_cy, manual_cx, manual_r = None, None, None
     if plate_mode == "Manual Circle":
+        # Manual Circle defaults/maxima derive from the first input image:
+        # the circle starts centred at ~70% of the image, and the centre
+        # cannot leave the frame (x/y capped at the image size). Stale
+        # values from a previous image are dropped when the size changes so
+        # nothing sits outside the new bounds.
+        img_size = _first_input_image_size(input_files, input_folder)
+        if img_size is not None:
+            img_w, img_h = img_size
+            d_cx, d_cy, d_r = img_w // 2, img_h // 2, int(0.35 * min(img_w, img_h))
+            cx_max, cy_max, r_max = img_w, img_h, max(img_w, img_h)
+            if st.session_state.get("manual_circle_img_size") != img_size:
+                for _k in ("m_cy", "m_cx", "m_r"):
+                    for _sk in (_k, f"num_{_k}", f"slide_{_k}"):
+                        st.session_state.pop(_sk, None)
+                st.session_state["manual_circle_img_size"] = img_size
+        else:
+            d_cx, d_cy, d_r = 1000, 1000, 800
+            cx_max, cy_max, r_max = 4000, 4000, 2000
+            st.session_state["manual_circle_img_size"] = None
+
         manual_cy = compact_control(
             "Center Y",
             "m_cy",
             0,
-            4000,
-            1000,
+            cy_max,
+            d_cy,
             1,
             "Pixel Y (vertical) coordinate of the plate centre in the uploaded image, for Manual Circle mode.",
         )
@@ -536,8 +632,8 @@ with st.sidebar:
             "Center X",
             "m_cx",
             0,
-            4000,
-            1000,
+            cx_max,
+            d_cx,
             1,
             "Pixel X (horizontal) coordinate of the plate centre in the uploaded image, for Manual Circle mode.",
         )
@@ -545,24 +641,61 @@ with st.sidebar:
             "Radius",
             "m_r",
             0,
-            2000,
-            800,
+            r_max,
+            d_r,
             1,
             "Plate radius in pixels for Manual Circle mode. Pick a value just inside the plate rim.",
         )
 
+    def _clear_drawing_channel(target: str) -> None:
+        """Clear one aspect of the drawn plate without touching the other.
+
+        ``target`` is 'plate' or 'exclusion'. The derived mask file is
+        deleted and only that colour's strokes are removed from the canvas
+        layer (blue = plate area, magenta = exclusion); the surviving
+        strokes are replayed via ``initial_drawing`` on the fresh canvas.
+        """
+        mask_path = PLATE_MASK_PATH if target == "plate" else EXCLUSION_MASK_PATH
+        if mask_path.exists():
+            mask_path.unlink()
+
+        # The canvas keeps every stroke in a single layer; the widget's
+        # json_data lists the drawing objects, so we can filter by stroke
+        # colour to drop only the cleared aspect.
+        canvas_key = f"canvas_{st.session_state.get('canvas_version', 0)}"
+        prev = st.session_state.get(canvas_key)
+        raw = getattr(prev, "json_data", None) if prev is not None else None
+        if raw is None and isinstance(prev, dict):
+            raw = prev.get("raw") or prev.get("json_data")
+
+        def _color_str(o: dict) -> str:
+            return f"{o.get('stroke', '')} {o.get('fill', '')}".lower().replace(" ", "")
+
+        survivors = None
+        if isinstance(raw, dict) and raw.get("objects"):
+            kept = []
+            for o in raw["objects"]:
+                s = _color_str(o)
+                is_plate = "0000ff" in s or "0,0,255" in s
+                is_excl = "ff00ff" in s or "255,0,255" in s
+                if not (is_plate if target == "plate" else is_excl):
+                    kept.append(o)
+            # Always replay the survivors (even if nothing was dropped) so a
+            # clear of an already-empty aspect can't wipe the other one.
+            survivors = {**raw, "objects": kept}
+        if survivors is not None:
+            st.session_state["canvas_initial_drawing"] = survivors
+        else:
+            st.session_state.pop("canvas_initial_drawing", None)
+        st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
+        st.rerun()
+
     brush_size = st.slider("Brush Size", 1, 100, 20, key="mask_brush_size")
     c_cl1, c_cl2 = st.columns(2)
-    if c_cl1.button("Clear Plate", width="stretch"):
-        if PLATE_MASK_PATH.exists():
-            PLATE_MASK_PATH.unlink()
-        st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
-        st.rerun()
-    if c_cl2.button("Clear Mask", width="stretch"):
-        if EXCLUSION_MASK_PATH.exists():
-            EXCLUSION_MASK_PATH.unlink()
-        st.session_state["canvas_version"] = st.session_state.get("canvas_version", 0) + 1
-        st.rerun()
+    if c_cl1.button("Clear Plate Area", width="stretch"):
+        _clear_drawing_channel("plate")
+    if c_cl2.button("Clear Exclusion Mask", width="stretch"):
+        _clear_drawing_channel("exclusion")
 
     st.divider()
     st.header("4. Tuning")
@@ -649,7 +782,11 @@ with st.sidebar:
     else:
         min_area_ppm, min_circ = min_area_ppm_default, min_circ_default
 
-    if has_interior:
+    # Interior/edge artifact rejection is circle-based (radial zones from the
+    # plate centre), so it is meaningless for a drawn polygon: the whole
+    # polygon is ground truth. Hide the sliders in Manual Polygon mode instead
+    # of showing controls that silently do nothing.
+    if has_interior and plate_mode != "Manual Polygon":
         interior_radius = compact_control(
             "Interior Radius",
             "int_r",
@@ -667,6 +804,13 @@ with st.sidebar:
             fallback_ecc_default,
             0.05,
             "Elongation cap for the strict fallback filter used when too few interior colonies exist to build a reference. Detections more elongated than this are marked as artefacts; 0.55 is a typical value, 1.0 disables the filter.",
+        )
+    elif has_interior:
+        interior_radius, fallback_ecc = interior_radius_default, fallback_ecc_default
+        st.caption(
+            "Manual Polygon treats the whole drawn polygon as ground truth: "
+            "edge-zone artifact testing (Interior Radius / Max Eccentricity) "
+            "is disabled."
         )
     else:
         interior_radius, fallback_ecc = interior_radius_default, fallback_ecc_default
@@ -717,12 +861,17 @@ if input_names != st.session_state["last_input_paths"]:
 if mode == "Colony Counting":
     # --- Main Logic ---
     input_paths = []
+    display_sources = []
     if input_files:
         written = []
         for f in input_files:
             p = GUI_TEMP_DIR / f.name
             p.write_bytes(f.getvalue())
             input_paths.append(p)
+            # Uploads live only in the scratch dir; the original filename is
+            # the real user-facing source (the client-side path is never sent
+            # to the server, so that's the best identifier available).
+            display_sources.append(f.name)
             written.append(str(p))
         st.session_state["gui_written_uploads"] = written
     elif input_folder and Path(input_folder).is_dir():
@@ -731,12 +880,20 @@ if mode == "Colony Counting":
         input_paths = sorted(
             [f for f in Path(input_folder).iterdir() if f.suffix.lower() in IMAGE_EXTENSIONS]
         )
+        display_sources = [str(p) for p in input_paths]
 
     if input_paths:
         ref_img = Image.open(input_paths[0])
         ref_img = ImageOps.exif_transpose(ref_img).convert("RGB")
         scale = min(1200 / ref_img.width, 1000 / ref_img.height, 1.0)
         canvas_w, canvas_height = int(ref_img.width * scale), int(ref_img.height * scale)
+        # The st_canvas iframe is clipped to its column (overflow hidden in
+        # the app CSS), so an over-wide canvas used to cut off the right side
+        # of the image. Cap the display size to the left column's width in
+        # the 2-col layout below, preserving the aspect ratio (the mask is
+        # still resized back to full resolution afterwards).
+        fit = min(1.0, 560 / canvas_w) if canvas_w else 1.0
+        canvas_w, canvas_height = int(canvas_w * fit), int(canvas_height * fit)
         canvas_bg_img = ref_img.copy()
 
         # Drawing context overlays
@@ -750,37 +907,77 @@ if mode == "Colony Counting":
                 d.line([(0, r * ch), (w, r * ch)], fill=(0, 255, 255), width=2)
             for c in range(1, grid_cols):
                 d.line([(c * cw, 0), (c * cw, h)], fill=(0, 255, 255), width=2)
+        if plate_mode == "Manual Circle" and None not in (manual_cy, manual_cx, manual_r):
+            from PIL import ImageDraw
+
+            d = ImageDraw.Draw(canvas_bg_img)
+            cy, cx, r = int(manual_cy), int(manual_cx), int(manual_r)
+            # Live preview of the plate circle (full-resolution coordinates,
+            # drawn before the display resize) so the sidebar sliders give
+            # immediate visual feedback before the analysis runs.
+            d.ellipse([cx - r, cy - r, cx + r, cy + r], outline=(0, 255, 0), width=3)
+            d.ellipse([cx - 3, cy - 3, cx + 3, cy + 3], fill=(0, 255, 0))
 
         active_tool = {
-            "View": None,
-            "Polygon Plate Area": "Define Plate Area",
+            "Plate Area": "Define Plate Area",
             "Exclusion Mask": "Paint Exclusion Mask",
+            "View": None,
         }[selected_tool_label]
         canvas_bg = canvas_bg_img.resize((canvas_w, canvas_height), Image.Resampling.LANCZOS)
 
-        col1, col2 = st.columns(2)
+        col1, col2 = st.columns([3, 2])
         with col1:
             if active_tool:
                 mode = "polygon" if active_tool == "Define Plate Area" else "freedraw"
+                # The stroke colors double as mask keys: plate polygons are
+                # blue, exclusion strokes are magenta at ~50% opacity. The
+                # canvas keeps every stroke (so the polygon survives tool
+                # switches), and the two masks are separated by colour below --
+                # otherwise the polygon strokes would leak into the exclusion
+                # mask (leaving no analysis area at all).
+                if active_tool == "Paint Exclusion Mask":
+                    stroke_color, fill_color = (
+                        "rgba(255, 0, 255, 0.5)",
+                        "rgba(255, 0, 255, 0.5)",
+                    )
+                else:
+                    stroke_color, fill_color = "#0000FF", "rgba(0, 0, 255, 0.3)"
+                # Single, stable canvas (matching main): no per-tool keys, so
+                # strokes persist across tool switches and never flash/reload
+                # while drawing. The only exception is the per-channel clear
+                # (see _clear_drawing_channel), which replays the surviving
+                # strokes once onto a freshly keyed canvas.
                 canvas = st_canvas(
-                    fill_color="rgba(0,0,255,0.3)",
+                    fill_color=fill_color,
                     stroke_width=2 if mode == "polygon" else brush_size,
-                    stroke_color="#0000FF",
+                    stroke_color=stroke_color,
                     background_image=canvas_bg,
                     height=canvas_height,
                     width=canvas_w,
                     drawing_mode=mode,
                     key=f"canvas_{st.session_state.get('canvas_version', 0)}",
+                    # Replays strokes kept by a per-channel clear (see
+                    # _clear_drawing_channel); stable across reruns so the
+                    # canvas doesn't reload while drawing.
+                    initial_drawing=st.session_state.get("canvas_initial_drawing"),
                 )
                 if canvas.image_data is not None and np.any(canvas.image_data[:, :, 3] > 0):
-                    mask = Image.fromarray(
-                        (canvas.image_data[:, :, 3] > 0).astype(np.uint8) * 255
-                    ).resize(ref_img.size, Image.Resampling.NEAREST)
-                    mask.save(
-                        PLATE_MASK_PATH
-                        if active_tool == "Define Plate Area"
-                        else EXCLUSION_MASK_PATH
-                    )
+                    # image_data is the drawing layer only (transparent
+                    # background), so stroke colour cleanly identifies the tool.
+                    arr = canvas.image_data
+                    r = arr[:, :, 0].astype(int)
+                    b = arr[:, :, 2].astype(int)
+                    alpha = arr[:, :, 3] > 0
+                    blue = alpha & (b > 100) & (r <= 100)
+                    magenta = alpha & (b > 100) & (r > 100)
+                    if blue.any():
+                        Image.fromarray((blue * 255).astype(np.uint8)).resize(
+                            ref_img.size, Image.Resampling.NEAREST
+                        ).save(PLATE_MASK_PATH)
+                    if magenta.any():
+                        Image.fromarray((magenta * 255).astype(np.uint8)).resize(
+                            ref_img.size, Image.Resampling.NEAREST
+                        ).save(EXCLUSION_MASK_PATH)
             else:
                 st.image(canvas_bg_img, width="stretch")
 
@@ -859,23 +1056,47 @@ if mode == "Colony Counting":
                             else None
                         },
                     }
+                    # Manual modes don't detect anything: the user's circle or
+                    # polygon IS the plate, so swap the detector step out for
+                    # force_plate, which builds the plate mask + ROI metadata
+                    # from the drawn geometry (no circle finding). (elif: a
+                    # stale plate polygon from a previous Manual Polygon
+                    # session must not override the manual circle.)
+                    force_plate_params = None
+                    forced_label = None
                     if plate_mode == "Manual Circle":
-                        for k in ["detect_plate", "detect_facile"]:
-                            overrides[k].update(
-                                {"force_cy": manual_cy, "force_cx": manual_cx, "force_r": manual_r}
-                            )
-                    if plate_mode == "Manual Shape" and PLATE_MASK_PATH.exists():
-                        for k in ["detect_plate", "detect_facile"]:
-                            overrides[k].update({"force_mask_path": str(PLATE_MASK_PATH)})
+                        force_plate_params = {
+                            "radius_scale": radius_scale,
+                            "force_cy": manual_cy,
+                            "force_cx": manual_cx,
+                            "force_r": manual_r,
+                        }
+                        forced_label = "manual_circle"
+                    elif plate_mode == "Manual Polygon" and PLATE_MASK_PATH.exists():
+                        force_plate_params = {
+                            "radius_scale": radius_scale,
+                            "force_mask_path": str(PLATE_MASK_PATH),
+                        }
+                        forced_label = "manual_polygon"
                     if EXCLUSION_MASK_PATH.exists():
                         overrides["apply_exclusion_mask"] = {"mask_path": str(EXCLUSION_MASK_PATH)}
 
                     def apply_overrides(steps):
-                        for s in steps:
-                            if s["name"] in overrides:
-                                s.setdefault("params", {}).update(overrides[s["name"]])
-                            if s["name"] == "sub_pipeline":
-                                apply_overrides(s["params"].get("steps", []))
+                        for i, s in enumerate(steps):
+                            if force_plate_params is not None and s["name"] in (
+                                "detect_plate",
+                                "detect_facile",
+                            ):
+                                steps[i] = {
+                                    "name": "force_plate",
+                                    "params": dict(force_plate_params),
+                                    "instance_name": forced_label,
+                                }
+                            else:
+                                if s["name"] in overrides:
+                                    s.setdefault("params", {}).update(overrides[s["name"]])
+                                if s["name"] == "sub_pipeline":
+                                    apply_overrides(s["params"].get("steps", []))
 
                     apply_overrides(raw_steps)
 
@@ -885,17 +1106,23 @@ if mode == "Colony Counting":
                         st.session_state["gui_analysis_log"] = ""
                         log_container = st.empty()
 
-                        for i, p in enumerate(input_paths):
+                        for i, (p, display_source) in enumerate(
+                            zip(input_paths, display_sources, strict=True)
+                        ):
                             status.update(
                                 label=f"Analyzing {p.name} ({i + 1}/{len(input_paths)})..."
                             )
                             st.session_state["gui_analysis_log"] += f"### {p.name}\n"
                             log_container.markdown(st.session_state["gui_analysis_log"])
 
-                            def gui_progress(current, total, name):
-                                # Append to persistent session log
+                            def gui_progress(current, total, name, depth=0):
+                                # Append to persistent session log. Steps that
+                                # run inside a sub_pipeline report depth > 0;
+                                # indent them so the parent/child structure
+                                # reads clearly.
+                                indent = "&nbsp;&nbsp;" * depth
                                 st.session_state["gui_analysis_log"] += (
-                                    f"&nbsp;&nbsp;[{current}/{total}] `{name}`  \n"
+                                    f"&nbsp;&nbsp;{indent}[{current}/{total}] `{name}`  \n"
                                 )
                                 log_container.markdown(st.session_state["gui_analysis_log"])
 
@@ -906,6 +1133,10 @@ if mode == "Colony Counting":
                                 output_dir=output_dir,
                                 progress_callback=gui_progress,
                             )
+                            # The pipeline read from the scratch copy; re-stamp
+                            # the source so logs/CSVs report where the image
+                            # actually came from (see restamp_source).
+                            restamp_source(data, display_source)
                             t_p_elapsed = time.perf_counter() - t_p_start
                             st.session_state["gui_analysis_log"] += (
                                 f"&nbsp;&nbsp;**Plate analysis complete in {t_p_elapsed:.2f}s**  \n\n"

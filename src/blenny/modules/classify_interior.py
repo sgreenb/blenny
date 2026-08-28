@@ -167,6 +167,31 @@ class InteriorColonyClassifier(Classifier):
         if not rows:
             return rows
 
+        # Manual Polygon plates are ground truth: the user's polygon IS the
+        # analysis area, so there is no interior/edge split to test against
+        # (the centroid + equivalent radius used for zoning is meaningless
+        # for a drawn shape). Upstream artifact marks (e.g. the post-YOLO
+        # size/circularity filter, which still applies) are preserved; we
+        # only keep the CSV schema, counts and label numbering consistent.
+        if data.metadata.get("plate_shape") == "manual_polygon":
+            for row in rows:
+                row.setdefault("is_artifact", False)
+                row.setdefault("artifact_reason", "")
+                row.setdefault("normalized_dist", None)
+                row.setdefault("zone", "interior")
+            # No interior/edge geometry exists for a polygon; drop any stale
+            # value so nothing downstream visualises a circle for this plate.
+            data.metadata.pop("interior_classifier_geometry", None)
+            data.add_flag(
+                "interior_classifier_skipped_manual_polygon",
+                "InteriorColonyClassifier: plate is a manual polygon; "
+                "edge-zone artifact testing disabled (the whole polygon is "
+                "ground truth). Upstream size/circularity filters still apply.",
+                severity="info",
+            )
+            self.update_count(rows, data)
+            return self.reassign_ids(rows, data)
+
         # --- 1. Plate geometry in the current (possibly-cropped) frame ---
         cy, cx, radius = self._plate_geometry(data)
 

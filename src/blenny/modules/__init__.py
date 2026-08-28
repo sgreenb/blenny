@@ -19,6 +19,7 @@ from blenny.modules.export_csv import CSVExporter
 from blenny.modules.export_summary import SummaryExporter
 from blenny.modules.filter_by_id import IDFilter
 from blenny.modules.filter_colonies import ColonyFilter
+from blenny.modules.force_plate import ForcePlate
 from blenny.modules.identity import IdentityPreprocessor
 from blenny.modules.load_image import ImageFileLoader
 from blenny.modules.mask_exclusion import ExclusionMasker
@@ -34,6 +35,7 @@ __all__ = [
     "ColonyMeasurer",
     "ExclusionMasker",
     "FacileDetector",
+    "ForcePlate",
     "IDFilter",
     "IdentityPreprocessor",
     "IlluminationCorrection",

@@ -90,7 +90,7 @@ command line. `scripts/create_shortcut.ps1` and
 `scripts/create_macos_shortcut.command` put a copy on your Desktop.
 
 The GUI provides point-and-click analysis with **Interactive Review**:
-- **Colony Counting**: automatic (Auto, Multi-Plate Grid) or manual (Manual Circle, Manual Shape) plate detection, then review each plate in a table.
+- **Colony Counting**: automatic (Auto, Multi-Plate Grid) or manual (Manual Circle, Manual Polygon) plate detection, then review each plate in a table.
 - **ROI Mode**: draw regions of interest on any image for per-region area and colour statistics — no pipeline needed.
 - **Live Editing**: toggle the **"Artifact?"** box on any colony to flip its classification; the count updates instantly.
 - **Manual Exclusion**: paint directly on the image to exclude contaminants or writing.

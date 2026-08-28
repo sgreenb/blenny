@@ -36,6 +36,16 @@ class SubPipeline(Module):
             return data
 
         progress_callback = kwargs.get("progress_callback")
+        if progress_callback is not None:
+            parent_cb = progress_callback
+
+            def _sub_progress(current: int, total: int, name: str, depth: int = 0) -> None:
+                # Nested steps are reported one level deeper than the parent
+                # pipeline's, so UIs (e.g. the GUI status log) can indent
+                # sub-pipeline progress beneath the sub_pipeline step itself.
+                parent_cb(current, total, name, depth + 1)
+
+            progress_callback = _sub_progress
         all_measurements = []
         all_sub_results = []
 
@@ -81,14 +91,39 @@ class SubPipeline(Module):
                 sub_scale_y, sub_scale_x = new_h / lh, new_w / lw
 
             lh_final, lw_final = local_image.shape[:2]
-            local_mask = np.zeros((lh_final, lw_final), dtype=bool)
             cy_l, cx_l = (
                 int(roi["center_local"][0] * scale_y * sub_scale_y),
                 int(roi["center_local"][1] * scale_x * sub_scale_x),
             )
-            r_eff = int(roi["radius_eff"] * max(scale_x, scale_y) * max(sub_scale_x, sub_scale_y))
-            rr_m, cc_m = disk((cy_l, cx_l), r_eff, shape=(lh_final, lw_final))
-            local_mask[rr_m, cc_m] = True
+            # Prefer the parent's plate mask (cropped to this ROI's bbox) so
+            # manual polygon plates keep their drawn shape; fall back to a
+            # synthetic disk for ROIs without a matching parent mask (e.g.
+            # auto-detected multi-plate runs).
+            parent_plate = data.masks.get("plate")
+            if parent_plate is not None and parent_plate.shape[:2] == (h_work, w_work):
+                roi_plate = parent_plate[y0:y1, x0:x1]
+                if roi_plate.shape != (lh_final, lw_final):
+                    from skimage.transform import resize
+
+                    local_mask = (
+                        resize(
+                            roi_plate.astype(float),
+                            (lh_final, lw_final),
+                            order=0,
+                            preserve_range=True,
+                            anti_aliasing=False,
+                        )
+                        > 0.5
+                    )
+                else:
+                    local_mask = roi_plate.copy()
+            else:
+                local_mask = np.zeros((lh_final, lw_final), dtype=bool)
+                r_eff = int(
+                    roi["radius_eff"] * max(scale_x, scale_y) * max(sub_scale_x, sub_scale_y)
+                )
+                rr_m, cc_m = disk((cy_l, cx_l), r_eff, shape=(lh_final, lw_final))
+                local_mask[rr_m, cc_m] = True
 
             # Map sub-plate mask into global plate mask
             if (lh_final, lw_final) != (target_h, target_w):
@@ -124,7 +159,7 @@ class SubPipeline(Module):
                 roi["radius"] * max(scale_x, scale_y) * max(sub_scale_x, sub_scale_y)
             )
 
-            for key in ["output_dir", "stem", "original_size_wh"]:
+            for key in ["output_dir", "stem", "original_size_wh", "plate_shape"]:
                 if key in data.metadata:
                     sub_data.metadata[key] = data.metadata[key]
 
