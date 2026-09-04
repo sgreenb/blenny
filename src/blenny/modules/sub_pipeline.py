@@ -304,7 +304,7 @@ class SubPipeline(Module):
                 detector_params = step.params
                 break
 
-        if detector_params:
+        if detector_params and not data.metadata.get("grid_fit_failed"):
             rows_p, cols_p = detector_params.get("grid", [1, 1])
             labels_config = detector_params.get("labels")
             for r_p in range(rows_p):
@@ -314,8 +314,10 @@ class SubPipeline(Module):
                     else:
                         expected_labels.append(str(r_p * cols_p + c_p + 1))
         else:
-            # Plates were found by a non-grid detector (e.g. detect_facile):
-            # order by the ROI labels so per_plate_counts is still reported.
+            # Plates were found by a non-grid detector (e.g. detect_facile), or
+            # grid mapping failed and we fell back to auto-labeled ROIs (labels
+            # 1..N): order by the ROI labels so per_plate_counts is still
+            # reported rather than showing all "NA" against grid labels.
             expected_labels = [str(r["label"]) for r in rois]
 
         ordered_per_plate_counts = {}

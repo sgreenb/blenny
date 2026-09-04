@@ -7,6 +7,7 @@ from PIL import Image
 
 from blenny import ImageData
 from blenny.modules import FacileDetector
+from blenny.testing import make_synthetic_plate
 
 
 def _data(image_size: tuple[int, int] = (256, 256)) -> ImageData:
@@ -62,3 +63,15 @@ def test_forced_empty_mask_raises_flag(tmp_path) -> None:
     codes = [f.code for f in out.quality_flags]
     assert "plate_not_found" in codes
     assert out.masks["plate"].all()  # all-True fallback
+
+
+def test_auto_single_plate_label_uses_stem() -> None:
+    """An auto-mode single plate is labelled by its source stem (A2, C4, ...)
+    so a batch of single-plate images is distinguishable, not all "1"."""
+    plate = make_synthetic_plate(n_colonies=15, image_size=(400, 400), seed=3)
+    data = ImageData(source="/some/folder/A2.png", image=plate.image, original_image=plate.image)
+    out = FacileDetector().run(data)  # multi_plate=None (auto)
+    rois = out.metadata.get("rois")
+    assert rois is not None
+    assert len(rois) == 1
+    assert rois[0]["label"] == "A2"

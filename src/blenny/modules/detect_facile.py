@@ -6,6 +6,7 @@ without requiring a grid specification.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import cv2
@@ -179,6 +180,85 @@ def facile_detection(
     return final_circles
 
 
+def detect_plates(
+    image: Any,
+    *,
+    petri_only: bool = True,
+    min_points: int | None = None,
+    max_error: float | None = None,
+    suppression_dist_frac: float = 0.45,
+    size_consistency_limit: float | None = 0.15,
+    data: ImageData | None = None,
+) -> tuple[list[tuple[float, float, float, float, int]], int]:
+    """Shared plate detection used by auto (``FacileDetector``) and grid mode.
+
+    Runs the same facile detection both paths use (downsampled to <=1500px for
+    speed), then scales circles back to **full-resolution** coordinates and
+    applies, in full-res space, the petri-only size filter and the optional
+    size-consistency filter. This is what makes grid mode "run auto mode": it
+    locates the real plates the same way the working auto path does.
+
+    Returns ``(circles, n_raw)`` where ``circles`` is the filtered list of
+    ``(xc, yc, r, std_dev, n)`` tuples and ``n_raw`` is how many circles facile
+    produced before the petri/consistency filters (so callers can distinguish
+    "nothing found" from "everything filtered out").
+    """
+    h_orig, w_orig = image.shape[:2]
+
+    # facile works best on images around 1000-2000px.
+    det_dim = 1500
+    if max(h_orig, w_orig) > det_dim:
+        det_scale = det_dim / max(h_orig, w_orig)
+        new_h, new_w = int(h_orig * det_scale), int(w_orig * det_scale)
+        det_img = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+    else:
+        det_img = image
+        det_scale = 1.0
+
+    circles = facile_detection(
+        det_img,
+        # petri_only=False: the size filter must run in full-resolution space
+        # (see the block below) so the 150 px threshold is not resolution-dependent.
+        petri_only=False,
+        min_points=min_points,
+        max_error=max_error,
+        suppression_dist_frac=suppression_dist_frac,
+    )
+    if not circles:
+        return [], 0
+
+    # Scale circles back to original resolution.
+    circles = [
+        (xc / det_scale, yc / det_scale, r / det_scale, std, n) for xc, yc, r, std, n in circles
+    ]
+    n_raw = len(circles)
+
+    # Apply the "petri-only" size filter in FULL-RESOLUTION space.
+    if petri_only and circles:
+        max_r = max(c[2] for c in circles)
+        circles = [c for c in circles if c[2] > 150 or c[2] >= max_r * 0.5]
+
+    # Size-consistency filter when more than one plate is found.
+    if size_consistency_limit is not None and len(circles) > 1:
+        radii = np.array([c[2] for c in circles])
+        median_r = float(np.median(radii))
+        limit = size_consistency_limit
+        kept = []
+        for c in circles:
+            if abs(c[2] - median_r) / median_r <= limit:
+                kept.append(c)
+            elif data is not None:
+                data.add_flag(
+                    "plate_size_outlier",
+                    f"A circle with radius {c[2]:.1f} was rejected as an outlier "
+                    f"(median={median_r:.1f}).",
+                    severity="info",
+                )
+        circles = kept
+
+    return circles, n_raw
+
+
 @register("detect_facile")
 class FacileDetector(Preprocessor):
     class Params(BlennyParams):
@@ -243,89 +323,56 @@ class FacileDetector(Preprocessor):
                 image, data, h_orig, w_orig, force_mask_path, force_cy, force_cx, force_r
             )
 
-        # facile works best on images around 1000-2000px.
-        # If the image is very large, we downsample it for detection.
-        det_dim = 1500
-        if max(h_orig, w_orig) > det_dim:
-            det_scale = det_dim / max(h_orig, w_orig)
-            new_h, new_w = int(h_orig * det_scale), int(w_orig * det_scale)
-            # Use a fast resize for detection
-            det_img = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-        else:
-            det_img = image
-            det_scale = 1.0
-
-        circles = facile_detection(
-            det_img,
-            # petri_only=False: the size filter must run in full-resolution
-            # space (see below) -- inside facile_detection it would test the
-            # DOWNScaled radius, making the 150 px threshold resolution-dependent.
-            petri_only=False,
+        # Detect plates via the shared auto-detection path. ``n_raw`` lets us
+        # distinguish "no circles at all" from "all circles filtered out".
+        circles, n_raw = detect_plates(
+            image,
+            petri_only=self.params.petri_only,
             min_points=self.params.min_points,
             max_error=self.params.max_error,
             suppression_dist_frac=self.params.suppression_dist_frac,
+            size_consistency_limit=(
+                self.params.size_consistency_limit if self.params.multi_plate is not False else None
+            ),
+            data=data,
         )
 
         if not circles:
-            data.add_flag(
-                "plate_not_found",
-                "FacileDetector could not locate any circular plates.",
-                severity="warning",
-            )
             h, w = image.shape[:2]
             data.masks[self.params.mask_key] = np.ones((h, w), dtype=bool)
+            if n_raw == 0:
+                data.add_flag(
+                    "plate_not_found",
+                    "FacileDetector could not locate any circular plates.",
+                    severity="warning",
+                )
+            else:
+                data.add_flag(
+                    "plate_not_found",
+                    "FacileDetector found circles but every one was rejected as a "
+                    "size outlier; downstream steps will run on the full image.",
+                    severity="warning",
+                )
             return image
-
-        # Scale circles back to original resolution
-        rescaled_circles = []
-        for xc, yc, r, std, n in circles:
-            rescaled_circles.append((xc / det_scale, yc / det_scale, r / det_scale, std, n))
-        circles = rescaled_circles
-
-        # Apply the "petri-only" size filter in FULL-RESOLUTION space. Inside
-        # facile_detection the same rule (r > 150 or r >= 0.5 * max_r) would be
-        # evaluated against the downscaled radius, so a genuine small plate
-        # could be silently dropped on a large scan. Here radii are scaled back.
-        if self.params.petri_only and circles:
-            max_r = max(c[2] for c in circles)
-            circles = [c for c in circles if c[2] > 150 or c[2] >= max_r * 0.5]
 
         # Determination of multi-plate mode.
         use_roi_mode = self.params.multi_plate is not False
-
-        # Apply Size Consistency Filter if in multi-plate mode and >1 found
-        if use_roi_mode and len(circles) > 1 and self.params.size_consistency_limit is not None:
-            radii = np.array([c[2] for c in circles])
-            median_r = np.median(radii)
-            limit = self.params.size_consistency_limit
-
-            filtered_circles = []
-            for c in circles:
-                deviation = abs(c[2] - median_r) / median_r
-                if deviation <= limit:
-                    filtered_circles.append(c)
-                else:
-                    data.add_flag(
-                        "plate_size_outlier",
-                        f"A circle with radius {c[2]:.1f} was rejected as an outlier (median={median_r:.1f}).",
-                        severity="info",
-                    )
-            circles = filtered_circles
-
-        if not circles:  # Edge case: all outliers
-            data.add_flag(
-                "plate_not_found",
-                "FacileDetector found circles but every one was rejected as a "
-                "size outlier; downstream steps will run on the full image.",
-                severity="warning",
-            )
-            data.masks[self.params.mask_key] = np.ones((h_orig, w_orig), dtype=bool)
-            return image
 
         if use_roi_mode and len(circles) > 0:
             rois = []
             # Sort circles by position (top-to-bottom, then left-to-right) for consistent naming
             circles.sort(key=lambda c: (c[1], c[0]))
+
+            # In auto mode (``multi_plate`` is None) a single detected plate is
+            # the whole image, so label it by the source stem instead of "1".
+            # A batch of single-plate images is then unambiguously attributable
+            # (A2, C4, C5 ...) rather than collapsing every row to
+            # plate_label="1", which makes the batch CSV look like one plate.
+            single_plate_label = (
+                Path(data.source).stem
+                if self.params.multi_plate is None and len(circles) == 1 and data.source
+                else None
+            )
 
             for i, (xc, yc, r_raw, _std, _n) in enumerate(circles):
                 r_eff = max(1, round(r_raw * self.params.radius_scale))
@@ -344,7 +391,7 @@ class FacileDetector(Preprocessor):
 
                 rois.append(
                     {
-                        "label": str(i + 1),
+                        "label": single_plate_label or str(i + 1),
                         "bbox": (y0_crop, x0_crop, y1_crop, x1_crop),
                         "center_local": (int(yc - y0_crop), int(xc - x0_crop)),
                         "radius": int(r),
@@ -357,7 +404,7 @@ class FacileDetector(Preprocessor):
         else:
             # Single plate mode (multi_plate=False or only 1 found): pick the largest one
             circles.sort(key=lambda x: x[2], reverse=True)
-            xc, yc, r_raw, std, n = circles[0]
+            xc, yc, r_raw, _std, _n = circles[0]
             r_eff = max(1, round(r_raw * self.params.radius_scale))
             r = max(r_raw, r_eff)
 

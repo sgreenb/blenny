@@ -263,3 +263,67 @@ def test_nested_yolo_conf_is_overridable(tmp_path: Path, args: list[str], expect
     inner_steps = config["steps"][1]["params"]["steps"]
     assert inner_steps[0]["name"] == "yolo_detector"
     assert inner_steps[0]["params"]["conf_threshold"] == expected
+
+
+# --- batch files are emitted based on the number of PLATES, not images -----
+
+
+def test_single_multiplate_image_emits_batch_files(tmp_path: Path) -> None:
+    """A single scan image containing several plates must still produce a batch.
+
+    Regression: the CLI only wrote batch_summary.csv / batch_colonies.csv when
+    more than one *image* was passed in, so a multi-plate scan (one image, five
+    plates) silently produced no batch files.
+    """
+    img = _save_synthetic(tmp_path, n=5, seed=1)
+    pipe_yaml = tmp_path / "pipe.yaml"
+    _write_nested_yolo_pipeline(pipe_yaml)
+    out_dir = tmp_path / "out"
+
+    class MultiPlatePipeline(_FakePipeline):
+        def run(self, *args, **kwargs) -> ImageData:
+            d = ImageData(source=str(args[0]))
+            d.metadata["rois"] = [{"label": str(i + 1)} for i in range(5)]
+            d.metadata["multi_plate_mode"] = True
+            d.metadata["per_plate_counts"] = {str(i + 1): 10 for i in range(5)}
+            d.metadata["colony_count"] = 50
+            d.metadata["stem"] = "plate"
+            d.measurements = [
+                {
+                    "plate_label": str(i + 1),
+                    "label": 1,
+                    "area_px": 10,
+                    "is_artifact": False,
+                    "source": str(args[0]),
+                }
+                for i in range(5)
+            ]
+            return d
+
+    with patch("blenny.cli.main.Pipeline", MultiPlatePipeline):
+        result = runner.invoke(
+            app,
+            ["run", str(pipe_yaml), "--input", str(img), "--output", str(out_dir)],
+        )
+    assert result.exit_code == 0, result.stdout
+    summary = (out_dir / "batch_summary.csv").read_text()
+    assert "plate_1_count" in summary
+    assert "plate_5_count" in summary
+    assert (out_dir / "batch_colonies.csv").exists()
+
+
+def test_single_plate_image_does_not_emit_batch_files(tmp_path: Path) -> None:
+    """A single-plate run (one image, one plate) should NOT emit batch files."""
+    img = _save_synthetic(tmp_path, n=5, seed=2)
+    pipe_yaml = tmp_path / "pipe.yaml"
+    _write_nested_yolo_pipeline(pipe_yaml)
+    out_dir = tmp_path / "out"
+
+    with patch("blenny.cli.main.Pipeline", _FakePipeline):
+        result = runner.invoke(
+            app,
+            ["run", str(pipe_yaml), "--input", str(img), "--output", str(out_dir)],
+        )
+    assert result.exit_code == 0, result.stdout
+    assert not (out_dir / "batch_summary.csv").exists()
+    assert not (out_dir / "batch_colonies.csv").exists()

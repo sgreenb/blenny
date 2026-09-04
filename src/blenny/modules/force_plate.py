@@ -10,6 +10,7 @@ consumes straight from the forced geometry, with no circle fitting.
 from __future__ import annotations
 
 import math
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -75,9 +76,13 @@ def build_forced_plate(
     data.metadata["plate_shape"] = "manual_polygon" if mask_path is not None else "manual_circle"
     y0, y1, x0, x1 = 0, h_orig, 0, w_orig
 
+    # Label the single manual plate by its source stem (like auto single-plate
+    # mode) so a batch of manual plates is distinguishable, rather than "1".
+    label = Path(data.source).stem if data.source else "1"
+
     data.metadata["rois"] = [
         {
-            "label": "1",
+            "label": label,
             "bbox": (y0, x0, y1, x1),
             "center_local": (int(cy - y0), int(cx - x0)),
             "radius": int(r),

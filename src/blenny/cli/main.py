@@ -25,6 +25,7 @@ from typing import Annotated, Any
 import typer
 
 from blenny import __version__
+from blenny.batch import count_plates
 from blenny.config import dump_resolved_config, extract_steps, load_yaml, substitute_paths
 from blenny.pipeline import MODULES, Pipeline
 
@@ -210,21 +211,6 @@ def run(
         if not flat:  # Only auto-flatten if not already explicitly handled by --flat
             _flatten_paths(raw_steps)
 
-    # Pre-detect if we are in multi-plate mode to fix column ordering in summary.csv
-    expected_plate_columns: list[str] = []
-    for step in raw_steps:
-        if step["name"] == "detect_multi_plate":
-            p = step.get("params", {})
-            rows, cols = p.get("grid", [1, 1])
-            labels = p.get("labels")
-            for r in range(rows):
-                for c in range(cols):
-                    if labels and r < len(labels) and c < len(labels[r]):
-                        expected_plate_columns.append(f"plate_{labels[r][c]}_count")
-                    else:
-                        expected_plate_columns.append(f"plate_{r * cols + c + 1}_count")
-            break
-
     if override:
         for item in override:
             try:
@@ -269,6 +255,12 @@ def run(
             err=True,
         )
 
+    # Compute the grid plate columns *after* overrides so a CLI override like
+    # ``-v detect_multi_plate.grid=[3,2]`` is reflected in the batch_summary
+    # column ordering (the same sequence sub_pipeline reports per-plate counts
+    # in).
+    expected_plate_columns = _expected_plate_columns(raw_steps)
+
     # Sanity-check that the pipeline makes a Pipeline at all (no inputs yet).
     # Substitution leaves placeholders untouched if no values are provided,
     # which would later fail to format. Catch unknown registry names early.
@@ -282,6 +274,9 @@ def run(
     summary_rows: list[dict[str, Any]] = []
     all_measurements: list[dict[str, Any]] = []
     failures = 0
+    # Number of plates actually analysed across the whole run (one scan image
+    # may contain several plates). A batch is emitted when this exceeds 1.
+    total_plates = 0
     t_batch = time.perf_counter()
     first_resolved: list[dict[str, Any]] | None = None
 
@@ -318,6 +313,7 @@ def run(
             continue
 
         elapsed = time.perf_counter() - t0
+        total_plates += count_plates(data)
         all_measurements.extend(data.measurements)
         if write_provenance:
             prov_path = (
@@ -326,21 +322,21 @@ def run(
                 else output_dir / f"{stem}_provenance.json"
             )
             _write_provenance(prov_path, data, img)
-        summary_rows.append(
-            {
-                "input": str(img),
-                "stem": stem,
-                "status": "ok",
-                "colony_count": data.metadata.get("colony_count"),
-                **{
-                    f"plate_{k}_count": v
-                    for k, v in data.metadata.get("per_plate_counts", {}).items()
-                },
-                "n_quality_flags": len(data.quality_flags),
-                "flag_codes": "|".join(f.code for f in data.quality_flags),
-                "duration_s": round(elapsed, 3),
-            }
-        )
+        summary_row: dict[str, Any] = {
+            "input": str(img),
+            "stem": stem,
+            "status": "ok",
+            "colony_count": data.metadata.get("colony_count"),
+            "n_quality_flags": len(data.quality_flags),
+            "flag_codes": "|".join(f.code for f in data.quality_flags),
+            "duration_s": round(elapsed, 3),
+        }
+        # Only add per-plate count columns when this image genuinely holds
+        # several plates; a single-plate image's count is already colony_count.
+        if count_plates(data) > 1:
+            for k, v in data.metadata.get("per_plate_counts", {}).items():
+                summary_row[f"plate_{k}_count"] = v
+        summary_rows.append(summary_row)
         if not as_json:
             count = data.metadata.get("colony_count", "?")
             typer.echo(f"  [OK]   {img.name}  colonies={count}  ({elapsed:.1f}s)")
@@ -361,9 +357,12 @@ def run(
             },
         )
 
-    # Only write batch summary files if requested OR if there are multiple images
-    # and the user hasn't explicitly disabled them.
-    if write_summary is True or (write_summary is None and len(inputs) > 1):
+    # Write batch files whenever more than one plate is analysed in the run
+    # (a single scan image can hold several plates), or when any image failed
+    # (so the failure is surfaced in the summary), or when the user explicitly
+    # requested a summary. ``--no-summary`` still disables them.
+    batch_needed = total_plates > 1 or failures > 0
+    if write_summary is True or (write_summary is None and batch_needed):
         _write_summary_csv(
             output_dir / "batch_summary.csv", summary_rows, plate_cols=expected_plate_columns
         )
@@ -557,6 +556,30 @@ def _expand_input(pattern: str) -> list[Path]:
         )
     if p.is_file():
         return [p]
+    return []
+
+
+def _expected_plate_columns(steps: list[dict[str, Any]]) -> list[str]:
+    """Return the batch_summary plate-count column names for a multi-plate grid.
+
+    Mirrors the ``per_plate_counts`` key order that ``sub_pipeline`` uses so the
+    summary columns line up with the reported per-plate counts. Returns ``[]``
+    when the pipeline has no ``detect_multi_plate`` step (auto / single-plate).
+    """
+    for step in steps:
+        if step.get("name") != "detect_multi_plate":
+            continue
+        p = step.get("params", {})
+        rows, cols = p.get("grid", [1, 1])
+        labels = p.get("labels")
+        cols_out: list[str] = []
+        for r in range(rows):
+            for c in range(cols):
+                if labels and r < len(labels) and c < len(labels[r]):
+                    cols_out.append(f"plate_{labels[r][c]}_count")
+                else:
+                    cols_out.append(f"plate_{r * cols + c + 1}_count")
+        return cols_out
     return []
 
 

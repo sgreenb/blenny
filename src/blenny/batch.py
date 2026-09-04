@@ -10,6 +10,34 @@ import csv
 from pathlib import Path
 from typing import Any
 
+from blenny.pipeline.context import ImageData
+
+
+def count_plates(data: ImageData) -> int:
+    """Number of plates analysed for a single run result.
+
+    A run has more than one plate when it produced more than one ROI
+    (auto ``detect_facile`` or grid ``detect_multi_plate``), or when the
+    sub-pipeline recorded per-plate counts for more than one slot. Otherwise
+    it is a single plate (classic ``detect_plate``, manual mode, or a single
+    plate found by auto mode) and counts as one.
+
+    Used by the CLI and GUI to decide whether to emit batch files: a batch
+    is written whenever a run analyses more than one plate (e.g. one scan
+    image containing five plates), not merely when more than one *image* was
+    passed in.
+    """
+    rois = data.metadata.get("rois")
+    if rois:
+        return len(rois)
+    per_plate = data.metadata.get("per_plate_counts")
+    if per_plate:
+        occupied = [v for v in per_plate.values() if v != "NA"]
+        # A grid run that found plates but left every slot empty shouldn't be
+        # treated as a genuine batch of plates; fall back to a single plate.
+        return len(occupied) if occupied else 1
+    return 1
+
 
 def batch_colonies_csv_text(measurements: list[dict[str, Any]]) -> str:
     """Return one row per measurement as CSV text.

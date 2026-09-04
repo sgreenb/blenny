@@ -122,6 +122,11 @@ class ColonyMeasurer(FeatureExtractor):
             # Circularity = 4π·area / perimeter² (1.0 = perfect circle).
             perim = float(prop.perimeter)
             circularity = float(4 * np.pi * prop.area / (perim * perim)) if perim > 0 else 0.0
+            # skimage's ``regionprops.perimeter`` undercounts the boundary of
+            # very small regions, so a perfect small disk can read >1.0, which
+            # is impossible for a simple closed shape. Clamp the reported value
+            # to the physical maximum of 1.0.
+            circularity = min(1.0, max(0.0, circularity))
 
             row = {
                 "label": int(prop.label),

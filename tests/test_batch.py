@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from blenny.batch import write_batch_colonies_csv
+from blenny.batch import count_plates, write_batch_colonies_csv
+from blenny.pipeline.context import ImageData
 
 
 def _row(**overrides: object) -> dict:
@@ -76,3 +77,40 @@ def test_batch_colonies_csv_placeholder_when_empty(tmp_path: Path) -> None:
     p = tmp_path / "batch_colonies.csv"
     write_batch_colonies_csv(p, [])
     assert p.read_text(encoding="utf-8") == "# no measurements\n"
+
+
+# --- count_plates (determines when batch files are emitted) ---------------
+
+
+def _data(**metadata) -> ImageData:
+    return ImageData(source="img", image=None, original_image=None, metadata=metadata)
+
+
+def test_count_plates_counts_rois_for_multiplate() -> None:
+    """A multi-plate result reports one plate per ROI."""
+    d = _data(rois=[{"label": "1"}, {"label": "2"}, {"label": "3"}], multi_plate_mode=True)
+    assert count_plates(d) == 3
+
+
+def test_count_plates_single_roi_is_one() -> None:
+    """A single-plate image (one ROI) counts as one plate."""
+    d = _data(rois=[{"label": "A2"}], multi_plate_mode=True)
+    assert count_plates(d) == 1
+
+
+def test_count_plates_no_rois_single_plate() -> None:
+    """Classic single-plate runs (no ROI list) count as one plate."""
+    d = _data()
+    assert count_plates(d) == 1
+
+
+def test_count_plates_uses_per_plate_counts_fallback() -> None:
+    """When ROIs are absent, count the non-NA per-plate slots."""
+    d = _data(per_plate_counts={"1": 74, "2": 66, "3": "NA", "4": 60})
+    assert count_plates(d) == 3
+
+
+def test_count_plates_all_na_falls_back_to_one() -> None:
+    """An all-empty per-plate map shouldn't claim a multi-plate batch."""
+    d = _data(per_plate_counts={"1": "NA", "2": "NA"})
+    assert count_plates(d) == 1
